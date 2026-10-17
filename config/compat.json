@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "claudeCode": { "min": "2.1.0", "maxExclusive": "3.0.0", "tested": ["2.1.296"] },
+  "python": { "min": "3.10", "tested": ["3.14"] },
+  "platforms": {
+    "windows": "已驗證（Windows 11、Git Bash 執行 hook）",
+    "macos": "未驗證（路徑邏輯已寫，未實機測試）",
+    "linux": "未驗證（路徑邏輯已寫，未實機測試）"
+  }
+}

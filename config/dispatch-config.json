@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "_note": "範本：門檻與模型表。待 DOC 合併（Stock-web .claude/dispatch-config.json 完成後以其結構為準）。安裝後複製到 <CLAUDE_HOME>/claude-dev-system/config/，使用者可直接改；update 時若偵測到使用者改過會保留不覆蓋。",
+  "usage": {
+    "fiveHourLimit": 80,
+    "sevenDayLimit": 97,
+    "checkTtl": 300,
+    "checkTtlNear": 60,
+    "alertRepeat": 600
+  },
+  "dispatch": {
+    "maxParallelAgents": 2,
+    "reportEveryMinutes": 10,
+    "verifyAgentTimeLimitMinutes": 30,
+    "taskTypes": [
+      { "id": "A", "desc": "改核心業務規則、AI 回答流程／提示詞", "model": "opus", "effort": "high" },
+      { "id": "B", "desc": "多分支合併、解衝突", "model": "opus", "effort": "high" },
+      { "id": "C", "desc": "研究設計（事先登錄、診斷失敗、重設計）", "model": "opus", "effort": "high" },
+      { "id": "D", "desc": "跨模組新功能（規格已寫清楚）", "model": "opus", "effort": "medium" },
+      { "id": "E", "desc": "單一模組、規格明確的修正", "model": "sonnet", "effort": "medium" },
+      { "id": "F", "desc": "實際操作驗證（Playwright／API 比對）", "model": "sonnet", "effort": "medium" },
+      { "id": "G", "desc": "資料抓取／回填腳本（來源與格式已知）", "model": "sonnet", "effort": "medium" },
+      { "id": "H", "desc": "唯讀盤點、整理報告、查紀錄", "model": "sonnet", "effort": "low" },
+      { "id": "I", "desc": "查狀態、grep、讀單一檔", "model": null, "effort": null }
+    ]
+  }
+}

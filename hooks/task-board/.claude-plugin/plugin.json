@@ -1,0 +1,1 @@
+{ "name": "task-board", "version": "0.1.0", "description": "任務看板：執行中 agent 的狀態、預計完成時間、token 用量與 5 小時／7 天額度", "types": "./types/index.d.ts" }
