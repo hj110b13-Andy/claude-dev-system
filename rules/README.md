@@ -9,4 +9,4 @@
 | 4. 任務派工規格 | 派 agent 時的指示 | 只對該 agent | 該次任務的驗收與限制 |
 
 衝突時**越下層越優先**（專案規則 > 全域規則）；專案的特殊需求不可升格成全域規則（規格 11.5）。
-`global-workflow.md` 為 Stock-web agent DOC 正在撰寫的通用規則草稿佔位檔——**待 DOC 合併**。
+原 Stock-web `docs/claude-rules/global-workflow.md`（規則二、三、六～十二、派工規格品質、git 協作）已於 0.2.0 去專案化並分入 `workflow.md`（二、三、六～九）、`token-efficiency.md`（十）、`safe-refactor.md`（十一）、`doc-governance.md`（十二）、`agent-dispatch.md`（派工規格品質、git 協作）；各檔後半「完整規則原文」保留使用者原話、數字、日期。

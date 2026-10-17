@@ -39,6 +39,9 @@ export type BoardUsage = {
 
 export type BoardGit = { dirty: number; last: string; at: number; commits?: string[] }
 
+/** 用量門檻與標線（讀 dispatch-config.json；見 hooks/limits.ts） */
+export type BoardLimits = { fiveHour: number; sevenDay: number; markFive: number; markSeven: number; source: string }
+
 declare module 'claude-code' {
   interface PluginState {
     'task-board': {
@@ -48,6 +51,7 @@ declare module 'claude-code' {
       mainTokens: number
       usageHist: Array<[number, number]>
       currentMain: string
+      limits: BoardLimits
     }
   }
 }

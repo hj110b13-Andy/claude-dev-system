@@ -1,7 +1,7 @@
 # claude-dev-system
 
 把 Stock-web 專案系統優化中「成熟且驗證過」的通用流程，封裝成可跨專案、跨裝置安裝的 Claude Code 全域工具。
-版本見 `config/VERSION`（目前 0.1.0），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
+版本見 `config/VERSION`（目前 0.2.0），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
 
 ## 內容與分層
 
@@ -12,7 +12,7 @@
 | `hooks/usage_guard.py` | 用量守門 hook（通用版；門檻讀設定檔） | `claude-dev-system/hooks/`，並在 `settings.json` 註冊 UserPromptSubmit／PostToolUse |
 | `hooks/task-board/` | 任務看板 mod 來源（**專案專屬**：讀 Stock-web 的 PROGRESS.md），`hooks/.claude-plugin/marketplace.json` 是本機 marketplace | 不自動安裝；要用的專案在 `.claude/settings.json` 以 `extraKnownMarketplaces`＋`enabledPlugins` 啟用 |
 | `tools/` | `depgraph.py`（依賴圖／循環閘門）、`moduleInventory.py`（模組盤點）、`progress-diff.py`（文件瘦身逐句比對）；不寫死路徑，全用參數 | `claude-dev-system/tools/` |
-| `config/` | `VERSION`、`compat.json`、`dispatch-config.json`（門檻與模型表範本，**待 DOC 合併**） | `claude-dev-system/config/`（dispatch-config 可自行修改，更新時保留） |
+| `config/` | `VERSION`、`compat.json`、`dispatch-config.json`（用量門檻、方案期間、模型表；專案 `.claude/dispatch-config.json` 優先於全域） | `claude-dev-system/config/`（dispatch-config 可自行修改，更新時保留） |
 | `installer/` | `install.py`＋`cds/` 模組（只用 Python 標準庫） | — |
 | `tests/` | 安裝器與工具的自我測試 | — |
 | `docs/` | 安裝、更新、解除安裝、跨裝置、故障排除、相容版本 | — |
@@ -76,8 +76,3 @@ python -m unittest discover -s tests -v
 ```
 
 修改後：更新 `config/VERSION`（語意化版本）、`CHANGELOG.md`；改到 manifest 結構時把 `installer/cds/__init__.py` 的 `MANIFEST_SCHEMA` +1 並在 `installer/cds/manifest.py` 的 `MIGRATIONS` 加遷移函式。通用規則更新後必跑自我測試（規格 11.5）；不可把單一專案的特殊需求升格成全域規則。
-
-## 待 DOC 合併
-
-- `rules/global-workflow.md`：佔位檔，等 Stock-web `docs/claude-rules/global-workflow.md` 完成後依分層併入。
-- `config/dispatch-config.json`：目前為範本，等 Stock-web `.claude/dispatch-config.json` 完成後對齊結構。

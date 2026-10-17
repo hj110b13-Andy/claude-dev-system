@@ -74,5 +74,52 @@ class ProgressDiff(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
 
 
+class UsageGuardConfig(unittest.TestCase):
+    """門檻讀取順序：專案 .claude/dispatch-config.json → 全域設定檔 → 內建預設。"""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("usage_guard_t", REPO / "hooks" / "usage_guard.py")
+        cls.ug = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.ug)
+
+    def _cfg(self, five, seven, **plan):
+        return {"plan": {"current": "x", **plan}, "usageThresholdPct": {"x": {"fiveHour": five, "sevenDay": seven}, "p": {"fiveHour": 80, "sevenDay": 97}}}
+
+    def test_order_project_global_default(self):
+        import json
+        ug = self.ug
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            proj = td / "proj" / "sub"
+            (td / "proj" / ".claude").mkdir(parents=True)
+            proj.mkdir()
+            (td / "proj" / ".claude" / "dispatch-config.json").write_text(json.dumps(self._cfg(95, 99)), encoding="utf-8")
+            glob = td / "g.json"
+            glob.write_text(json.dumps(self._cfg(70, 90)), encoding="utf-8")
+            old = ug.CONFIG
+            try:
+                ug.CONFIG = str(glob)
+                lim, src = ug.load_limits(str(proj))
+                self.assertEqual((lim["fiveHourLimit"], lim["sevenDayLimit"]), (95.0, 99.0))
+                self.assertIn("專案", src)
+                lim, src = ug.load_limits(str(td))  # 專案外 -> 全域
+                self.assertEqual((lim["fiveHourLimit"], lim["sevenDayLimit"]), (70.0, 90.0))
+                self.assertIn("全域", src)
+                ug.CONFIG = str(td / "missing.json")
+                lim, src = ug.load_limits(str(td))
+                self.assertEqual((lim["fiveHourLimit"], lim["sevenDayLimit"]), (80.0, 97.0))
+                self.assertEqual(src, "內建預設")
+            finally:
+                ug.CONFIG = old
+
+    def test_plan_until_switches_to_after(self):
+        cfg = self._cfg(95, 99, until="2026-11-13", after="p")
+        cfg["plan"]["x"] = {"until": "2026-11-13"}
+        self.assertEqual(self.ug.pick_thresholds(cfg, "2026-11-12"), (95.0, 99.0))
+        self.assertEqual(self.ug.pick_thresholds(cfg, "2026-11-13"), (80.0, 97.0))
+
+
 if __name__ == "__main__":
     unittest.main()

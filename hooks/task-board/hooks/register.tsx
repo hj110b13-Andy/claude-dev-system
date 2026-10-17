@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { BoardGit, BoardTask, BoardUsage } from '../types'
+import type { BoardGit, BoardLimits, BoardTask, BoardUsage } from '../types'
+import { chooseLimits, DEFAULT_LIMITS } from './limits'
 
 /**
  * 任務看板（2026-10-11 使用者要求）：同時看所有任務的狀況、進度、預計還需多久、
@@ -17,6 +18,14 @@ const mainTokens = atom({ plugin: 'task-board', key: 'mainTokens' } as const, 0)
 const currentMain = atom({ plugin: 'task-board', key: 'currentMain' } as const, '')
 /** 5 小時用量取樣 [毫秒, %]（每 30 秒），用來算每筆 commit 期間花掉多少額度 */
 const usageHist = atom({ plugin: 'task-board', key: 'usageHist' } as const, [] as Array<[number, number]>)
+
+/** 用量門檻與標線（讀 dispatch-config.json；refreshUsage 每輪更新）。預設 80／97。 */
+const limitsAtom = atom({ plugin: 'task-board', key: 'limits' } as const, DEFAULT_LIMITS as BoardLimits)
+const CONFIG_TRIES = [
+  '.claude/dispatch-config.json',
+  'C:/Users/88691/Documents/Claude/Stock-web/.claude/dispatch-config.json',
+  'C:/Users/88691/.claude/claude-dev-system/config/dispatch-config.json',
+]
 
 const USAGE_FILE = 'C:/Users/88691/.claude/state/usage.json'
 const STORE_KEY = 'board-v1'
@@ -95,9 +104,24 @@ function leftText(t: BoardTask, now: number): string {
   return e.basis
 }
 
+async function refreshLimits($: EngineInterface, now: number) {
+  const files: Array<[string, string | undefined]> = []
+  for (const path of CONFIG_TRIES) {
+    try {
+      files.push([path, await $.fs.read(path)])
+    } catch {
+      files.push([path, undefined])
+    }
+  }
+  const today = new Date(now + 8 * 3600_000).toISOString().slice(0, 10)
+  const next = chooseLimits(files, today)
+  await update($, limitsAtom, p => (JSON.stringify(p) === JSON.stringify(next) ? p : next))
+}
+
 async function refreshUsage($: EngineInterface) {
   try {
     const now = Date.now()
+    await refreshLimits($, now)
     // 優先讀用量守門 hook 寫的用量檔（每則訊息與工具後更新，重開 VSCode 也有）；讀不到才用這次執行的 API 回應
     let next: BoardUsage | undefined
     try {
@@ -255,7 +279,8 @@ async function pushStatus($: EngineInterface) {
     const shareOf = (t: BoardTask) => (t.fiveStart != null && us.five != null ? pctTxt(Math.max(0, (t.fiveEnd ?? us.five) - t.fiveStart), t.tokens > 0) : '—')
     void totalTok
     void shareOf
-    const warn = (us.five ?? 0) >= 95 || (us.seven ?? 0) >= 99
+    const lim = await read($, limitsAtom)
+    const warn = (us.five ?? 0) >= lim.fiveHour || (us.seven ?? 0) >= lim.sevenDay
     const head = `📋 額度 5h ${us.five ?? '—'}%（重置 ${fmtReset(us.fiveResetsAt)}）／7d ${us.seven ?? '—'}%${warn ? ' ⚠收尾門檻' : ''}`
     const running = Object.values(all).filter(t => {
       const st = statusOf.get(t.id)
@@ -371,8 +396,8 @@ body,body.scrollBeyondLastLine{padding:8px!important;margin:0!important;max-widt
     const html = [
       CSS,
       `<div class="hd"><b>📋 任務看板</b><span>更新 ${fmtReset(new Date(now).toISOString())}</span></div>`,
-      meter('5h', us.five, `重置 ${fmtReset(us.fiveResetsAt)}`, 80),
-      meter('7d', us.seven, `重置 ${fmtReset(us.sevenResetsAt)}`, 97),
+      meter('5h', us.five, `重置 ${fmtReset(us.fiveResetsAt)}`, lim.markFive),
+      meter('7d', us.seven, `重置 ${fmtReset(us.sevenResetsAt)}`, lim.markSeven),
       warn ? row('⚠', '<b>已達收尾門檻</b>') : '',
       row('🗂', `未提交 ${g.dirty}｜最新 ${esc((g.last || '—').slice(0, 7))}`),
       sec('任務', taskList.length),
@@ -803,7 +828,8 @@ export const register: Register = on => {
     const share = (tok: number) =>
       us.five != null && totalTok > 0 ? `${((tok / totalTok) * us.five).toFixed(1)}%（估）` : '—'
     void share
-    const warn = (us.five ?? 0) >= 95 || (us.seven ?? 0) >= 99
+    const lim = await read($, limitsAtom)
+    const warn = (us.five ?? 0) >= lim.fiveHour || (us.seven ?? 0) >= lim.sevenDay
     return (
       <Box flexDirection="column">
         <Text bold color={warn ? 'red' : undefined}>

@@ -6,7 +6,7 @@ description: 派 agent 前決定模型（opus／sonnet／haiku）與努力程度
 # 派工模型與努力程度（通用版，claude-dev-system）
 
 ## 第一步：判斷任務類型（取最高風險的一項）
-讀 `~/.claude/claude-dev-system/config/dispatch-config.json` 的 `dispatch.taskTypes`（沒有就用下表）：
+讀 `dispatch-config.json` 的 `modelTable`（先讀專案 `.claude/dispatch-config.json`，再讀 `~/.claude/claude-dev-system/config/dispatch-config.json`，都沒有就用下表）：
 
 | 類型 | 模型 | 努力 |
 |---|---|---|
@@ -23,7 +23,7 @@ description: 派 agent 前決定模型（opus／sonnet／haiku）與努力程度
 升級一格：同類已失敗過、影響所有使用者、需跨報告取捨、牽涉權限／隱私。降級一格：規格已寫死、只動文件或測試期望值、重跑既有腳本。
 
 ## 第二步：看用量
-`python ~/.claude/claude-dev-system/hooks/usage_guard.py --print`。接近門檻時 C、D 降為 opus medium 或 sonnet；超過門檻只派必要的 A、B，其餘排隊。並行數不超過 `dispatch.maxParallelAgents`（專案另有規定從專案）。
+`python ~/.claude/claude-dev-system/hooks/usage_guard.py --print`。接近門檻時 C、D 降為 opus medium 或 sonnet；超過門檻只派必要的 A、B，其餘排隊。並行數依設定檔 `concurrency[plan.current]`（專案另有規定從專案）；用量調整的百分比見 `dispatchUsageAdjust`。
 
 ## 第三步：填參數與規格
 - Agent 工具的 `model`、`effort` 照表填（不支援 effort 的版本就省略）。
