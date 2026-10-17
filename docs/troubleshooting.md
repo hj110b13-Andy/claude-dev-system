@@ -13,3 +13,4 @@
 | Python 移除或升級後 hook 失效 | hook 指向舊 Python 路徑。用新 Python 跑 `update --python <新路徑>`。 |
 | `manifest schemaVersion … 比本安裝器支援的新` | 這台的 repo 比安裝時舊。`git pull` 後再執行。 |
 | 想完全回到安裝前 | `uninstall --restore-backup`；或從 `~/.claude/backups/claude-dev-system-*` 手動複製。 |
+| macOS 用量守門永遠沒輸出 | macOS 的 Claude 登入憑證在鑰匙圈，不在 `~/.claude/.credentials.json`；usage_guard 目前只讀檔案，Mac 上需改讀鑰匙圈才能用（未實作、未驗證）。 |
