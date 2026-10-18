@@ -30,7 +30,7 @@
 ## 安裝
 
 ```bash
-git clone <你的 claude-dev-system 版本庫> ~/Documents/Claude/claude-dev-system   # 位置可自選
+git clone https://github.com/hj110b13-Andy/claude-dev-system.git ~/Documents/Claude/claude-dev-system   # 位置可自選
 cd ~/Documents/Claude/claude-dev-system
 python installer/install.py check      # Windows 用 py -3 代替 python
 python installer/install.py install
