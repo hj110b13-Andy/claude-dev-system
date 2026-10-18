@@ -9,7 +9,7 @@
 
 ## 新裝置步驟
 1. 安裝 Python ≥3.10、git、Claude Code（並登入）。
-2. `git clone <遠端> ; cd claude-dev-system`
+2. `git clone https://github.com/hj110b13-Andy/claude-dev-system.git ; cd claude-dev-system`（私有 repo，2026-10-18 建立；要先 `gh auth login` 或用有權限的帳號）
 3. `python installer/install.py check` → `install` → `verify`（Windows 用 `py -3`）。
 4. 重開 Claude Code。
 5. 有需要的專案（例如 Stock-web）另外照該專案的新裝置文件設定專案專屬項目（task-board mod、專案 hook）。
