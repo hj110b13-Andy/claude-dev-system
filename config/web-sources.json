@@ -88,8 +88,10 @@
     }
   },
   "env": {
-    "_comment": "寫入 settings.json 的 env（Claude Code ≥2.1.290）。預設值 200／100 常讓多 agent 研究中途停住；這裡放寬 3 倍，仍保留失控迴圈的煞車。local.json 的 env 可覆寫。",
+    "_comment": "寫入 settings.json 的 env，Claude Code 的所有工具子程序（Bash、PowerShell 內啟動的 python 等）都會繼承。WebSearch 上限：官方預設 200／100 常讓多 agent 研究中途停住，放寬 3 倍仍保留煞車。PYTHONUTF8／PYTHONIOENCODING：Windows 系統碼頁 950 時 Python 子程序印中文會 UnicodeEncodeError 或亂碼（2026-10-27 實測），強制 UTF-8 後 API 回應的中日文才讀得對；非 Windows 無害。local.json 的 env 可覆寫。",
     "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION": "600",
-    "CLAUDE_CODE_WEB_SEARCH_REFILLS_PER_HOUR": "300"
+    "CLAUDE_CODE_WEB_SEARCH_REFILLS_PER_HOUR": "300",
+    "PYTHONUTF8": "1",
+    "PYTHONIOENCODING": "utf-8"
   }
 }

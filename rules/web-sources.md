@@ -176,7 +176,15 @@ TDX 用法（2026-10-27 以本機金鑰實測）：
 3. **只用於單筆或少量靜態查詢**（一題不超過 4 次呼叫，含換 token 不計）；5 次／分不夠排路線或迴圈掃描，那種需求不要用 TDX。回應 header `RateLimit-Remaining` 低於 1 就等 60 秒或改走網頁。回覆標「來源：交通部 TDX，資料版本 `UpdateTime`」。
 4. 回應以 gzip 壓縮時要解壓（Python `urllib` 需自行處理；`WebFetch`／`curl --compressed` 自動）。
 
-**Windows 呼叫 API 的工具選擇**：回應含中文、日文等非 ASCII 的 JSON，**不要用 PowerShell 5.1 的 `Invoke-RestMethod`**——它對沒標 charset 的回應會把 UTF-8 當 Latin-1 解，中日文全變「ä¸é·¹」這種亂碼（2026-10-27 OpenAQ 東京測站名實測），`[Console]::OutputEncoding` 救不了。改用 `WebFetch`、Bash `curl -s … | python -I -c …`、或 `python -I` 的 `urllib`（輸出寫檔或 `-X utf8`）。純數字／英文的 API（Open-Meteo、匯率）用 `Invoke-RestMethod` 無妨。
+**Windows 亂碼的三個根源與修法**（2026-10-27 實測）：
+- **Python 子程序輸出**：系統碼頁 950 時 `print('中文')` 會 `UnicodeEncodeError` 或變「���」。安裝器 `--with-web` 已把 `PYTHONUTF8=1`、`PYTHONIOENCODING=utf-8` 寫進 settings.json 的 env（下個對話起生效），之後 `python -I` 處理任何 API 回應都安全。若 verify 顯示這兩個 env 存在，Python 就是首選工具。
+- **PowerShell 5.1 的 `Invoke-RestMethod`／`Invoke-WebRequest`**：對沒標 charset 的 JSON 會把 UTF-8 當 Latin-1 解，中日文變「ä¸é·¹å¸」，環境變數與 `[Console]::OutputEncoding` 都救不了（cmdlet 行為）。非 ASCII 回應**一律**改用這個寫法：
+  ```powershell
+  $r = Invoke-WebRequest -UseBasicParsing $url -Headers $h
+  $data = [Text.Encoding]::UTF8.GetString($r.RawContentStream.ToArray()) | ConvertFrom-Json
+  ```
+  或直接改用 Python。純數字／英文的 API（Open-Meteo、匯率）用 `Invoke-RestMethod` 無妨。
+- **系統 ANSI 碼頁 950**：上面兩項與 PS 5.1 `Get-Content` 讀無 BOM UTF-8 檔亂碼的共同根源。要徹底解決需使用者自行開啟 Windows「Beta: 使用 Unicode UTF-8 提供全球語言支援」（控制台 → 地區 → 系統管理 → 變更系統地區設定）並重開機；副作用是少數舊 Big5 程式顯示異常。Claude 不可代為修改系統設定，只能建議。
 
 **停車場靜態事實選哪個**：問「平面還是立體、幾個車位、地址電話」→ **TDX 第一步**（公有與多數民營都有）；問「費率」→ 先看基本資料的 `FareDescription`（南投車埕實測有值），沒有才查 `ParkingRate`；問「營業時間、限高」→ 對應端點先試一次，空筆或無該停車場就走網頁鏈（店家／營運商官網 ＞ 停管處 ＞ 聚合頁）；即時剩餘車位 → TDX `ParkingAvailability`（有的縣市才有）。TDX 查無該停車場（例如純私人臨停場）時直接走網頁鏈，並說明「TDX 無登錄」。
 
@@ -206,7 +214,7 @@ TDX 用法（2026-10-27 以本機金鑰實測）：
 2. **來源沒說的不可以寫在引用旁邊**。自己的推論、換算、建議一律另立一段，標題固定為「**我的補充／推測**」，裡面每一句要能回答「根據上面哪一條推出來的」。
 3. **沒有來源的關鍵事實必須標〔未附來源〕**，不可以用肯定句光溜溜地寫。寧可標了讓使用者看到，不可省略。憑既有知識答的事實也算未附來源（版本、參數類本來就必查，見第 1 節）。
 4. **送出前逐條核對**：把回覆裡每個關鍵數字對回抓到的原文，找不到對應句就刪掉或改標〔未附來源〕。這一步不是選項。
-5. **亂碼停手**：抓回的文字含「ä¸」「�」「�」等亂碼時，不可憑印象補名稱或數字；依 TDX 段的「Windows 呼叫 API 工具選擇」重抓（WebFetch／curl＋python -I）。2026-10-27 東京空品一題把亂碼測站名猜成「港區」就是這條的由來。
+5. **亂碼停手**：抓回的文字含「ä¸」「�」「�」等亂碼時，不可憑印象補名稱或數字；依「Windows 亂碼的三個根源與修法」重抓（python -I，或 PowerShell 讀 RawContentStream 以 UTF-8 解）。2026-10-27 東京空品一題把亂碼測站名猜成「港區」就是這條的由來。
 6. **兩個來源不一致**：兩個都列、各附日期，說明採用哪個與理由，不可只留一個。
 7. 回覆末尾固定一段「**來源**」清單（網址＋查證日期）與一段「**查證過程**」（用了哪些工具、哪些事實走到第幾步、最後手段做了哪幾項）。長度以能核對為準，不要為了簡潔省掉。
 

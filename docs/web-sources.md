@@ -2,7 +2,7 @@
 
 讓每台電腦的 Claude Code 查資料更不容易「查不到」或「查到一半停掉」，而不多花每場對話的 token。預設**不啟用**；啟用後做四件事：
 
-1. 放寬內建 `WebSearch` 的次數上限（官方預設每場 200 次、每小時補 100 次 → `config/web-sources.json` 的 600／300；需 Claude Code ≥2.1.290）。寫進 `settings.json` 的 `env`。
+1. 寫入 `settings.json` 的 `env`：放寬內建 `WebSearch` 的次數上限（官方預設每場 200 次、每小時補 100 次 → `config/web-sources.json` 的 600／300；需 Claude Code ≥2.1.290），以及 `PYTHONUTF8=1`、`PYTHONIOENCODING=utf-8`（Windows 碼頁 950 下 Python 子程序中文輸出不再亂碼）。
 2. 用官方 `claude mcp add --scope user` 註冊免金鑰 MCP：預設搜尋 `parallel`、`exa` 與文件 `context7`（程式庫文件）、`deepwiki`（GitHub repo）、`mslearn`（微軟文件）；選用 `tavily`、`firecrawl`。
 3. 規則：`rules/core.md` 多一條「上網查資料」優先序；細則 `rules/web-sources.md` 列出 2026-10-26 實測過的免金鑰開放 API（天氣、匯率、台股、假日、百科、地理編碼、航班位置）與金鑰位置。這兩項隨一般 `install`／`update` 安裝，不需 `--with-web`。
 4. 需要金鑰的來源（中央氣象署、Tavily、Exa）金鑰只存本機 `<CLAUDE_HOME>/claude-dev-system/config/local.json`，不進 repo。
