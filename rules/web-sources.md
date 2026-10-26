@@ -42,7 +42,7 @@
 **禁止的回報方式**：在還沒走完升級鏈之前，不可以對使用者說「查不到」「沒查到是平面還是立體」，也不可以用「建議打電話確認」代替查證。走完才可以寫「未能確認」，並列出：用過哪些工具、下了什麼查詢、最接近的線索是什麼（例如「官網交通資訊頁整頁已讀，只寫『設有地下停車場』未標限高」）。走完之後**可以**附官方電話當備案——那時電話是補充，不是逃避。
 **「現在沒有預報／資料還沒出」不等於「未能確認」**（可判定）：
 - 問的是**曆法／天文可推算**的事（大潮小潮、農曆日期、日出日落、月相、星期幾）→ 直接推算並標「推算」，再補一句何時可查官方預報。例：大潮／中潮由農曆日決定（氣象署分類：初一～初三、十五～十七大潮；初四～初七、十八～廿一中潮；初八～初十、廿二～廿四小潮；其餘長潮），潮時才需等預報。
-- 問的是**未來太遠的天氣**（超過 Open-Meteo 16 天、CWA 一週）→ 用 Open-Meteo 歷史 API 拉**過去 3～5 年同期**當「歷史同期參考」（均溫範圍、雨日比例），標明「非預報」，並寫預報幾號會出。
+- 問的是**未來太遠的天氣**（超過 Open-Meteo 16 天、CWA 一週）→ 拉**過去 5～10 年同期**當「歷史同期參考」（均溫範圍、雨日比例、風），標明「非預報」，並寫預報幾號會出。台灣有署屬測站的地點優先用 CODiS 官方實測，沒有測站的（海邊、山區）用 Open-Meteo Archive 重分析並註明模式值；兩者都有時拿測站校正模式偏差。
 - 問的是**月內的潮汐、天文**→ 有 `cwa` 金鑰時直接查 CWA 潮汐預報（第 4 節）。
 - 只有「資料本質上不存在」（店家沒公告、官方沒登錄）才寫未能確認。
 
@@ -76,6 +76,7 @@ Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔�
 | 空氣品質（全球） | Open-Meteo Air Quality | `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=25.03&longitude=121.56&current=pm2_5,pm10,us_aqi&timezone=Asia/Taipei` | 同上 | 模式推算值；台灣用環境部、國外有 OpenAQ 金鑰時用 OpenAQ（實測值） |
 | 地震（全球） | USGS | `https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson`（`significant_week`、`2.5_day` 等 20 種組合）；查詢 `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=5&limit=5` | 每分鐘重生、無上限 | 台灣官方報告用中央氣象署（第 4 節） |
 | 天氣歷史同期（任一地點、1940 年起） | Open-Meteo Archive | `https://archive-api.open-meteo.com/v1/archive?latitude=24.15&longitude=120.67&start_date=2025-12-27&end_date=2025-12-31&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=Asia/Taipei` | 同 Open-Meteo 額度；資料約落後 5 天 | 預報還沒出時拉過去 3～5 年同期當參考；2026-10-27 實測 |
+| 天氣歷史**官方實測**（台灣測站，逐日） | 中央氣象署 CODiS | `POST https://codis.cwa.gov.tw/api/station`，body `date=2024-12-29T00:00:00.000+08:00&type=report_month&stn_ID=467490&stn_type=cwb&start=2024-12-01T00:00:00&end=2024-12-31T00:00:00`，需 header `Referer: https://codis.cwa.gov.tw/StationData`；回 `data[0].dts[]` 每日 `AirTemperature`（Max/Min/Mean）、`Precipitation.Accumulation`、`WindSpeed`、`PeakGust`、`SunshineDuration` 等 | 免金鑰；非文件化端點，可能改 | 署屬站代碼：臺中 467490、臺北 466920、高雄 467440…（梧棲 467770 2024 起無資料，已撤站）。雨量 `-9.8`＝「雨跡」代碼（未達 0.5 mm），不是負值。Python 3.14 憑證會被擋 → 用 curl。比 Open-Meteo 重分析準（2026-10-27 比對臺中站：模式值平均偏冷約 1.5°C） |
 | 日出日落 | Sunrise-Sunset | `https://api.sunrise-sunset.org/json?lat=25.03&lng=121.56&formatted=0&tzid=Asia/Taipei` | 寬鬆 | 旅遊排程、攝影 |
 
 ### 金融
