@@ -40,6 +40,12 @@
 - **第三步在這種情況下是必做的**：前兩步的搜尋結果裡已經出現官方網站（店家官網、營運商公告頁、政府公告），但摘錄裡沒有要的值 → 用 `WebFetch`（抓不乾淨用 Jina 或 `tavily_extract`）把那一頁和相鄰頁（交通資訊、停車資訊、FAQ）整頁抓下來確認。搜尋摘錄只是片段，「摘錄沒有」不等於「官網沒寫」。沒有官網的才可以停在兩步。**抓取對象的優先序**：店家／營運商官網 ＞ 政府或風管處官方頁（`.gov.tw`）＞ 新聞 ＞ 聚合頁（訂房網、旅遊整理站）；結果裡同時有官方頁與聚合頁時先抓官方頁，聚合頁只拿來補官方沒寫的細節並標明來源品質。
 
 **禁止的回報方式**：在還沒走完升級鏈之前，不可以對使用者說「查不到」「沒查到是平面還是立體」，也不可以用「建議打電話確認」代替查證。走完才可以寫「未能確認」，並列出：用過哪些工具、下了什麼查詢、最接近的線索是什麼（例如「官網交通資訊頁整頁已讀，只寫『設有地下停車場』未標限高」）。走完之後**可以**附官方電話當備案——那時電話是補充，不是逃避。
+**「現在沒有預報／資料還沒出」不等於「未能確認」**（可判定）：
+- 問的是**曆法／天文可推算**的事（大潮小潮、農曆日期、日出日落、月相、星期幾）→ 直接推算並標「推算」，再補一句何時可查官方預報。例：大潮／中潮由農曆日決定（氣象署分類：初一～初三、十五～十七大潮；初四～初七、十八～廿一中潮；初八～初十、廿二～廿四小潮；其餘長潮），潮時才需等預報。
+- 問的是**未來太遠的天氣**（超過 Open-Meteo 16 天、CWA 一週）→ 用 Open-Meteo 歷史 API 拉**過去 3～5 年同期**當「歷史同期參考」（均溫範圍、雨日比例），標明「非預報」，並寫預報幾號會出。
+- 問的是**月內的潮汐、天文**→ 有 `cwa` 金鑰時直接查 CWA 潮汐預報（第 4 節）。
+- 只有「資料本質上不存在」（店家沒公告、官方沒登錄）才寫未能確認。
+
 **額度說明**：`parallel`、`exa`、`context7`、`deepwiki`、`mslearn` 免金鑰、不消耗使用者任何額度；只有 `tavily`（有金鑰時）用使用者的每月 1,000 credits。不要跟使用者說「這些工具會用到你的額度」。
 
 Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔工具**名稱**，用到才載入說明；所以多幾個遠端 MCP 幾乎不花 token。真正的成本是本機執行型 MCP（要跑 Node 子程序、佔記憶體）與工具太多時選錯工具——規則寫清楚用途就是在降這個風險。
@@ -69,6 +75,7 @@ Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔�
 | 天氣（全球） | Open-Meteo | `https://api.open-meteo.com/v1/forecast?latitude=25.03&longitude=121.56&current=temperature_2m,weather_code&hourly=temperature_2m,precipitation_probability&timezone=Asia/Taipei` | 即時；600 次／分、10,000 次／天 | 僅限非商業；台灣在地預報不如中央氣象署細（選擇規則見第 4 節） |
 | 空氣品質（全球） | Open-Meteo Air Quality | `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=25.03&longitude=121.56&current=pm2_5,pm10,us_aqi&timezone=Asia/Taipei` | 同上 | 模式推算值；台灣用環境部、國外有 OpenAQ 金鑰時用 OpenAQ（實測值） |
 | 地震（全球） | USGS | `https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson`（`significant_week`、`2.5_day` 等 20 種組合）；查詢 `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=5&limit=5` | 每分鐘重生、無上限 | 台灣官方報告用中央氣象署（第 4 節） |
+| 天氣歷史同期（任一地點、1940 年起） | Open-Meteo Archive | `https://archive-api.open-meteo.com/v1/archive?latitude=24.15&longitude=120.67&start_date=2025-12-27&end_date=2025-12-31&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=Asia/Taipei` | 同 Open-Meteo 額度；資料約落後 5 天 | 預報還沒出時拉過去 3～5 年同期當參考；2026-10-27 實測 |
 | 日出日落 | Sunrise-Sunset | `https://api.sunrise-sunset.org/json?lat=25.03&lng=121.56&formatted=0&tzid=Asia/Taipei` | 寬鬆 | 旅遊排程、攝影 |
 
 ### 金融
@@ -113,7 +120,7 @@ Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔�
 | `tdx_id`＋`tdx_secret` | TDX 運輸資料流通服務（交通部） | **停車場結構化靜態資料**：類型（平面／立體／地下／機械）、車位數、地址、電話；部分縣市另有營業時間、出入口限高、費率。也有公車／台鐵／高鐵站點靜態資料 | 基礎會員 **5 次／分／金鑰**、3 點／月（基礎服務 1,500 次＝1 點）；訂閱頁無「學術方案」級別，學術／加盟單位是付費方案的費用減免（需核定） | https://tdx.transportdata.tw/ 註冊 → 會員中心 → 資料服務 → API 金鑰（用「API 金鑰內容」的 Client Id／Secret，不是 MQTT 那組） |
 
 用法（Claude 用 `Read` 讀 `local.json` 取金鑰；**金鑰不可出現在回覆或 commit**，引用網址時遮成 `***`）：
-- CWA：`https://opendata.cwa.gov.tw/api/v1/rest/datastore/<資料集ID>?Authorization=<金鑰>&locationName=臺北市`。常用：36 小時預報 `F-C0032-001`、鄉鎮一週 `F-D0047-091`、**顯著有感地震報告 `E-A0015-001`**（回應 `records.Earthquake[].ReportContent`）、警特報 `W-C0033-001`。
+- CWA：`https://opendata.cwa.gov.tw/api/v1/rest/datastore/<資料集ID>?Authorization=<金鑰>&locationName=臺北市`。常用：36 小時預報 `F-C0032-001`、鄉鎮一週 `F-D0047-091`、**顯著有感地震報告 `E-A0015-001`**（回應 `records.Earthquake[].ReportContent`）、警特報 `W-C0033-001`、**潮汐預報 `F-A0021-001`**（參數 `LocationName=臺中市梧棲區` 等沿海鄉鎮；回 `records.TideForecasts[].Location.TimePeriods.Daily[]`，每日有 `Date`、`LunarDate`、**`TideRange`（大／中／小）**、`Time[]` 潮時與潮高，一次約 32 天、**日期未排序要自己 sort**；2026-10-27 實測）。
 - 環境部：`https://data.moenv.gov.tw/api/v2/aqx_p_432?api_key=<金鑰>&limit=100&format=JSON`（`aqx_p_432` 為各測站即時 AQI；回應**最外層是陣列**，欄位 `sitename`、`county`、`aqi`、`pm2.5`、`status`、`publishtime`，每小時更新）。該站憑證鏈在 Python 3.14 `urllib` 會被擋（Missing Subject Key Identifier），用 `WebFetch` 或 Bash `curl` 即可，不要繞過憑證驗證。2026-10-26 以本機金鑰實測 200。
 - OpenAQ：`https://api.openaq.org/v3/locations?coordinates=25.03,121.56&radius=10000&limit=5`（header `X-API-Key`；2026-10-26 以本機金鑰實測 200，台北 10 km 內 3 站），再以 location id 查 `/v3/locations/<id>/latest`。
 
