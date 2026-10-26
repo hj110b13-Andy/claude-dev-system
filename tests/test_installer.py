@@ -258,6 +258,7 @@ def fake_mcp_runner(lay: Layout, calls: list):
 
 class WebSources(Base):
     ENV_KEYS = ("CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION", "CLAUDE_CODE_WEB_SEARCH_REFILLS_PER_HOUR")
+    DEFAULTS = {"parallel", "exa", "context7", "deepwiki", "mslearn"}  # web-sources.json 的 default:true 項目
 
     def setUp(self):
         super().setUp()
@@ -286,7 +287,7 @@ class WebSources(Base):
     def test_with_web_defaults_env_verify_uninstall(self):
         self.write_settings(USER_SETTINGS)
         self.apply(with_web=True)
-        self.assertEqual(set(self.servers()), {"parallel", "exa"}, "預設只開 parallel 與 exa")
+        self.assertEqual(set(self.servers()), self.DEFAULTS, "預設只開 web-sources.json 標 default 的項目")
         self.assertEqual(self.servers()["parallel"]["url"], "https://search.parallel.ai/mcp")
         env = self.settings()["env"]
         self.assertEqual(env["CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"], "600")
@@ -298,7 +299,7 @@ class WebSources(Base):
         self.assertEqual(code, 0, "\n".join(out))
         self.assertTrue(any("MCP parallel 已註冊" in x for x in out))
         m = mf.load(self.lay.manifest)
-        self.assertEqual(m["web"]["mcpAdded"], ["exa", "parallel"])
+        self.assertEqual(m["web"]["mcpAdded"], sorted(self.DEFAULTS))
         self.assertIn("env", m["web"]["envCreatedKeys"])
         commands.uninstall(self.lay, runner=self.runner)
         self.assertEqual(self.servers(), {})
@@ -310,7 +311,7 @@ class WebSources(Base):
         self.apply(mode="update")
         self.assertTrue(mf.load(self.lay.manifest)["web"]["enabled"])
         self.assertEqual(len([c for c in self.calls if c[0] == "add"]), adds, "update 不應重複註冊")
-        self.assertEqual(set(self.servers()), {"parallel", "exa"})
+        self.assertEqual(set(self.servers()), self.DEFAULTS)
 
     def test_web_config_enable_tavily_keyless_then_key_then_disable(self):
         self.apply(with_web=True)
@@ -329,7 +330,7 @@ class WebSources(Base):
         code, log = commands.web_config(self.lay, disable=["tavily"], runner=self.runner)
         self.assertEqual(code, 0, "\n".join(log))
         self.assertNotIn("tavily", self.servers())
-        self.assertEqual(set(self.servers()), {"parallel", "exa"})
+        self.assertEqual(set(self.servers()), self.DEFAULTS)
         code, log = commands.web_config(self.lay, enable=["nope"], runner=self.runner)
         self.assertEqual(code, 2)
 

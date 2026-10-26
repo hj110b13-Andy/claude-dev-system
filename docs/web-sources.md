@@ -3,7 +3,7 @@
 讓每台電腦的 Claude Code 查資料更不容易「查不到」或「查到一半停掉」，而不多花每場對話的 token。預設**不啟用**；啟用後做四件事：
 
 1. 放寬內建 `WebSearch` 的次數上限（官方預設每場 200 次、每小時補 100 次 → `config/web-sources.json` 的 600／300；需 Claude Code ≥2.1.290）。寫進 `settings.json` 的 `env`。
-2. 用官方 `claude mcp add --scope user` 註冊免金鑰搜尋 MCP：預設 `parallel`、`exa`；選用 `tavily`、`firecrawl`。
+2. 用官方 `claude mcp add --scope user` 註冊免金鑰 MCP：預設搜尋 `parallel`、`exa` 與文件 `context7`（程式庫文件）、`deepwiki`（GitHub repo）、`mslearn`（微軟文件）；選用 `tavily`、`firecrawl`。
 3. 規則：`rules/core.md` 多一條「上網查資料」優先序；細則 `rules/web-sources.md` 列出 2026-10-26 實測過的免金鑰開放 API（天氣、匯率、台股、假日、百科、地理編碼、航班位置）與金鑰位置。這兩項隨一般 `install`／`update` 安裝，不需 `--with-web`。
 4. 需要金鑰的來源（中央氣象署、Tavily、Exa）金鑰只存本機 `<CLAUDE_HOME>/claude-dev-system/config/local.json`，不進 repo。
 
@@ -20,6 +20,7 @@ python installer/install.py verify                 # 應看到「MCP parallel �
 ```bash
 python installer/install.py web --show                              # 看目前會啟用什麼、有哪些金鑰（金鑰只顯示名稱）
 python installer/install.py web --key cwa=CWA-xxxx                  # 中央氣象署授權碼
+python installer/install.py web --key moenv=xxxx --key openaq=xxxx  # 環境部空品、OpenAQ（規則檔教 Claude 怎麼用）
 python installer/install.py web --key tavily=tvly-xxxx --enable tavily
 python installer/install.py web --enable firecrawl                  # 免金鑰
 python installer/install.py web --disable exa                       # 關掉某個預設
@@ -32,6 +33,9 @@ python installer/install.py web --off                               # 關閉：�
 - **中央氣象署**：https://opendata.cwa.gov.tw/ 加入會員 → 登入 → 開發指南 →「API 授權碼」→ 取得（`CWA-` 開頭）。免費；試用額度 1,000 次／天。
 - **Tavily**：https://app.tavily.com/ 用 Google／GitHub 登入，dashboard 自動產生金鑰。免費 1,000 credits／月、不用信用卡。不註冊也能用（免金鑰模式只開 search／extract）。
 - **Exa**：不註冊即可用；https://dashboard.exa.ai/ 註冊後每月 $10 額度，提高速率。
+- **Context7**：不註冊即可用；https://context7.com/dashboard 免費金鑰提高速率（`--key context7=…`）。
+- **環境部空品**：https://data.moenv.gov.tw/ 註冊取 api_key（台灣各測站官方 AQI）。
+- **OpenAQ**：https://explore.openaq.org/register 免費金鑰（全球官方測站空品）。
 
 ## 安裝器怎麼避免動到你的東西
 

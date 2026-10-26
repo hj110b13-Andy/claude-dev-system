@@ -1,7 +1,7 @@
 # claude-dev-system
 
 把 Stock-web 專案系統優化中「成熟且驗證過」的通用流程，封裝成可跨專案、跨裝置安裝的 Claude Code 全域工具。
-版本見 `config/VERSION`（目前 0.3.0），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
+版本見 `config/VERSION`（目前 0.4.0），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
 
 ## 內容與分層
 
@@ -44,11 +44,11 @@ python installer/install.py verify     # 全部 ✅ 才算完成；重開 Claude
 ## 選用：聯網來源
 
 ```bash
-python installer/install.py update --with-web            # 放寬內建 WebSearch 上限＋註冊免金鑰搜尋 MCP（parallel、exa）
+python installer/install.py update --with-web            # 放寬內建 WebSearch 上限＋註冊免金鑰 MCP（搜尋 parallel、exa；文件 context7、deepwiki、mslearn）
 python installer/install.py web --key cwa=CWA-xxxx       # 選用：中央氣象署授權碼（金鑰只存本機 local.json）
 python installer/install.py web --key tavily=tvly-xxxx --enable tavily
 ```
-預設不啟用。用官方 `claude mcp add --scope user` 註冊，不覆蓋你自己同名的 MCP 或 env；`web --off` 或 `uninstall` 只移除本工具登記過的。規則 `rules/web-sources.md` 列出實測過的免金鑰開放 API（天氣、匯率、台股、假日、百科、地理編碼、航班位置）。細節：`docs/web-sources.md`。
+預設不啟用。用官方 `claude mcp add --scope user` 註冊，不覆蓋你自己同名的 MCP 或 env；`web --off` 或 `uninstall` 只移除本工具登記過的。規則 `rules/web-sources.md` 列出實測過的免金鑰開放 API（天氣、空氣品質、地震、匯率、加密貨幣、台股／美股、全球新聞、論文、假日、百科、地理編碼、航班位置）與選擇規則。細節：`docs/web-sources.md`。
 
 ## 更新
 
