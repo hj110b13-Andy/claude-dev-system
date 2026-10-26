@@ -4,6 +4,7 @@
 
 ## 0.4.9（2026-10-27）
 
+- 補查證來源：settings.json env 傳遞子程序（Claude Code 官方設定參考）、PS 6.2 起 JSON 預設 UTF-8（微軟「Differences from Windows PowerShell」）、Windows Beta UTF-8 的作用與副作用（微軟 Q&A、黑暗執行緒、Esri）。來源：使用者提醒「這題本身也該用這套系統多面確認」。
 - 亂碼根源修正：`web-sources.json` env 新增 `PYTHONUTF8=1`、`PYTHONIOENCODING=utf-8`（`--with-web` 寫入 settings.json，工具子程序繼承）——實測 Windows 碼頁 950 下 Python 子程序印中文會 `UnicodeEncodeError`／「���」，設定後正常。規則「Windows 亂碼的三個根源與修法」：Python（已由 env 解）、PowerShell 5.1 `Invoke-RestMethod` 把 UTF-8 當 Latin-1（給出 `RawContentStream` + UTF-8 解碼的正確寫法，實測「ä¸é·¹å¸…」→「三鷹市下連雀７丁目…」）、系統碼頁 950（需使用者自行開啟 Windows Beta UTF-8，Claude 不代改系統設定）。來源：使用者問「能不能從根源讓它不會誤看成亂碼」。
 
 ## 0.4.8（2026-10-27）

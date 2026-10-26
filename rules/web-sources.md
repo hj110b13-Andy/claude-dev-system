@@ -176,15 +176,15 @@ TDX 用法（2026-10-27 以本機金鑰實測）：
 3. **只用於單筆或少量靜態查詢**（一題不超過 4 次呼叫，含換 token 不計）；5 次／分不夠排路線或迴圈掃描，那種需求不要用 TDX。回應 header `RateLimit-Remaining` 低於 1 就等 60 秒或改走網頁。回覆標「來源：交通部 TDX，資料版本 `UpdateTime`」。
 4. 回應以 gzip 壓縮時要解壓（Python `urllib` 需自行處理；`WebFetch`／`curl --compressed` 自動）。
 
-**Windows 亂碼的三個根源與修法**（2026-10-27 實測）：
-- **Python 子程序輸出**：系統碼頁 950 時 `print('中文')` 會 `UnicodeEncodeError` 或變「���」。安裝器 `--with-web` 已把 `PYTHONUTF8=1`、`PYTHONIOENCODING=utf-8` 寫進 settings.json 的 env（下個對話起生效），之後 `python -I` 處理任何 API 回應都安全。若 verify 顯示這兩個 env 存在，Python 就是首選工具。
-- **PowerShell 5.1 的 `Invoke-RestMethod`／`Invoke-WebRequest`**：對沒標 charset 的 JSON 會把 UTF-8 當 Latin-1 解，中日文變「ä¸é·¹å¸」，環境變數與 `[Console]::OutputEncoding` 都救不了（cmdlet 行為）。非 ASCII 回應**一律**改用這個寫法：
+**Windows 亂碼的三個根源與修法**（2026-10-27 實測＋官方文件查證）：
+- **Python 子程序輸出**：系統碼頁 950 時 `print('中文')` 會 `UnicodeEncodeError` 或變「���」。安裝器 `--with-web` 已把 `PYTHONUTF8=1`、`PYTHONIOENCODING=utf-8` 寫進 settings.json 的 env（下個對話起生效），之後 `python -I` 處理任何 API 回應都安全。依據：Claude Code 設定參考「Set environment variables for every session and for the subprocesses Claude Code starts from it」（https://code.claude.com/docs/en/settings-reference#env ，2026-10-27 查）。若 verify 顯示這兩個 env 存在，Python 就是首選工具。
+- **PowerShell 5.1 的 `Invoke-RestMethod`／`Invoke-WebRequest`**：對沒標 charset 的 JSON 會把 UTF-8 當 Latin-1 解，中日文變「ä¸é·¹å¸」，環境變數與 `[Console]::OutputEncoding` 都救不了（cmdlet 行為）。這是 5.1 專屬：微軟文件「In PowerShell 6.2, a change was made to default to UTF-8 encoding for JSON responses. When a charset isn't supplied for a JSON response, the default encoding should be UTF-8 per RFC 8259」（https://learn.microsoft.com/powershell/scripting/whats-new/differences-from-windows-powershell ，2026-10-27 查），所以 PowerShell 7 沒這問題。非 ASCII 回應**一律**改用這個寫法：
   ```powershell
   $r = Invoke-WebRequest -UseBasicParsing $url -Headers $h
   $data = [Text.Encoding]::UTF8.GetString($r.RawContentStream.ToArray()) | ConvertFrom-Json
   ```
   或直接改用 Python。純數字／英文的 API（Open-Meteo、匯率）用 `Invoke-RestMethod` 無妨。
-- **系統 ANSI 碼頁 950**：上面兩項與 PS 5.1 `Get-Content` 讀無 BOM UTF-8 檔亂碼的共同根源。要徹底解決需使用者自行開啟 Windows「Beta: 使用 Unicode UTF-8 提供全球語言支援」（控制台 → 地區 → 系統管理 → 變更系統地區設定）並重開機；副作用是少數舊 Big5 程式顯示異常。Claude 不可代為修改系統設定，只能建議。
+- **系統 ANSI 碼頁 950**：上面兩項與 PS 5.1 `Get-Content` 讀無 BOM UTF-8 檔亂碼的共同根源。要徹底解決需使用者自行開啟 Windows「Beta: 使用 Unicode UTF-8 提供全球語言支援」（控制台 → 地區 → 系統管理 → 變更系統地區設定）並重開機；效果：ACP／OEMCP／MACCP 改為 65001，等於 cmd 與 PowerShell 一開啟就 `chcp 65001`，Python 預設編碼與 PS 5.1 `Get-Content` 無 BOM 檔也跟著變 UTF-8。副作用（有來源）：微軟 Q&A 說「compatibility issues are primarily dependent on how individual applications handle text encoding」（https://learn.microsoft.com/en-my/answers/questions/5951701/ ）；黑暗執行緒實測「日常生活不時會接觸到 BIG5 檔案」會變亂碼（https://blog.darkthread.net/blog/win-utf8-for-non-unicode ，2023）；Esri 文件 ArcGIS Pro 開啟此設定可能「崩潰或顯示菱形和方形符號」（https://support.esri.com/zh-cn/knowledge-base/arcgis-pro-crashes-or-experiences-character-encoding-is-000024027 ）。Claude 不可代為修改系統設定，只能建議；使用者若仍常開 Big5 舊檔或用 ArcGIS 類軟體就不要開。
 
 **停車場靜態事實選哪個**：問「平面還是立體、幾個車位、地址電話」→ **TDX 第一步**（公有與多數民營都有）；問「費率」→ 先看基本資料的 `FareDescription`（南投車埕實測有值），沒有才查 `ParkingRate`；問「營業時間、限高」→ 對應端點先試一次，空筆或無該停車場就走網頁鏈（店家／營運商官網 ＞ 停管處 ＞ 聚合頁）；即時剩餘車位 → TDX `ParkingAvailability`（有的縣市才有）。TDX 查無該停車場（例如純私人臨停場）時直接走網頁鏈，並說明「TDX 無登錄」。
 
