@@ -6,7 +6,7 @@
 ## 1. 工具優先序
 
 1. 內建 `WebSearch`／`WebFetch`：一般問題永遠先用。限制：索引偏美國（工具說明寫 US-only）；每場 session 預設 200 次、每小時補 100 次（安裝器 `--with-web` 放寬到 `config/web-sources.json` 的值）。
-2. **文件類問題直接用文件 MCP**（比搜尋引擎準、省來回）：
+2. **文件類問題直接用文件 MCP**（比搜尋引擎準、省來回）。**必查的觸發**：問題含「哪一版開始／支不支援／有沒有這個參數／預設值／已棄用嗎」等版本、相容性、參數事實 → 即使模型有把握也要查一次並附 learn.microsoft.com／官方文件網址；答完若沒附來源，等於沒查。純概念（「什麼是閉包」）才可免查。
    - 某程式庫／框架的 API 怎麼用、參數、版本差異 → `context7`（`resolve-library-id` 找到庫 → `query-docs`）。
    - 某個公開 GitHub repo 的架構、某段邏輯在哪、怎麼運作 → `deepwiki`（`read_wiki_structure` → `read_wiki_contents`，或直接 `ask_wiki_question`）。
    - Windows、PowerShell、.NET、Azure、Office 的官方說法（例如「PowerShell 5.1 有沒有這個參數」）→ `mslearn`。
@@ -124,6 +124,8 @@ TDX 用法（2026-10-27 以本機金鑰實測）：
    - 觀光景點停車場不分縣市：`CarPark/Tourism`；台鐵／高鐵站停車場：`CarPark/Rail/Station/TRA`、`.../THSR`；國道服務區：`CarPark/Road/Freeway/ServiceArea`。
 3. **只用於單筆或少量靜態查詢**（一題不超過 4 次呼叫，含換 token 不計）；5 次／分不夠排路線或迴圈掃描，那種需求不要用 TDX。回應 header `RateLimit-Remaining` 低於 1 就等 60 秒或改走網頁。回覆標「來源：交通部 TDX，資料版本 `UpdateTime`」。
 4. 回應以 gzip 壓縮時要解壓（Python `urllib` 需自行處理；`WebFetch`／`curl --compressed` 自動）。
+
+**Windows 呼叫 API 的工具選擇**：回應含中文、日文等非 ASCII 的 JSON，**不要用 PowerShell 5.1 的 `Invoke-RestMethod`**——它對沒標 charset 的回應會把 UTF-8 當 Latin-1 解，中日文全變「ä¸é·¹」這種亂碼（2026-10-27 OpenAQ 東京測站名實測），`[Console]::OutputEncoding` 救不了。改用 `WebFetch`、Bash `curl -s … | python -I -c …`、或 `python -I` 的 `urllib`（輸出寫檔或 `-X utf8`）。純數字／英文的 API（Open-Meteo、匯率）用 `Invoke-RestMethod` 無妨。
 
 **停車場靜態事實選哪個**：問「平面還是立體、幾個車位、地址電話」→ **TDX 第一步**（公有與多數民營都有）；問「費率」→ 先看基本資料的 `FareDescription`（南投車埕實測有值），沒有才查 `ParkingRate`；問「營業時間、限高」→ 對應端點先試一次，空筆或無該停車場就走網頁鏈（店家／營運商官網 ＞ 停管處 ＞ 聚合頁）；即時剩餘車位 → TDX `ParkingAvailability`（有的縣市才有）。TDX 查無該停車場（例如純私人臨停場）時直接走網頁鏈，並說明「TDX 無登錄」。
 
