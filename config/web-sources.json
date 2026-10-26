@@ -3,55 +3,87 @@
   "_comment": "聯網來源唯一來源。安裝器 `install.py web`／`--with-web` 讀這裡決定要註冊哪些 HTTP MCP 與寫入哪些環境變數；本機偏好（金鑰、啟用／停用、覆寫 env）寫在 <CLAUDE_HOME>/claude-dev-system/config/local.json，不進 repo。工具用法與開放 API 清單見 rules/web-sources.md。MCP 工具 schema 由 Claude Code 延後載入（每場對話只佔工具名稱），所以預設開多個遠端 MCP 的 token 成本很低；真正要省的是本機執行型 MCP 的背景程序。",
   "localKeys": {
     "_comment": "local.json 的 keys 可放的名稱（不在此列的也會存，但規則檔只認這些）。MCP 用的在 mcpServers 各項 keyParam／keyHeader；其餘由 rules/web-sources.md 指示 Claude 讀取使用。",
-    "tavily": "Tavily（MCP）", "exa": "Exa（MCP）", "context7": "Context7（MCP）",
-    "cwa": "中央氣象署 opendata.cwa.gov.tw 授權碼", "moenv": "環境部 data.moenv.gov.tw api_key", "openaq": "OpenAQ explore.openaq.org X-API-Key"
+    "tavily": "Tavily（MCP）",
+    "exa": "Exa（MCP）",
+    "context7": "Context7（MCP）",
+    "cwa": "中央氣象署 opendata.cwa.gov.tw 授權碼",
+    "moenv": "環境部 data.moenv.gov.tw api_key",
+    "openaq": "OpenAQ explore.openaq.org X-API-Key",
+    "tdx_id": "TDX 運輸資料流通服務 API 金鑰 Client Id",
+    "tdx_secret": "TDX API 金鑰 Client Secret（OAuth2 client_credentials 換 token）"
   },
   "mcpServers": {
     "parallel": {
       "url": "https://search.parallel.ai/mcp",
       "default": true,
-      "tools": ["web_search", "web_fetch"],
+      "tools": [
+        "web_search",
+        "web_fetch"
+      ],
       "note": "免金鑰；自建索引，回傳壓縮過的相關段落；匿名層速率較低（數字未公開）。2026-10-26 實測端點存活。"
     },
     "exa": {
       "url": "https://mcp.exa.ai/mcp",
       "default": true,
-      "tools": ["web_search_exa", "web_fetch_exa"],
+      "tools": [
+        "web_search_exa",
+        "web_fetch_exa"
+      ],
       "keyHeader": "x-api-key",
       "note": "免金鑰語意搜尋（用意思找而非關鍵字），與 Parallel／內建索引互補；免金鑰有每日與每秒上限（數字未公開）。有金鑰時以 x-api-key header 傳。"
     },
     "context7": {
       "url": "https://mcp.context7.com/mcp",
       "default": true,
-      "tools": ["resolve-library-id", "query-docs"],
+      "tools": [
+        "resolve-library-id",
+        "query-docs"
+      ],
       "keyHeader": "CONTEXT7_API_KEY",
       "note": "免金鑰；任何程式庫的最新官方文件（寫程式時查 API 現況，不靠模型過期記憶）。免費註冊 context7.com/dashboard 拿金鑰可提高速率，以 CONTEXT7_API_KEY header 傳。2026-10-26 實測端點存活。"
     },
     "deepwiki": {
       "url": "https://mcp.deepwiki.com/mcp",
       "default": true,
-      "tools": ["read_wiki_structure", "read_wiki_contents", "ask_wiki_question"],
+      "tools": [
+        "read_wiki_structure",
+        "read_wiki_contents",
+        "ask_wiki_question"
+      ],
       "note": "免金鑰、免註冊（Cognition／Devin 官方）；任何公開 GitHub repo 的自動生成文件，可直接問「這個 repo 的 X 怎麼運作」。私有 repo 需 Devin 帳號，本工具不處理。"
     },
     "mslearn": {
       "url": "https://learn.microsoft.com/api/mcp",
       "default": true,
-      "tools": ["microsoft_docs_search", "microsoft_docs_fetch", "microsoft_code_sample_search"],
+      "tools": [
+        "microsoft_docs_search",
+        "microsoft_docs_fetch",
+        "microsoft_code_sample_search"
+      ],
       "note": "免金鑰、免註冊；微軟官方文件（Windows、PowerShell、.NET、Azure、Office）。寫 PowerShell 5.1 腳本時查官方確認語法支援。遠端託管，本機不跑程式。"
     },
     "tavily": {
       "url": "https://mcp.tavily.com/mcp/",
       "default": false,
-      "headers": { "X-Tavily-Access-Mode": "keyless" },
+      "headers": {
+        "X-Tavily-Access-Mode": "keyless"
+      },
       "keyParam": "tavilyApiKey",
       "keyedHeaders": {},
-      "tools": ["tavily-search", "tavily-extract"],
+      "tools": [
+        "tavily-search",
+        "tavily-extract"
+      ],
       "note": "選用。免金鑰模式需 header X-Tavily-Access-Mode: keyless（只開 search／extract，速率受限）；有金鑰改用 ?tavilyApiKey= 並拿掉該 header（免費方案 1,000 credits／月，含 crawl／map／research）。回傳內容已去導覽列與廣告，較省 token。"
     },
     "firecrawl": {
       "url": "https://mcp.firecrawl.dev/v2/mcp",
       "default": false,
-      "tools": ["firecrawl_search", "firecrawl_scrape", "firecrawl_parse"],
+      "tools": [
+        "firecrawl_search",
+        "firecrawl_scrape",
+        "firecrawl_parse"
+      ],
       "note": "選用。免金鑰，依 IP 滾動限流，官方標示免費資格「while eligible」可能收回；強項是 JS 渲染頁面抓取。與 Parallel web_fetch 功能重疊，故預設關。"
     }
   },

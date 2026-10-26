@@ -109,11 +109,23 @@ Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔�
 | `moenv` | 環境部環境資料開放平臺 | 台灣各測站官方 AQI、PM2.5（實測值） | 官方未公開 | https://data.moenv.gov.tw/ 註冊取 api_key |
 | `openaq` | OpenAQ | 全球各國官方測站空品實測值 | 第三方說法 60 次／分、2,000 次／時 | https://explore.openaq.org/register，金鑰放 `X-API-Key` header |
 | `tavily`、`exa`、`context7` | 見第 2 節 | 提高對應 MCP 額度 | | 由安裝器 `install.py web --key 名稱=值` 寫入並重註冊 MCP |
+| `tdx_id`＋`tdx_secret` | TDX 運輸資料流通服務（交通部） | **停車場結構化靜態資料**：類型（平面／立體／地下／機械）、車位數、地址、電話；部分縣市另有營業時間、出入口限高、費率。也有公車／台鐵／高鐵站點靜態資料 | 基礎會員 **5 次／分／金鑰**、3 點／月（基礎服務 1,500 次＝1 點）；訂閱頁無「學術方案」級別，學術／加盟單位是付費方案的費用減免（需核定） | https://tdx.transportdata.tw/ 註冊 → 會員中心 → 資料服務 → API 金鑰（用「API 金鑰內容」的 Client Id／Secret，不是 MQTT 那組） |
 
 用法（Claude 用 `Read` 讀 `local.json` 取金鑰；**金鑰不可出現在回覆或 commit**，引用網址時遮成 `***`）：
 - CWA：`https://opendata.cwa.gov.tw/api/v1/rest/datastore/<資料集ID>?Authorization=<金鑰>&locationName=臺北市`。常用：36 小時預報 `F-C0032-001`、鄉鎮一週 `F-D0047-091`、**顯著有感地震報告 `E-A0015-001`**（回應 `records.Earthquake[].ReportContent`）、警特報 `W-C0033-001`。
 - 環境部：`https://data.moenv.gov.tw/api/v2/aqx_p_432?api_key=<金鑰>&limit=100&format=JSON`（`aqx_p_432` 為各測站即時 AQI；回應**最外層是陣列**，欄位 `sitename`、`county`、`aqi`、`pm2.5`、`status`、`publishtime`，每小時更新）。該站憑證鏈在 Python 3.14 `urllib` 會被擋（Missing Subject Key Identifier），用 `WebFetch` 或 Bash `curl` 即可，不要繞過憑證驗證。2026-10-26 以本機金鑰實測 200。
 - OpenAQ：`https://api.openaq.org/v3/locations?coordinates=25.03,121.56&radius=10000&limit=5`（header `X-API-Key`；2026-10-26 以本機金鑰實測 200，台北 10 km 內 3 站），再以 location id 查 `/v3/locations/<id>/latest`。
+
+TDX 用法（2026-10-27 以本機金鑰實測）：
+1. 換 token（有效 24 小時，取 token 端點另有每 IP 20 次／分）：`POST https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token`，body `grant_type=client_credentials&client_id=<tdx_id>&client_secret=<tdx_secret>`（`application/x-www-form-urlencoded`）→ `access_token`。
+2. 查詢帶 `Authorization: Bearer <token>`，基底 `https://tdx.transportdata.tw/api/basic/v1/Parking/OffStreet/`，縣市代碼如 `NantouCounty`、`Taichung`、`Taipei`、`NewTaipei`、`Kaohsiung`；用 OData 過濾縮小筆數（省點數、回應小）：
+   - 基本資料（**最可靠**）：`CarPark/City/{City}?$filter=contains(CarParkName/Zh_tw,'車埕')&$format=JSON` → 回 `CarParks[]`，欄位 `CarParkID`、`CarParkName.Zh_tw`、`Address`、`Telephone`、`Description`（含車位數）、**`CarParkType`**：`1` 平面、`2` 立體、`3` 地下、`4` 立體停車塔、`5` 立體機械式、`6` 同時涵蓋 2 種以上、`254` 其他、`255` 未知。
+   - 營業時間 `ParkingServiceTime/City/{City}?$filter=CarParkID eq 'NAN_018'`（回 `ServiceTimes[]`）、出入口限高 `ParkingEntranceExit/...`（`ParkingEntranceExits[]`，欄位 `MaxAllowedHeight`）、費率 `ParkingRate/...`（`ParkingRates[]`）、車位數 `ParkingSpace/...`、即時剩餘 `ParkingAvailability/...`。**各縣市填寫完整度不同**：南投車埕兩座 2026-10-27 實測這三個端點皆 0 筆，台中等大縣市較齊。空筆就退回第 1 節的網頁升級鏈，不要重試。
+   - 觀光景點停車場不分縣市：`CarPark/Tourism`；台鐵／高鐵站停車場：`CarPark/Rail/Station/TRA`、`.../THSR`；國道服務區：`CarPark/Road/Freeway/ServiceArea`。
+3. **只用於單筆或少量靜態查詢**（一題不超過 4 次呼叫，含換 token 不計）；5 次／分不夠排路線或迴圈掃描，那種需求不要用 TDX。回應 header `RateLimit-Remaining` 低於 1 就等 60 秒或改走網頁。回覆標「來源：交通部 TDX，資料版本 `UpdateTime`」。
+4. 回應以 gzip 壓縮時要解壓（Python `urllib` 需自行處理；`WebFetch`／`curl --compressed` 自動）。
+
+**停車場靜態事實選哪個**：問「平面還是立體、幾個車位、地址電話」→ **TDX 第一步**（公有與多數民營都有）；問「營業時間、限高、費率」→ TDX 先試一次，空筆或無該停車場就走網頁鏈（店家／營運商官網 ＞ 停管處 ＞ 聚合頁）；即時剩餘車位 → TDX `ParkingAvailability`（有的縣市才有）。TDX 查無該停車場（例如純私人臨停場）時直接走網頁鏈，並說明「TDX 無登錄」。
 
 **天氣選哪個**：台灣以外一律 Open-Meteo（CWA 只有台灣）。台灣「現在幾度」這類當下狀況先用 Open-Meteo（免金鑰、一次呼叫、不吃 CWA 每日額度），使用者指定要官方測站實測值才用 CWA 觀測站資料。台灣**鄉鎮級預報**（「板橋明天會不會下雨」）、一週預報、颱風／豪雨等警特報用 CWA。CWA 回 401、額度用完或 `local.json` 沒有 `keys.cwa` 時退回 Open-Meteo 並說明。兩邊數字差很多就兩個都列。
 **空氣品質選哪個**：台灣 → `moenv`（官方測站實測）；國外 → `openaq`（官方測站實測）；沒有對應金鑰或失敗 → Open-Meteo Air Quality（模式值，要註明）。
@@ -121,7 +133,7 @@ Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔�
 
 ## 5. 沒有免費來源的類別
 
-航班票價、飯店房價（商業資產，無免費公開 API）、TDX 交通（免費會員 5 次／分，太少不實用）。這些只能用搜尋引擎抓網頁，拿到的是「網頁上寫的價格」，要註明不是即時報價。
+航班票價、飯店房價（商業資產，無免費公開 API）、TDX 用於排路線／反覆掃描（5 次／分不夠；單筆靜態查詢可用，見第 4 節）。這些只能用搜尋引擎抓網頁，拿到的是「網頁上寫的價格」，要註明不是即時報價。
 查了但不列：Semantic Scholar（免金鑰共用 IP 額度，實測首次呼叫即 429）、REST Countries（靜態常識，Wikipedia 可代）、OpenAQ 免金鑰（v3 要金鑰，見第 4 節）。
 
 ## 6. 瀏覽器：實際開頁面看、操作、驗證（Claude in Chrome）
