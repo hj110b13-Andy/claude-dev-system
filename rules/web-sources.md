@@ -119,13 +119,13 @@ Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔�
 TDX 用法（2026-10-27 以本機金鑰實測）：
 1. 換 token（有效 24 小時，取 token 端點另有每 IP 20 次／分）：`POST https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token`，body `grant_type=client_credentials&client_id=<tdx_id>&client_secret=<tdx_secret>`（`application/x-www-form-urlencoded`）→ `access_token`。
 2. 查詢帶 `Authorization: Bearer <token>`，基底 `https://tdx.transportdata.tw/api/basic/v1/Parking/OffStreet/`，縣市代碼如 `NantouCounty`、`Taichung`、`Taipei`、`NewTaipei`、`Kaohsiung`；用 OData 過濾縮小筆數（省點數、回應小）：
-   - 基本資料（**最可靠**）：`CarPark/City/{City}?$filter=contains(CarParkName/Zh_tw,'車埕')&$format=JSON` → 回 `CarParks[]`，欄位 `CarParkID`、`CarParkName.Zh_tw`、`Address`、`Telephone`、`Description`（含車位數）、**`CarParkType`**：`1` 平面、`2` 立體、`3` 地下、`4` 立體停車塔、`5` 立體機械式、`6` 同時涵蓋 2 種以上、`254` 其他、`255` 未知。
+   - 基本資料（**最可靠**）：`CarPark/City/{City}?$filter=contains(CarParkName/Zh_tw,'車埕')&$format=JSON` → 回 `CarParks[]`，欄位 `CarParkID`、`CarParkName.Zh_tw`、`Address`、`Telephone`、`Description`（含車位數）、**`FareDescription`（費率文字，常已足夠，先看這裡再決定要不要查 `ParkingRate`）**、`ChargeTypes`、`IsPublic`、`OvernightPermitted`、**`CarParkType`**：`1` 平面、`2` 立體、`3` 地下、`4` 立體停車塔、`5` 立體機械式、`6` 同時涵蓋 2 種以上、`254` 其他、`255` 未知。
    - 營業時間 `ParkingServiceTime/City/{City}?$filter=CarParkID eq 'NAN_018'`（回 `ServiceTimes[]`）、出入口限高 `ParkingEntranceExit/...`（`ParkingEntranceExits[]`，欄位 `MaxAllowedHeight`）、費率 `ParkingRate/...`（`ParkingRates[]`）、車位數 `ParkingSpace/...`、即時剩餘 `ParkingAvailability/...`。**各縣市填寫完整度不同**：南投車埕兩座 2026-10-27 實測這三個端點皆 0 筆，台中等大縣市較齊。空筆就退回第 1 節的網頁升級鏈，不要重試。
    - 觀光景點停車場不分縣市：`CarPark/Tourism`；台鐵／高鐵站停車場：`CarPark/Rail/Station/TRA`、`.../THSR`；國道服務區：`CarPark/Road/Freeway/ServiceArea`。
 3. **只用於單筆或少量靜態查詢**（一題不超過 4 次呼叫，含換 token 不計）；5 次／分不夠排路線或迴圈掃描，那種需求不要用 TDX。回應 header `RateLimit-Remaining` 低於 1 就等 60 秒或改走網頁。回覆標「來源：交通部 TDX，資料版本 `UpdateTime`」。
 4. 回應以 gzip 壓縮時要解壓（Python `urllib` 需自行處理；`WebFetch`／`curl --compressed` 自動）。
 
-**停車場靜態事實選哪個**：問「平面還是立體、幾個車位、地址電話」→ **TDX 第一步**（公有與多數民營都有）；問「營業時間、限高、費率」→ TDX 先試一次，空筆或無該停車場就走網頁鏈（店家／營運商官網 ＞ 停管處 ＞ 聚合頁）；即時剩餘車位 → TDX `ParkingAvailability`（有的縣市才有）。TDX 查無該停車場（例如純私人臨停場）時直接走網頁鏈，並說明「TDX 無登錄」。
+**停車場靜態事實選哪個**：問「平面還是立體、幾個車位、地址電話」→ **TDX 第一步**（公有與多數民營都有）；問「費率」→ 先看基本資料的 `FareDescription`（南投車埕實測有值），沒有才查 `ParkingRate`；問「營業時間、限高」→ 對應端點先試一次，空筆或無該停車場就走網頁鏈（店家／營運商官網 ＞ 停管處 ＞ 聚合頁）；即時剩餘車位 → TDX `ParkingAvailability`（有的縣市才有）。TDX 查無該停車場（例如純私人臨停場）時直接走網頁鏈，並說明「TDX 無登錄」。
 
 **天氣選哪個**：台灣以外一律 Open-Meteo（CWA 只有台灣）。台灣「現在幾度」這類當下狀況先用 Open-Meteo（免金鑰、一次呼叫、不吃 CWA 每日額度），使用者指定要官方測站實測值才用 CWA 觀測站資料。台灣**鄉鎮級預報**（「板橋明天會不會下雨」）、一週預報、颱風／豪雨等警特報用 CWA。CWA 回 401、額度用完或 `local.json` 沒有 `keys.cwa` 時退回 Open-Meteo 並說明。兩邊數字差很多就兩個都列。
 **空氣品質選哪個**：台灣 → `moenv`（官方測站實測）；國外 → `openaq`（官方測站實測）；沒有對應金鑰或失敗 → Open-Meteo Air Quality（模式值，要註明）。
