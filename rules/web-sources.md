@@ -52,6 +52,8 @@
 | Tavily | 省 token 的搜尋／擷取、crawl | 1,000 credits／月 | https://app.tavily.com/ | `install.py web --key tavily=tvly-xxxx`（同時啟用：`--enable tavily`） |
 | Exa | 提高 exa 速率 | 每月 $10 額度 | https://dashboard.exa.ai/ | `install.py web --key exa=xxxx` |
 
+**天氣選哪個**：台灣以外一律 Open-Meteo（CWA 只有台灣）。台灣「現在幾度」這類當下狀況先用 Open-Meteo（免金鑰、一次呼叫、不吃 CWA 每日額度），使用者指定要官方測站實測值才用 CWA 觀測站資料。台灣**鄉鎮級預報**（「板橋明天會不會下雨」）、一週預報、颱風／豪雨等警特報用 CWA（Open-Meteo 是全球模式，沒有鄉鎮解析度與台灣官方警報）。CWA 回 401、額度用完或 `local.json` 沒有 `keys.cwa` 時退回 Open-Meteo 並說明。兩邊數字差很多就兩個都列。
+
 中央氣象署用法：用 `Read` 讀 `local.json` 取 `keys.cwa`，呼叫 `https://opendata.cwa.gov.tw/api/v1/rest/datastore/<資料集ID>?Authorization=<金鑰>&locationName=臺北市`（一般天氣預報 36 小時：`F-C0032-001`；鄉鎮一週：`F-D0047-091`）。**金鑰不可出現在回覆或 commit**；回覆引用網址時把金鑰遮成 `***`。
 
 ## 5. 沒有免費來源的類別
