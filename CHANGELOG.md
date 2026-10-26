@@ -4,6 +4,7 @@
 
 ## 0.4.5（2026-10-27）
 
+- 補：文件 MCP 的查法與引用——先 search 拿摘錄、夠用就不 fetch 整頁；回覆貼完整網址、關鍵句逐字引、自己的補充與文件原文分開標。來源：`Get-ChildItem -Depth` 題已照規則查 mslearn 並逐字引「added in PowerShell 5.0」，但整頁 fetch 約 2 萬字、未貼網址、且把「要搭配 -Recurse」寫在引用旁（文件範例 8 顯示 -Depth 可單獨使用）。
 - 規則修正（來自兩題實測）：(1) 文件 MCP 的必查觸發明寫——「哪一版開始支援／支不支援／有沒有這個參數／預設值」等版本、相容性、參數事實即使有把握也必查並附官方來源，純概念才可免查（實測：PowerShell 三元運算子題答對但未用 mslearn、未附來源）。(2) Windows 呼叫 API 的工具選擇——含非 ASCII 的 JSON 不用 PowerShell 5.1 `Invoke-RestMethod`（UTF-8 被當 Latin-1 解，實測 OpenAQ 東京測站名亂碼導致誤報「港區」），改用 WebFetch／curl＋python／`python -I`。東京一日遊題其餘行為（四 API 單腳本平行、零搜尋、日期雙解讀、OpenAQ 金鑰實測值優先、自行指出預報內部矛盾）全部合規。
 
 ## 0.4.4（2026-10-27）

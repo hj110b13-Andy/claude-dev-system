@@ -7,6 +7,7 @@
 
 1. 內建 `WebSearch`／`WebFetch`：一般問題永遠先用。限制：索引偏美國（工具說明寫 US-only）；每場 session 預設 200 次、每小時補 100 次（安裝器 `--with-web` 放寬到 `config/web-sources.json` 的值）。
 2. **文件類問題直接用文件 MCP**（比搜尋引擎準、省來回）。**必查的觸發**：問題含「哪一版開始／支不支援／有沒有這個參數／預設值／已棄用嗎」等版本、相容性、參數事實 → 即使模型有把握也要查一次並附 learn.microsoft.com／官方文件網址；答完若沒附來源，等於沒查。純概念（「什麼是閉包」）才可免查。
+   **查法與引用**：先用 search 類工具（`microsoft_docs_search`、`query-docs`、`read_wiki_structure`）拿摘錄，摘錄已含答案就**不要**再 fetch 整頁（整頁文件動輒上萬字，白耗 context）；摘錄不夠才 fetch。回覆要貼**完整網址**（不是「我查了 Microsoft Learn」），關鍵句**逐字引用**；文件沒寫的事（例如「要搭配某參數」）不要寫在引用旁邊讓人以為是文件說的，要分開標「我的補充」。
    - 某程式庫／框架的 API 怎麼用、參數、版本差異 → `context7`（`resolve-library-id` 找到庫 → `query-docs`）。
    - 某個公開 GitHub repo 的架構、某段邏輯在哪、怎麼運作 → `deepwiki`（`read_wiki_structure` → `read_wiki_contents`，或直接 `ask_wiki_question`）。
    - Windows、PowerShell、.NET、Azure、Office 的官方說法（例如「PowerShell 5.1 有沒有這個參數」）→ `mslearn`。
