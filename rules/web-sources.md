@@ -65,6 +65,39 @@ Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔�
 不列入：Brave（2026-02 起取消免費方案、需信用卡）、博查 Bocha（需中國平台金鑰、簡體索引）、DuckDuckGo 社群 MCP（爬網頁，前端改版即壞）、Perplexity Sonar 與 Parallel Task API（付費，且多步規劃 Claude Code 自己會做）、Apify 新聞聚合 MCP（需 Apify token、按次計費）。
 瀏覽器類：**用 Claude Code 內建的 Claude in Chrome**（`mcp__claude-in-chrome__*`，接使用者真實 Chrome 與其登入狀態），不裝 Chrome DevTools MCP、Playwright。規則見第 6 節。
 
+## 2a. 社群、論壇、部落格（2026-10-27 逐站實測）
+
+| 站台 | 能查到嗎 | 用什麼 | 備註 |
+|---|---|---|---|
+| Mobile01、巴哈姆特、Dcard、PTT（ptt.cc 網頁版）、Reddit、Forumosa | ✅ 整篇含回覆／推文，有 2026 年貼文 | `parallel`（`site:` 限定網域）或 `exa`（描述式查詢）；兩者索引不同，一個沒命中換另一個 | PTT 的 Gossiping、TaichungBun、Food、Stock、MobileComm 都有；Dcard 感情、理財、股票、科技業、美食都有 |
+| Threads | ⚠️ 部分：貼文本文有索引，回覆多半看不到 | `parallel` `site:threads.com`（舊網域 threads.net 也可試） | 要看完整討論用 Claude in Chrome 以使用者登入狀態開 |
+| Facebook 社團 | ❌ 搜尋引擎只索引到社團首頁和零碎摘要，貼文內容在登入牆後 | **Claude in Chrome**（使用者已登入即可讀） | 不要用搜尋工具硬找，查不到不是查證不足 |
+| 部落格（痞客邦、Medium、個人站、食記旅記） | ✅ | 內建 WebSearch 或 `parallel`／`exa`；整頁用 `WebFetch`／Jina | 注意發文日期，旅遊／價格類超過一年要標舊 |
+| 新聞 | ✅ | `parallel`、`GDELT`（第 3 節） | |
+
+查法：主題＋站名直接下 `site:`（`site:dcard.tw 台中 停車`、`site:ptt.cc TaichungBun 逢甲`）；問「網友評價／真實心得」時至少跨兩站（例如 Mobile01＋PTT，或 Dcard＋Threads），單一站的意見不要寫成共識。社群內容是個人經驗，回覆時標「網友說法」、附貼文日期與連結，與官方資料分開列。
+
+## 2b. 程式與技術難題（Claude Code 自己卡住時）
+
+| 問題類型 | 第一步 | 第二步 |
+|---|---|---|
+| 某個錯誤訊息（含 traceback） | `exa`：把錯誤訊息**原句**當查詢，目標寫明「GitHub issue 或 Stack Overflow 的根因與修法」→ 直接命中 cpython／requests／claude-code 等 repo 的 issue，摘錄常含 root cause 與 workaround | `parallel` 同句再查一次；仍無 → `deepwiki` 問該 repo |
+| 某程式庫怎麼用、參數、版本差異 | `context7` | `deepwiki` 讀 repo 文件 |
+| Claude Code 本身（MCP 連不上、`/mcp`、hooks、設定） | `exa`／`parallel` 查 `anthropics/claude-code` issues（`site:github.com anthropics claude-code <症狀>`） | 官方文件 code.claude.com／`claude-code-guide` agent |
+| 微軟相關（PowerShell、.NET、Windows） | `mslearn` | — |
+| 某開源專案的內部邏輯 | `deepwiki` `ask_wiki_question` | 讀原始碼 |
+
+規則：錯誤訊息要**逐字**查，不要改寫成自己的描述；找到 issue 後看**最新**的留言（修法常在後面）、看是否已 closed／fixed 於哪一版；修法要符合安全原則（例如憑證問題不可關閉驗證，見下）。查到的修法先在本機實測再寫進規則或程式。
+
+**實例（2026-10-27）**：`ssl.SSLCertVerificationError: Missing Subject Key Identifier`——exa 以原句查到 cpython #107361 與 psf/requests #6945：Python 3.13+ 的 `ssl.create_default_context()` 預設開 `VERIFY_X509_STRICT`，而台灣 TWCA 根憑證（政府網站、氣象署、環境部、考選部等多用）缺少 SKI 擴充欄位，所以被嚴格檢查擋下。**正確修法**：只清掉 STRICT 旗標，保留 CA 鏈、hostname、到期驗證——
+```python
+import ssl, urllib.request
+ctx = ssl.create_default_context()
+ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT   # 只關嚴格擴充檢查，其餘驗證照常
+urllib.request.urlopen(url, context=ctx)
+```
+**不可**用 `ssl._create_unverified_context()`、`verify=False` 或 `check_hostname=False`。
+
 ## 3. 即時數值開放 API（免金鑰、免費）
 
 直接 `WebFetch`；回覆時附上來源與資料時間。要帶自訂 User-Agent 的來源（Nominatim、SEC）用 Bash `curl -A` 代替。
@@ -76,7 +109,7 @@ Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔�
 | 空氣品質（全球） | Open-Meteo Air Quality | `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=25.03&longitude=121.56&current=pm2_5,pm10,us_aqi&timezone=Asia/Taipei` | 同上 | 模式推算值；台灣用環境部、國外有 OpenAQ 金鑰時用 OpenAQ（實測值） |
 | 地震（全球） | USGS | `https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson`（`significant_week`、`2.5_day` 等 20 種組合）；查詢 `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=5&limit=5` | 每分鐘重生、無上限 | 台灣官方報告用中央氣象署（第 4 節） |
 | 天氣歷史同期（任一地點、1940 年起） | Open-Meteo Archive | `https://archive-api.open-meteo.com/v1/archive?latitude=24.15&longitude=120.67&start_date=2025-12-27&end_date=2025-12-31&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=Asia/Taipei` | 同 Open-Meteo 額度；資料約落後 5 天 | 預報還沒出時拉過去 3～5 年同期當參考；2026-10-27 實測 |
-| 天氣歷史**官方實測**（台灣測站，逐日） | 中央氣象署 CODiS | `POST https://codis.cwa.gov.tw/api/station`，body `date=2024-12-29T00:00:00.000+08:00&type=report_month&stn_ID=467490&stn_type=cwb&start=2024-12-01T00:00:00&end=2024-12-31T00:00:00`，需 header `Referer: https://codis.cwa.gov.tw/StationData`；回 `data[0].dts[]` 每日 `AirTemperature`（Max/Min/Mean）、`Precipitation.Accumulation`、`WindSpeed`、`PeakGust`、`SunshineDuration` 等 | 免金鑰；非文件化端點，可能改 | 署屬站代碼：臺中 467490、臺北 466920、高雄 467440…（梧棲 467770 2024 起無資料，已撤站）。雨量 `-9.8`＝「雨跡」代碼（未達 0.5 mm），不是負值。Python 3.14 憑證會被擋 → 用 curl。比 Open-Meteo 重分析準（2026-10-27 比對臺中站：模式值平均偏冷約 1.5°C） |
+| 天氣歷史**官方實測**（台灣測站，逐日） | 中央氣象署 CODiS | `POST https://codis.cwa.gov.tw/api/station`，body `date=2024-12-29T00:00:00.000+08:00&type=report_month&stn_ID=467490&stn_type=cwb&start=2024-12-01T00:00:00&end=2024-12-31T00:00:00`，需 header `Referer: https://codis.cwa.gov.tw/StationData`；回 `data[0].dts[]` 每日 `AirTemperature`（Max/Min/Mean）、`Precipitation.Accumulation`、`WindSpeed`、`PeakGust`、`SunshineDuration` 等 | 免金鑰；非文件化端點，可能改 | 署屬站代碼：臺中 467490、臺北 466920、高雄 467440…（梧棲 467770 2024 起無資料，已撤站）。雨量 `-9.8`＝「雨跡」代碼（未達 0.5 mm），不是負值。Python 3.13+ 憑證會被擋（TWCA 缺 SKI）→ 用 curl，或 Python 只清 `VERIFY_X509_STRICT`（第 2b 節）。比 Open-Meteo 重分析準（2026-10-27 比對臺中站：模式值平均偏冷約 1.5°C） |
 | 日出日落 | Sunrise-Sunset | `https://api.sunrise-sunset.org/json?lat=25.03&lng=121.56&formatted=0&tzid=Asia/Taipei` | 寬鬆 | 旅遊排程、攝影 |
 
 ### 金融
@@ -122,7 +155,7 @@ Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔�
 
 用法（Claude 用 `Read` 讀 `local.json` 取金鑰；**金鑰不可出現在回覆或 commit**，引用網址時遮成 `***`）：
 - CWA：`https://opendata.cwa.gov.tw/api/v1/rest/datastore/<資料集ID>?Authorization=<金鑰>&locationName=臺北市`。常用：36 小時預報 `F-C0032-001`、鄉鎮一週 `F-D0047-091`、**顯著有感地震報告 `E-A0015-001`**（回應 `records.Earthquake[].ReportContent`）、警特報 `W-C0033-001`、**潮汐預報 `F-A0021-001`**（參數 `LocationName=臺中市梧棲區` 等沿海鄉鎮；回 `records.TideForecasts[].Location.TimePeriods.Daily[]`，每日有 `Date`、`LunarDate`、**`TideRange`（大／中／小）**、`Time[]` 潮時與潮高，一次約 32 天、**日期未排序要自己 sort**；2026-10-27 實測）。
-- 環境部：`https://data.moenv.gov.tw/api/v2/aqx_p_432?api_key=<金鑰>&limit=100&format=JSON`（`aqx_p_432` 為各測站即時 AQI；回應**最外層是陣列**，欄位 `sitename`、`county`、`aqi`、`pm2.5`、`status`、`publishtime`，每小時更新）。該站憑證鏈在 Python 3.14 `urllib` 會被擋（Missing Subject Key Identifier），用 `WebFetch` 或 Bash `curl` 即可，不要繞過憑證驗證。2026-10-26 以本機金鑰實測 200。
+- 環境部：`https://data.moenv.gov.tw/api/v2/aqx_p_432?api_key=<金鑰>&limit=100&format=JSON`（`aqx_p_432` 為各測站即時 AQI；回應**最外層是陣列**，欄位 `sitename`、`county`、`aqi`、`pm2.5`、`status`、`publishtime`，每小時更新）。該站憑證鏈在 Python 3.13+ `urllib` 會被擋（Missing Subject Key Identifier，TWCA 根憑證缺 SKI）：用 `WebFetch`／`curl`，或 Python 依第 2b 節只清 `VERIFY_X509_STRICT`；不可關閉憑證驗證。2026-10-26 以本機金鑰實測 200。
 - OpenAQ：`https://api.openaq.org/v3/locations?coordinates=25.03,121.56&radius=10000&limit=5`（header `X-API-Key`；2026-10-26 以本機金鑰實測 200，台北 10 km 內 3 站），再以 location id 查 `/v3/locations/<id>/latest`。
 
 TDX 用法（2026-10-27 以本機金鑰實測）：

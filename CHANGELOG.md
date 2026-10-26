@@ -2,6 +2,12 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.4.7（2026-10-27）
+
+- 規則新增 2a「社群、論壇、部落格」：逐站實測（parallel／exa）——Mobile01、巴哈姆特、Dcard、PTT、Reddit、Forumosa 整篇含回覆可查；Threads 僅本文；Facebook 社團在登入牆後只能用 Claude in Chrome。查法：`site:` 限定、跨兩站、標「網友說法」與日期。
+- 規則新增 2b「程式與技術難題」：錯誤訊息逐字用 exa 查 GitHub issue／Stack Overflow；Claude Code 自身問題查 anthropics/claude-code issues；修法須安全且本機實測。實例：`Missing Subject Key Identifier` 根因為 Python 3.13+ `VERIFY_X509_STRICT` 遇 TWCA 根憑證缺 SKI（cpython #107361、requests #6945），正確修法只清該旗標、不關驗證；據此更正環境部與 CODiS 兩處「用 curl」的說法。
+- `core.md` 加社群與程式難題分流一句。
+
 ## 0.4.6（2026-10-27）
 
 - 補：新增中央氣象署 CODiS 歷史觀測 API（免金鑰、非文件化 POST 端點、逐日官方實測；雨量 -9.8＝雨跡；梧棲 467770 已無資料）；歷史同期規則改為「有測站用 CODiS、沒測站用 Open-Meteo 重分析、兩者都有時校正偏差」。來源：旅遊行程實測中 Claude 自行找到 CODiS 並以臺中站 10 年實測校正 Open-Meteo（偏冷約 1.5°C）。
