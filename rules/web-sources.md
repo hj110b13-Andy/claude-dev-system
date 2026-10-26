@@ -90,8 +90,8 @@ Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔�
 
 用法（Claude 用 `Read` 讀 `local.json` 取金鑰；**金鑰不可出現在回覆或 commit**，引用網址時遮成 `***`）：
 - CWA：`https://opendata.cwa.gov.tw/api/v1/rest/datastore/<資料集ID>?Authorization=<金鑰>&locationName=臺北市`。常用：36 小時預報 `F-C0032-001`、鄉鎮一週 `F-D0047-091`、**顯著有感地震報告 `E-A0015-001`**（回應 `records.Earthquake[].ReportContent`）、警特報 `W-C0033-001`。
-- 環境部：`https://data.moenv.gov.tw/api/v2/aqx_p_432?api_key=<金鑰>&limit=100&format=JSON`（`aqx_p_432` 為各測站即時 AQI）。
-- OpenAQ：`https://api.openaq.org/v3/locations?coordinates=25.03,121.56&radius=10000`（header `X-API-Key`），再以 location id 查 `/v3/locations/<id>/latest`。
+- 環境部：`https://data.moenv.gov.tw/api/v2/aqx_p_432?api_key=<金鑰>&limit=100&format=JSON`（`aqx_p_432` 為各測站即時 AQI；回應**最外層是陣列**，欄位 `sitename`、`county`、`aqi`、`pm2.5`、`status`、`publishtime`，每小時更新）。該站憑證鏈在 Python 3.14 `urllib` 會被擋（Missing Subject Key Identifier），用 `WebFetch` 或 Bash `curl` 即可，不要繞過憑證驗證。2026-10-26 以本機金鑰實測 200。
+- OpenAQ：`https://api.openaq.org/v3/locations?coordinates=25.03,121.56&radius=10000&limit=5`（header `X-API-Key`；2026-10-26 以本機金鑰實測 200，台北 10 km 內 3 站），再以 location id 查 `/v3/locations/<id>/latest`。
 
 **天氣選哪個**：台灣以外一律 Open-Meteo（CWA 只有台灣）。台灣「現在幾度」這類當下狀況先用 Open-Meteo（免金鑰、一次呼叫、不吃 CWA 每日額度），使用者指定要官方測站實測值才用 CWA 觀測站資料。台灣**鄉鎮級預報**（「板橋明天會不會下雨」）、一週預報、颱風／豪雨等警特報用 CWA。CWA 回 401、額度用完或 `local.json` 沒有 `keys.cwa` 時退回 Open-Meteo 並說明。兩邊數字差很多就兩個都列。
 **空氣品質選哪個**：台灣 → `moenv`（官方測站實測）；國外 → `openaq`（官方測站實測）；沒有對應金鑰或失敗 → Open-Meteo Air Quality（模式值，要註明）。
