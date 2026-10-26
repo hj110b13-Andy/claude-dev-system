@@ -1,7 +1,7 @@
 # claude-dev-system
 
 把 Stock-web 專案系統優化中「成熟且驗證過」的通用流程，封裝成可跨專案、跨裝置安裝的 Claude Code 全域工具。
-版本見 `config/VERSION`（目前 0.2.1），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
+版本見 `config/VERSION`（目前 0.3.0），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
 
 ## 內容與分層
 
@@ -12,7 +12,7 @@
 | `hooks/usage_guard.py` | 用量守門 hook（通用版；門檻讀設定檔） | `claude-dev-system/hooks/`，並在 `settings.json` 註冊 UserPromptSubmit／PostToolUse |
 | `hooks/task-board/` | 任務看板 mod 來源（**專案專屬**：讀 Stock-web 的 PROGRESS.md），`hooks/.claude-plugin/marketplace.json` 是本機 marketplace | 不自動安裝；要用的專案在 `.claude/settings.json` 以 `extraKnownMarketplaces`＋`enabledPlugins` 啟用 |
 | `tools/` | `depgraph.py`（依賴圖／循環閘門）、`moduleInventory.py`（模組盤點）、`progress-diff.py`（文件瘦身逐句比對）；不寫死路徑，全用參數 | `claude-dev-system/tools/` |
-| `config/` | `VERSION`、`compat.json`、`dispatch-config.json`（用量門檻、方案期間、模型表；專案 `.claude/dispatch-config.json` 優先於全域） | `claude-dev-system/config/`（dispatch-config 可自行修改，更新時保留） |
+| `config/` | `VERSION`、`compat.json`、`dispatch-config.json`（用量門檻、方案期間、模型表；專案 `.claude/dispatch-config.json` 優先於全域）、`web-sources.json`（聯網來源：免金鑰搜尋 MCP 與 WebSearch 上限 env，選用） | `claude-dev-system/config/`（dispatch-config 可自行修改，更新時保留；本機金鑰與開關在 `local.json`，不進 repo） |
 | `installer/` | `install.py`＋`cds/` 模組（只用 Python 標準庫） | — |
 | `tests/` | 安裝器與工具的自我測試 | — |
 | `docs/` | 安裝、更新、解除安裝、跨裝置、故障排除、相容版本 | — |
@@ -40,6 +40,15 @@ python installer/install.py verify     # 全部 ✅ 才算完成；重開 Claude
 安裝會做：①備份 `settings.json` 與 `CLAUDE.md` 到 `~/.claude/backups/claude-dev-system-<時間>*`；②複製規則／工具／hook／設定到 `~/.claude/claude-dev-system/`、skills 到 `~/.claude/skills/cds-*`；③在 `settings.json` 只**新增**指令結尾帶 `# claude-dev-system` 的 hook（若已有你自己的 `usage_guard.py` hook 就不重複註冊、不寫檔）；④在 `CLAUDE.md` 末端加 `<!-- claude-dev-system:begin … -->`～`<!-- claude-dev-system:end -->` 區塊，區塊外一字不動；⑤安裝紀錄（版本、每個檔的雜湊、加了哪些條目）寫在 `~/.claude/claude-dev-system/manifest.json`。
 不碰 `permissions`、`model`、`language`、`statusLine`、`enabledPlugins`、其他 hooks 與 `~/.claude/commands/`。不會把任何金鑰或 `.credentials.json` 打包進工具。
 細節：`docs/install.md`。
+
+## 選用：聯網來源
+
+```bash
+python installer/install.py update --with-web            # 放寬內建 WebSearch 上限＋註冊免金鑰搜尋 MCP（parallel、exa）
+python installer/install.py web --key cwa=CWA-xxxx       # 選用：中央氣象署授權碼（金鑰只存本機 local.json）
+python installer/install.py web --key tavily=tvly-xxxx --enable tavily
+```
+預設不啟用。用官方 `claude mcp add --scope user` 註冊，不覆蓋你自己同名的 MCP 或 env；`web --off` 或 `uninstall` 只移除本工具登記過的。規則 `rules/web-sources.md` 列出實測過的免金鑰開放 API（天氣、匯率、台股、假日、百科、地理編碼、航班位置）。細節：`docs/web-sources.md`。
 
 ## 更新
 

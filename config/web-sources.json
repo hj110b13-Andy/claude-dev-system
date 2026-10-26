@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "_comment": "聯網來源唯一來源。安裝器 `install.py web`／`--with-web` 讀這裡決定要註冊哪些 HTTP MCP 與寫入哪些環境變數；本機偏好（金鑰、啟用／停用、覆寫 env）寫在 <CLAUDE_HOME>/claude-dev-system/config/local.json，不進 repo。工具用法與開放 API 清單見 rules/web-sources.md。",
+  "mcpServers": {
+    "parallel": {
+      "url": "https://search.parallel.ai/mcp",
+      "default": true,
+      "tools": ["web_search", "web_fetch"],
+      "note": "免金鑰；自建索引，回傳壓縮過的相關段落；匿名層速率較低（數字未公開）。2026-10-26 實測端點存活。"
+    },
+    "exa": {
+      "url": "https://mcp.exa.ai/mcp",
+      "default": true,
+      "tools": ["web_search_exa", "web_fetch_exa"],
+      "keyHeader": "x-api-key",
+      "note": "免金鑰語意搜尋（用意思找而非關鍵字），與 Parallel／內建索引互補；免金鑰有每日與每秒上限（數字未公開）。有金鑰時以 x-api-key header 傳。"
+    },
+    "tavily": {
+      "url": "https://mcp.tavily.com/mcp/",
+      "default": false,
+      "headers": { "X-Tavily-Access-Mode": "keyless" },
+      "keyParam": "tavilyApiKey",
+      "keyedHeaders": {},
+      "tools": ["tavily-search", "tavily-extract"],
+      "note": "選用。免金鑰模式需 header X-Tavily-Access-Mode: keyless（只開 search／extract，速率受限）；有金鑰改用 ?tavilyApiKey= 並拿掉該 header（免費方案 1,000 credits／月，含 crawl／map／research）。回傳內容已去導覽列與廣告，較省 token。"
+    },
+    "firecrawl": {
+      "url": "https://mcp.firecrawl.dev/v2/mcp",
+      "default": false,
+      "tools": ["firecrawl_search", "firecrawl_scrape", "firecrawl_parse"],
+      "note": "選用。免金鑰，依 IP 滾動限流，官方標示免費資格「while eligible」可能收回；強項是 JS 渲染頁面抓取。與 Parallel web_fetch 功能重疊，故預設關。"
+    }
+  },
+  "env": {
+    "_comment": "寫入 settings.json 的 env（Claude Code ≥2.1.290）。預設值 200／100 常讓多 agent 研究中途停住；這裡放寬 3 倍，仍保留失控迴圈的煞車。local.json 的 env 可覆寫。",
+    "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION": "600",
+    "CLAUDE_CODE_WEB_SEARCH_REFILLS_PER_HOUR": "300"
+  }
+}

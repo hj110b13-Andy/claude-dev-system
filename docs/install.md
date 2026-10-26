@@ -16,3 +16,4 @@
 - 不會覆蓋同名但不是本工具裝的 skill 資料夾（會印 ⚠️ 並略過）。
 - 已有你自己的 `usage_guard.py` hook 時不重複註冊（verify 會顯示「使用者既有條目在作用」）。想改由本工具管理：先從 settings.json 移除你自己的那兩條，再 `update`。
 - 不在 settings.json 加任何非官方鍵；版本與安裝紀錄放在 `~/.claude/claude-dev-system/manifest.json`。
+- 不碰 MCP 設定與 `env`——除非你加 `--with-web`（或之後跑 `install.py web`）；那時也只用官方 `claude mcp add --scope user` 註冊、只寫 `env` 裡本工具登記的鍵，見 `docs/web-sources.md`。

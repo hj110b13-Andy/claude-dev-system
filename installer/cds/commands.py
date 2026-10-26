@@ -1,13 +1,14 @@
 """子命令實作：install／update（共用 apply）、uninstall、verify、status。"""
 from __future__ import annotations
 
+import copy
 import datetime as _dt
 import py_compile
 import shutil
 from pathlib import Path
 
 from . import HOOK_MARK, SKILL_MARKER_FILE
-from . import claudemd, manifest as mf, payload, settings_ops
+from . import claudemd, manifest as mf, payload, settings_ops, web
 from .checks import claude_code_status, parse_ver
 from .fsio import atomic_write_bytes, read_json, sha256_bytes, sha256_file, write_json
 from .paths import REPO, Layout, repo_version
@@ -134,7 +135,35 @@ def _sync_claude_md(lay: Layout, repo: Path, version: str, old: dict, new: dict,
         log.append("CLAUDE.md 區塊已是最新")
 
 
-def apply(lay: Layout, python: str, repo: Path = REPO, force: bool = False, mode: str = "install") -> tuple:
+def _sync_web(lay: Layout, old: dict, new: dict, enable: bool, runner, log: list) -> None:
+    """聯網來源（選用）：enable 時對齊 MCP 與 env；關閉時移除本工具加過的；都只動自己登記過的項目。"""
+    old_web = {**web.empty_record(), **(old.get("web") or {})}
+    if not enable:
+        if old_web["mcpAdded"] or old_web["envCreatedKeys"]:
+            web.remove_mcp(lay, old_web, runner, log)
+            s, _ = _read_settings(lay)
+            s2, removed = web.remove_env(s, old_web["envCreatedKeys"])
+            if s2 != s:
+                write_json(lay.settings, s2)
+                log.extend(f"settings.json 移除 env {k}" for k in removed)
+        new["web"] = web.empty_record()
+        return
+    rec = web.sync_mcp(lay, old_web, runner, log)
+    s, _ = _read_settings(lay)
+    s2, created, skipped = web.apply_env(s, web.desired_env(web.sources(lay), web.load_local(lay)), old_web["envCreatedKeys"])
+    for k in skipped:
+        log.append(f"{WARN} settings.json 的 env 不是物件，略過 env 寫入" if k == "env" else f"{WARN} env {k} 為使用者自行設定，不覆蓋")
+    if s2 != s:
+        write_json(lay.settings, s2)
+        before = s.get("env") if isinstance(s.get("env"), dict) else {}
+        log.extend(f"settings.json 寫入 env {k[4:]}={s2['env'][k[4:]]}" for k in created
+                   if k.startswith("env.") and before.get(k[4:]) != s2["env"][k[4:]])
+    new["web"] = {"enabled": True, "mcpAdded": rec["mcpAdded"], "envCreatedKeys": created, "skipped": rec["skipped"]}
+
+
+def apply(lay: Layout, python: str, repo: Path = REPO, force: bool = False, mode: str = "install",
+          with_web: bool | None = None, runner=web.default_runner) -> tuple:
+    """with_web：True 開啟聯網來源、False 關閉、None 沿用已安裝的狀態。"""
     log: list = []
     old = mf.load(lay.manifest)
     if mode == "install" and old and old.get("version"):
@@ -157,12 +186,63 @@ def apply(lay: Layout, python: str, repo: Path = REPO, force: bool = False, mode
     _sync_files(lay, repo, version, old, new, force, log)
     _sync_settings(lay, python, old, new, log)
     _sync_claude_md(lay, repo, version, old, new, force, log)
+    enable = bool((old.get("web") or {}).get("enabled")) if with_web is None else with_web
+    _sync_web(lay, old, new, enable, runner, log)
     mf.save(lay.manifest, new)
-    log.append(f"{OK} {'安裝' if mode == 'install' else '更新'}完成 v{version}；安裝紀錄 {lay.manifest}")
-    return 0, log
+    failed = any(x.startswith(BAD) for x in log)
+    log.append(f"{BAD if failed else OK} {'安裝' if mode == 'install' else '更新'}{'完成但有項目失敗（見上方 ❌）' if failed else '完成'} v{version}；安裝紀錄 {lay.manifest}")
+    return (1 if failed else 0), log
 
 
-def uninstall(lay: Layout, force: bool = False, restore_backup: bool = False) -> tuple:
+def web_config(lay: Layout, keys=(), enable=(), disable=(), env=(), off: bool = False, show: bool = False,
+               runner=web.default_runner) -> tuple:
+    """`install.py web`：改本機偏好（local.json）後立即套用；--off 關閉並移除；--show 只顯示。"""
+    m = mf.load(lay.manifest)
+    if not m:
+        return 2, ["尚未安裝（找不到 manifest），請先 `install`"]
+    log: list = []
+    try:
+        local = web.load_local(lay)
+    except ValueError as e:
+        return 2, [str(e)]
+    names = set((web.sources(lay).get("mcpServers") or {}).keys())
+    bad = [n for n in (*enable, *disable) if n not in names]
+    if bad:
+        return 2, [f"不認識的 MCP 名稱：{', '.join(bad)}；可用：{', '.join(sorted(names))}"]
+    try:
+        for kv in keys:
+            web.set_key_arg(local, kv)
+        for kv in env:
+            web.set_env_arg(local, kv)
+    except ValueError as e:
+        return 2, [str(e)]
+    for n in enable:
+        local["enable"] = sorted(set(local.get("enable", [])) | {n})
+        local["disable"] = [x for x in local.get("disable", []) if x != n]
+    for n in disable:
+        local["disable"] = sorted(set(local.get("disable", [])) | {n})
+        local["enable"] = [x for x in local.get("enable", []) if x != n]
+    if keys or env or enable or disable:
+        web.save_local(lay, local)
+        log.append(f"本機偏好已寫入 {web.local_path(lay)}（不進 repo、update／uninstall 不動）")
+    if show:
+        want = web.desired_servers(web.sources(lay), local)
+        head = "將啟用的 MCP：" if m["web"].get("enabled") else "啟用後將註冊的 MCP（目前未啟用；`install.py web` 或 `update --with-web` 可開）："
+        log.append(head + (", ".join(f"{n} → {web.mask(v['url'], local)}" for n, v in want.items()) or "無"))
+        log.append("env：" + ", ".join(f"{k}={v}" for k, v in web.desired_env(web.sources(lay), local).items()))
+        log.append("本機金鑰：" + (", ".join(sorted(k for k, v in (local.get('keys') or {}).items() if v)) or "無"))
+        log.append(f"目前狀態：{'已啟用' if m['web'].get('enabled') else '未啟用'}；已註冊 {', '.join(m['web'].get('mcpAdded', [])) or '無'}")
+        return 0, log
+    new = copy.deepcopy(m)
+    new["backups"] = list(m.get("backups", [])) + [backup(lay, log)]
+    _sync_web(lay, m, new, not off, runner, log)
+    new["updatedAt"] = _dt.datetime.now().isoformat(timespec="seconds")
+    mf.save(lay.manifest, new)
+    log.append(f"{OK} 聯網來源{'已關閉並移除' if off else '已套用'}；重開 Claude Code 對話後生效（`/mcp` 可看連線狀態）")
+    return (1 if any(x.startswith(BAD) for x in log) else 0), log
+
+
+def uninstall(lay: Layout, force: bool = False, restore_backup: bool = False, runner=web.default_runner) -> tuple:
     log: list = []
     m = mf.load(lay.manifest)
     if not m:
@@ -170,9 +250,12 @@ def uninstall(lay: Layout, force: bool = False, restore_backup: bool = False) ->
         m = mf.empty()
     backup(lay, log)
     home = lay.home
+    web.remove_mcp(lay, m.get("web") or {}, runner, log)
     if lay.settings.exists():
         s = read_json(lay.settings)
         s2, removed = settings_ops.remove_marked(s, m["settings"].get("createdKeys"))
+        s2, env_removed = web.remove_env(s2, (m.get("web") or {}).get("envCreatedKeys"))
+        removed += [f"env {k}" for k in env_removed]
         if removed:
             first = next((b for b in m.get("backups", []) if b.get("settings")), None)
             if m["settings"].get("createdFile") and s2 == {}:
@@ -183,9 +266,11 @@ def uninstall(lay: Layout, force: bool = False, restore_backup: bool = False) ->
                 log.append("移除後內容與安裝前備份逐鍵相等，已還原原檔（含原排版）")
             else:
                 write_json(lay.settings, s2)
-            log.extend(f"移除 hook {r}" for r in removed)
+            log.extend(f"移除 {'' if r.startswith('env ') else 'hook '}{r}" for r in removed)
         else:
             log.append("settings.json 沒有本工具的條目（未寫入）")
+    if web.local_path(lay).exists():
+        log.append(f"{WARN} 保留本機偏好 {web.local_path(lay)}（含你的金鑰；不需要請自行刪除）")
     if lay.claude_md.exists():
         md = m.get("claudeMd") or {}
         t = lay.claude_md.read_text(encoding="utf-8")
@@ -281,6 +366,7 @@ def verify(lay: Layout, repo: Path | None = REPO, check_claude: bool = True) -> 
             rows.append((OK, f"{event} hook：使用者既有的 usage_guard 條目在作用（本工具未重複註冊）"))
         else:
             rows.append((BAD, f"{event} hook 不存在"))
+    rows.extend(web.verify_rows(lay, m.get("web") or {}, s))
     try:
         cfile = lay.payload / "_verify.pyc"
         py_compile.compile(str(lay.payload / "hooks" / "usage_guard.py"), cfile=str(cfile), doraise=True)
@@ -324,5 +410,6 @@ def status(lay: Layout, repo: Path = REPO) -> tuple:
         f"安裝於 {m.get('installedAt')}，最後更新 {m.get('updatedAt')}；來源 {m.get('repo')}",
         f"檔案 {len(m['files'])} 個；skills：{', '.join(m.get('skills', []))}",
         f"本工具 hook 條目 {marked} 條；沿用使用者既有 hook {len(m['settings'].get('hooksSkippedExisting', []))} 條（標記 {HOOK_MARK}）",
+        f"聯網來源：{'已啟用，MCP ' + (', '.join(m['web'].get('mcpAdded', [])) or '無') if m.get('web', {}).get('enabled') else '未啟用（`install.py web` 可開）'}",
         f"備份 {len(m.get('backups', []))} 次，最近：{last.get('settings')}",
     ]

@@ -20,6 +20,7 @@ def empty() -> dict:
         "skills": [],
         "claudeMd": {"blockSha256": None, "sep": "", "createdFile": False},
         "settings": {"hooksAdded": [], "hooksSkippedExisting": [], "createdKeys": [], "createdFile": False},
+        "web": {"enabled": False, "mcpAdded": [], "envCreatedKeys": [], "skipped": []},  # 聯網來源（選用）
         "backups": [],
     }
 
@@ -36,7 +37,14 @@ def _m0_to_1(m: dict) -> dict:
     return base
 
 
-MIGRATIONS = {0: _m0_to_1}  # 新增 schema 版本時在這裡加 {舊版: 函式}，並寫進 CHANGELOG
+def _m1_to_2(m: dict) -> dict:
+    """1 → 2：補 web 紀錄（0.3.0 聯網來源）；舊安裝視為未啟用。"""
+    m.setdefault("web", empty()["web"])
+    m["schemaVersion"] = 2
+    return m
+
+
+MIGRATIONS = {0: _m0_to_1, 1: _m1_to_2}  # 新增 schema 版本時在這裡加 {舊版: 函式}，並寫進 CHANGELOG
 
 
 def migrate(m: dict) -> dict:

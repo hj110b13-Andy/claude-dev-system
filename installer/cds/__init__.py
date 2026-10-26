@@ -2,4 +2,4 @@
 MARK = "claude-dev-system"
 HOOK_MARK = "# claude-dev-system"
 SKILL_MARKER_FILE = ".claude-dev-system"
-MANIFEST_SCHEMA = 1
+MANIFEST_SCHEMA = 2  # 2：新增 web（聯網來源）紀錄
