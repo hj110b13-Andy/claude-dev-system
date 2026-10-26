@@ -23,14 +23,14 @@
     "context7": {
       "url": "https://mcp.context7.com/mcp",
       "default": true,
-      "tools": ["resolve-library-id", "get-library-docs"],
+      "tools": ["resolve-library-id", "query-docs"],
       "keyHeader": "CONTEXT7_API_KEY",
       "note": "免金鑰；任何程式庫的最新官方文件（寫程式時查 API 現況，不靠模型過期記憶）。免費註冊 context7.com/dashboard 拿金鑰可提高速率，以 CONTEXT7_API_KEY header 傳。2026-10-26 實測端點存活。"
     },
     "deepwiki": {
       "url": "https://mcp.deepwiki.com/mcp",
       "default": true,
-      "tools": ["read_wiki_structure", "read_wiki_contents", "ask_question"],
+      "tools": ["read_wiki_structure", "read_wiki_contents", "ask_wiki_question"],
       "note": "免金鑰、免註冊（Cognition／Devin 官方）；任何公開 GitHub repo 的自動生成文件，可直接問「這個 repo 的 X 怎麼運作」。私有 repo 需 Devin 帳號，本工具不處理。"
     },
     "mslearn": {

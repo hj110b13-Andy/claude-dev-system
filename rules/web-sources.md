@@ -7,8 +7,8 @@
 
 1. 內建 `WebSearch`／`WebFetch`：一般問題永遠先用。限制：索引偏美國（工具說明寫 US-only）；每場 session 預設 200 次、每小時補 100 次（安裝器 `--with-web` 放寬到 `config/web-sources.json` 的值）。
 2. **文件類問題直接用文件 MCP**（比搜尋引擎準、省來回）：
-   - 某程式庫／框架的 API 怎麼用、參數、版本差異 → `context7`（`resolve-library-id` 找到庫 → `get-library-docs`）。
-   - 某個公開 GitHub repo 的架構、某段邏輯在哪、怎麼運作 → `deepwiki`（`read_wiki_structure` → `read_wiki_contents`，或直接 `ask_question`）。
+   - 某程式庫／框架的 API 怎麼用、參數、版本差異 → `context7`（`resolve-library-id` 找到庫 → `query-docs`）。
+   - 某個公開 GitHub repo 的架構、某段邏輯在哪、怎麼運作 → `deepwiki`（`read_wiki_structure` → `read_wiki_contents`，或直接 `ask_wiki_question`）。
    - Windows、PowerShell、.NET、Azure、Office 的官方說法（例如「PowerShell 5.1 有沒有這個參數」）→ `mslearn`。
 3. 搜尋 MCP（內建搜不到、結果太薄、來源偏美國、或已撞上限時）。索引不同，互補：
    - `parallel`（`web_search`／`web_fetch`）：自建索引，回傳壓縮過的相關段落，省 token；一次可下多個查詢。
