@@ -4,6 +4,7 @@
 
 ## 0.4.7（2026-10-27）
 
+- 補 1a「最後手段」六項（站內搜尋／Google 地圖照片評論、官方 PDF 與開放資料集、Wayback Machine、換語言、deepwiki 問 repo、Tavily 整站爬）並明寫「規則沒列的現有工具用法可主動嘗試並回報」。來源：使用者問「管道都找不到時會不會自己換方法」；CODiS 即為先例。
 - 規則新增 2a「社群、論壇、部落格」：逐站實測（parallel／exa）——Mobile01、巴哈姆特、Dcard、PTT、Reddit、Forumosa 整篇含回覆可查；Threads 僅本文；Facebook 社團在登入牆後只能用 Claude in Chrome。查法：`site:` 限定、跨兩站、標「網友說法」與日期。
 - 規則新增 2b「程式與技術難題」：錯誤訊息逐字用 exa 查 GitHub issue／Stack Overflow；Claude Code 自身問題查 anthropics/claude-code issues；修法須安全且本機實測。實例：`Missing Subject Key Identifier` 根因為 Python 3.13+ `VERIFY_X509_STRICT` 遇 TWCA 根憑證缺 SKI（cpython #107361、requests #6945），正確修法只清該旗標、不關驗證；據此更正環境部與 CODiS 兩處「用 curl」的說法。
 - `core.md` 加社群與程式難題分流一句。
