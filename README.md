@@ -44,11 +44,33 @@ python installer/install.py verify     # 全部 ✅ 才算完成；重開 Claude
 ## 選用：聯網來源
 
 ```bash
-python installer/install.py update --with-web            # 放寬內建 WebSearch 上限＋註冊免金鑰 MCP（搜尋 parallel、exa；文件 context7、deepwiki、mslearn）
-python installer/install.py web --key cwa=CWA-xxxx       # 選用：中央氣象署授權碼（金鑰只存本機 local.json）
-python installer/install.py web --key tavily=tvly-xxxx --enable tavily
+python installer/install.py update --with-web            # 放寬內建 WebSearch 上限＋UTF-8 env＋註冊免金鑰 MCP（搜尋 parallel、exa；文件 context7、deepwiki、mslearn）
+python installer/install.py web --key cwa=… --key moenv=… --key openaq=… --key tdx_id=… --key tdx_secret=… --key tavily=… --enable tavily
+python installer/install.py web --enable firecrawl       # 選用：JS 頁面抓取，與 parallel 重疊，預設關
 ```
-預設不啟用。用官方 `claude mcp add --scope user` 註冊，不覆蓋你自己同名的 MCP 或 env；`web --off` 或 `uninstall` 只移除本工具登記過的。規則 `rules/web-sources.md` 列出實測過的免金鑰開放 API（天氣、空氣品質、地震、匯率、加密貨幣、台股／美股、全球新聞、論文、假日、百科、地理編碼、航班位置）與選擇規則。細節：`docs/web-sources.md`。
+預設不啟用。用官方 `claude mcp add --scope user` 註冊，不覆蓋你自己同名的 MCP 或 env；`web --off` 或 `uninstall` 只移除本工具登記過的。規則 `rules/web-sources.md` 列出實測過的免金鑰開放 API（天氣、空氣品質、地震、潮汐、匯率、加密貨幣、台股／美股、全球新聞、論文、假日、百科、地理編碼、航班位置、停車場）、社群論壇與程式難題的查法、查證型回答格式。細節：`docs/web-sources.md`。
+
+## 新裝置安裝流程（給在新裝置上執行安裝的 Claude Code 看）
+
+照順序做；**每個「問」都要停下來問使用者，不可自行決定**。
+
+1. `check` → 缺 Python ≥3.10、git、`claude` 指令任一就先請使用者裝好。
+2. **問：要不要啟用聯網來源？**（建議要；不啟用則只有規則沒有工具）→ 要就 `install --with-web`，否則 `install`。
+3. **問：有哪些金鑰要填？** 逐一列出，使用者有的才填，沒有的跳過、功能自動退回免金鑰來源：
+   | 金鑰名 | 用途 | 沒填的影響 |
+   |---|---|---|
+   | `cwa` | 中央氣象署：台灣鄉鎮預報、潮汐、地震報告、警特報 | 天氣退回 Open-Meteo（全球模式），潮汐只能用農曆推算 |
+   | `moenv` | 環境部：台灣各測站官方空品 | 退回 Open-Meteo 模式值 |
+   | `openaq` | OpenAQ：國外官方測站空品 | 同上 |
+   | `tdx_id`＋`tdx_secret` | 交通部 TDX：停車場平面／立體、車位、費率 | 停車場只能靠網頁 |
+   | `tavily` | 搜尋＋擷取＋整站爬（填了要加 `--enable tavily`） | 少一個搜尋索引；可改免金鑰模式 `--enable tavily` 不填金鑰 |
+   金鑰由使用者**自己在終端機**輸入 `web --key 名稱=值`，不要請使用者貼在對話裡。
+4. **問：要不要開 firecrawl？**（預設關；只有常抓 JS 重的頁面才需要）。
+5. `verify` 全 ✅ 才算完成；請使用者**重開 Claude Code 對話**。
+6. **問：要不要啟用 Claude in Chrome？**（開網頁看狀況、操作需登入的網站、FB 社團、測自己的網站都靠它）→ 要就請使用者裝 Chrome 擴充「Claude in Chrome」、同帳號登入、在對話打 `/chrome` 開「Enabled by default」。這不是安裝器能做的。
+7. **告知（不代做）：Windows 系統碼頁**。安裝器已用 env 修好 Python 子程序的中文輸出；若使用者還常遇到 PowerShell 5.1 讀無 BOM 檔亂碼，可自行開啟 Windows「Beta: 使用 Unicode UTF-8 提供全球語言支援」並重開機；副作用與取捨見 `rules/web-sources.md`「Windows 亂碼的三個根源與修法」。Claude 不可代改系統設定。
+8. **問：訂閱方案與用量門檻**。`config/dispatch-config.json` 預設 pro（80／97%）；使用者若是 Max 方案，請他改 `plan.current`、`plan.until` 與門檻（例如 max5x 95／99），安裝器之後 update 會保留他的版本。
+9. 已裝過舊版的機器：`git pull` → `update --with-web` → 補金鑰 → `verify`。
 
 ## 更新
 
