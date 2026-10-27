@@ -1,7 +1,7 @@
 # claude-dev-system
 
 把 Stock-web 專案系統優化中「成熟且驗證過」的通用流程，封裝成可跨專案、跨裝置安裝的 Claude Code 全域工具。
-版本見 `config/VERSION`（目前 0.6.2），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
+版本見 `config/VERSION`（目前 0.6.3），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
 
 ## 內容與分層
 
@@ -10,7 +10,6 @@
 | `rules/` | 通用規則（分層說明見 `rules/README.md`）；`core.md` 是唯一會進 CLAUDE.md 的部分 | `claude-dev-system/rules/`；`core.md` 另合併進 `CLAUDE.md` 標記區塊 |
 | `skills/` | `cds-agent-dispatch`、`cds-safe-refactor`、`cds-doc-governance`、`cds-feedback-audit`（皆有 frontmatter） | `skills/<名稱>/`（Claude Code 原生個人 skill 位置） |
 | `hooks/usage_guard.py` | 用量守門 hook（通用版；門檻讀設定檔） | `claude-dev-system/hooks/`，並在 `settings.json` 註冊 UserPromptSubmit／PostToolUse |
-| `hooks/task-board/` | 任務看板 mod 來源（**專案專屬**：讀 Stock-web 的 PROGRESS.md），`hooks/.claude-plugin/marketplace.json` 是本機 marketplace | 不自動安裝；要用的專案在 `.claude/settings.json` 以 `extraKnownMarketplaces`＋`enabledPlugins` 啟用 |
 | `tools/` | `depgraph.py`（依賴圖／循環閘門）、`moduleInventory.py`（模組盤點）、`progress-diff.py`（文件瘦身逐句比對）、`video.py`（影片：搜尋、逐字稿、截圖、數據、Gemini 問答；選用，需 `--with-video`）；不寫死路徑，全用參數 | `claude-dev-system/tools/` |
 | `config/` | `VERSION`、`compat.json`、`dispatch-config.json`（用量門檻、方案期間、模型表；專案 `.claude/dispatch-config.json` 優先於全域）、`web-sources.json`（聯網來源：免金鑰搜尋 MCP 與 WebSearch 上限 env，選用）、`video.json`（影片來源：要 pip 的套件與 video.py 預設值，選用） | `claude-dev-system/config/`（dispatch-config 可自行修改，更新時保留；本機金鑰與開關在 `local.json`，不進 repo） |
 | `installer/` | `install.py`＋`cds/` 模組（只用 Python 標準庫） | — |

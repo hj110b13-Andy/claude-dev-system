@@ -2,6 +2,11 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.6.3（2026-10-28）
+
+- 移除 `hooks/task-board/`、`hooks/.claude-plugin/marketplace.json`、`hooks/board_server.py`：三者是 Stock-web 專案專屬（寫死本機路徑與使用者帳號名 7 處），且 Stock-web 已有逐位元相同的副本在 `tools/claude-setup/`，該專案 settings 也只引用自己的 `stockweb-tools` marketplace，本 repo 這份沒有任何引用。安裝器 payload 本來就不含它們，安裝行為不變。來源：使用者問「假設把 repo 公開會有什麼風險」→ 掃出唯一含個人路徑的檔就是這個 mod；使用者指示「做第①項」。
+- 文件：README 內容表、compatibility、cross-device 同步。
+
 ## 0.6.2（2026-10-28）
 
 - 新增 repo 根目錄 `CLAUDE.md`：新裝置 clone 後在此目錄開 Claude Code 會自動載入，指示它照 README「新裝置安裝流程」逐項詢問選用項目與金鑰、不印金鑰值、verify 全過才算完成。來源：使用者問「clone 到新裝置請該裝置的 Claude Code 架設就可以了嗎？也會詢問各項選用、金鑰、工具嗎？」——此前只有 README 有流程，沒有自動載入的入口。

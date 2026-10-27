@@ -13,7 +13,7 @@
 - 使用者層 `~/.claude/CLAUDE.md`（每個專案都載入）。
 - 使用者層 skills：`~/.claude/skills/<名稱>/SKILL.md`（`claude plugin init --help` 亦以此為個人擴充位置）。
 - 使用者層 `settings.json` 的 `hooks`（UserPromptSubmit、PostToolUse，`type: command`，`hookSpecificOutput.additionalContext` 注入上下文）。
-- plugin／marketplace（`claude plugin validate hooks` 通過）：只用於專案專屬的 task-board mod。
+- plugin／marketplace：本 repo 不再附任何 mod（task-board 屬 Stock-web 專案，已移回該專案 `tools/claude-setup/`，0.6.3）。
 
 ## 設定檔版本
 - `manifest.json`、`compat.json`、`dispatch-config.json` 皆有 `schemaVersion`。manifest 遷移在 `installer/cds/manifest.py`（`MIGRATIONS`，目前含 0→1 範例）。

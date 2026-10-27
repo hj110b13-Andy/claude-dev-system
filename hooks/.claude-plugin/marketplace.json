@@ -1,7 +1,0 @@
-{
-  "name": "claude-dev-system",
-  "owner": { "name": "hj110b13-Andy" },
-  "plugins": [
-    { "name": "task-board", "source": "./task-board", "description": "任務看板 mod（目前讀 Stock-web 的 PROGRESS.md 與子 agent 路徑，屬專案專屬；只在要用的專案以 enabledPlugins 啟用）" }
-  ]
-}

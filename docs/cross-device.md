@@ -14,7 +14,7 @@
 2. `git clone https://github.com/hj110b13-Andy/claude-dev-system.git ; cd claude-dev-system`（私有 repo，2026-10-18 建立；要先 `gh auth login` 或用有權限的帳號）
 3. `python installer/install.py check` → `install --with-web --with-video` → `verify`（Windows 用 `py -3`）。金鑰（`cwa`、`moenv`、`openaq`、`tdx_id`、`tdx_secret`、`tavily`、`youtube`、`gemini`）在這台另外 `install.py web --key …`；影片要另裝 ffmpeg（與選用的 faster-whisper）；Claude in Chrome 要裝擴充並打 `/chrome`。完整的選用決策清單見 README「新裝置安裝流程」。
 4. 重開 Claude Code。
-5. 有需要的專案（例如 Stock-web）另外照該專案的新裝置文件設定專案專屬項目（task-board mod、專案 hook）。
+5. 有需要的專案（例如 Stock-web）另外照該專案的新裝置文件設定專案專屬項目（task-board mod 與 board_server 在該專案 `tools/claude-setup/`、專案 hook）。
 
 ## 平台
 - Windows：已實測（Windows 11、Python 3.14、Claude Code 2.1.296）。hook 指令以 Git Bash 執行，結尾 `# claude-dev-system` 為註解。
