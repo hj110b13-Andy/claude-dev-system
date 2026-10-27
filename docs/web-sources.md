@@ -45,6 +45,11 @@ python installer/install.py web --off                               # 關閉：�
 - `uninstall` 與 `web --off` 只移除安裝紀錄 `web.mcpAdded`／`web.envCreatedKeys` 登記過的項目；`local.json`（含金鑰）一律保留，不需要請自行刪。
 - `~/.claude.json` 只讀不寫，所有寫入都經官方 `claude mcp add/remove`。
 
+## 瀏覽器與 Windows 亂碼（不在安裝器內，但屬同一套做法）
+
+- **Claude in Chrome**：要實際開網頁看、操作需登入的網站、讀 Facebook 社團／Threads、測自己的網站，用 Claude Code 內建的 Chrome 整合：裝 Chrome 擴充「Claude in Chrome」、同帳號登入、在對話打 `/chrome` 開「Enabled by default」。規則檔第 6 節寫明何時用它、何時不用。
+- **Windows 亂碼根本解**：裝 PowerShell 7 **MSI 版**（`winget install --id Microsoft.PowerShell --source winget --installer-type wix`，Store 版 Claude Code 偵測不到），重開 Claude Code 後 PowerShell 工具自動改用 pwsh，JSON 中文、`Get-Content`、`&&`／三元運算子的坑全部消失；Python 子程序由本工具寫入的 `PYTHONUTF8=1` 解決。系統碼頁 950 不需要改（「Beta: 使用 Unicode UTF-8」副作用大於收益，除非有具體舊程式問題）。細節：`rules/web-sources.md`「Windows 亂碼的三個根源與修法」。
+
 ## 跨裝置
 
 `web-sources.json`、規則、安裝器隨 repo 同步；**是否啟用、金鑰、開關偏好是每台各自的**（`local.json` 不同步）。新裝置：`install --with-web` → 需要的話 `web --key …`。
