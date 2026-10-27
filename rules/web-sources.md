@@ -248,6 +248,7 @@ Claude 不能直接「看」影片（Claude API 只收 JPEG／PNG／GIF／WebP �
 | 指定時間點的畫面 | `frames 網址 --at 12:30,14:05` | 逐字稿說「這個／這裡／看一下」時，截那一秒的畫面；每個時間點一張 |
 | 進行中的直播 | `transcript／frames／ask 網址 --live 300` | 用 ffmpeg 錄 N 秒（10–900）成本機檔再處理；**不是持續監看**，是「錄一段」。實測 24 小時新聞台 45 秒錄 33 秒、語音辨識正確。回答標「直播擷取時間 YYYY-MM-DD HH:MM、N 秒」 |
 | 本機 mp4 | 以上 `transcript`／`frames`／`ask` 都收檔案路徑 | 雲端分享連結要先請使用者下載到本機 |
+| 使用者明說「下載／存檔／存下來」 | `download 網址 [--out 資料夾] [--max-height 1080] [--audio-only]` | 最高畫質影像＋最佳音訊合併 mp4，預設存 `~/Downloads`，印路徑、畫質、大小。**只在使用者明說要存檔時用**，分析用途走快取。2026-10-27 實測 YouTube 1080p 4.5 分鐘影片 154 MB 約 4 分鐘；4K 檔約 4 倍大且速度同樣每秒約 0.6 MB，超過 1080p 先告知預估大小與時間再下載。要登入的站用 `--cookies-from-browser firefox` 或擴充套件匯出的 `--cookies cookies.txt`（Windows 的 Chrome 127+ cookie yt-dlp 解不開：yt-dlp issue #10927、#15401）。做不到的：DRM 串流平台（Netflix 等）；Bilibili 抓取器 2026-10-21 起壞掉（issue #17879、PR #17898 待合併），先更新 yt-dlp 再試；抖音要 cookie。下載只供個人使用，再散布須授權 |
 
 **選擇規則（可判定）**：
 - 使用者問「這支影片講什麼／提到哪些店、哪些重點」→ `transcript` 後**必須 Read 整份逐字稿檔**（路徑印在第一行）再寫摘要；螢幕上的前 40 行只是預覽，只憑預覽寫摘要＝轉述不完整。問「有沒有提到 X」→ `--grep X`。**不可**拿搜尋引擎摘要、標題、留言當影片內容。

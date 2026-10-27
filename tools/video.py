@@ -15,6 +15,7 @@
   stats   網址                                      觀看／按讚／留言數、發布時間（YouTube Data API，需 `youtube` 金鑰）
   comments 網址 [-n 20]                             熱門留言（YouTube Data API，需 `youtube` 金鑰）
   ask     網址|檔案 "問題" [--model gemini-flash-latest] [--clip 開始 結束]   Gemini 真的看影片（需 `gemini` 金鑰；公開 YouTube 免下載）
+  download 網址 [--out 資料夾] [--max-height 1080] [--audio-only] [--cookies-from-browser firefox | --cookies cookies.txt]   使用者要存檔時：最高畫質下載（預設 ~/Downloads）
   setup                                              檢查依賴與金鑰
   clean   [--older-than 30] [--all] [--media-only]    清快取（影音檔大，逐字稿小）；每次執行也會自動清超過 7 天沒用的影音檔、30 天的整個資料夾
 
@@ -193,6 +194,9 @@ def canonical(src: str) -> str:
 def ydl_opts(extra: dict | None = None) -> dict:
     o = {"quiet": True, "no_warnings": True, "noprogress": True, "sleep_interval_requests": CFG["sleepBetweenRequests"],
          "socket_timeout": 30, "retries": 2}
+    # YouTube 要用 JS runtime 解挑戰，否則缺高畫質格式、下載被限速（yt-dlp wiki/EJS）。deno 預設；沒有就用 node（≥22）。
+    if not shutil.which("deno") and shutil.which("node"):
+        o["js_runtimes"] = {"node": {}}
     if extra:
         o.update(extra)
     return o
@@ -943,6 +947,49 @@ def auto_clean() -> None:
         pass
 
 
+def cmd_download(a) -> int:
+    """使用者明說要「下載／存檔」時才用：最高畫質影像＋最佳音訊合併 mp4，存到 --out（預設 ~/Downloads）。分析用途不走這裡（走快取）。"""
+    yt_dlp = need_ytdlp()
+    out_dir = Path(a.out).expanduser() if a.out else Path.home() / "Downloads"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    h = f"[height<={a.max_height}]" if a.max_height else ""
+    fmt = "bestaudio/best" if a.audio_only else f"bestvideo{h}+bestaudio/best{h}/best"
+    opts = ydl_opts({"format": fmt, "outtmpl": str(out_dir / "%(title).120B [%(id)s].%(ext)s"), "noprogress": False, "quiet": False,
+                     "merge_output_format": None if a.audio_only else "mp4", "windowsfilenames": sys.platform == "win32",
+                     "writethumbnail": False, "noplaylist": True})
+    if a.audio_only:
+        opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}]
+    ff = find_ffmpeg()
+    if ff:
+        opts["ffmpeg_location"] = str(Path(ff).parent)
+    if a.cookies_from_browser:
+        if sys.platform == "win32" and a.cookies_from_browser.lower() in ("chrome", "edge", "brave", "chromium", "opera", "vivaldi"):
+            warn("Windows 上 Chrome 127+ 系列瀏覽器的 cookie 用程序綁定加密，yt-dlp 解不開（yt-dlp issue #10927、#15401）；通常會失敗，改用 --cookies-from-browser firefox 或用擴充套件匯出 cookies.txt 後 --cookies 檔案")
+        opts["cookiesfrombrowser"] = (a.cookies_from_browser,)
+    if a.cookies:
+        opts["cookiefile"] = str(Path(a.cookies).expanduser())
+    try:
+        with yt_dlp.YoutubeDL(opts) as y:
+            info = y.extract_info(a.src, download=True)
+            info = y.sanitize_info(info)
+            path = Path(info.get("requested_downloads", [{}])[0].get("filepath") or y.prepare_filename(info))
+    except Exception as e:  # noqa: BLE001
+        s = str(e)
+        if "DRM" in s or "drm" in s:
+            die("這個影片有 DRM 保護（串流平台），無法下載。", 3)
+        if "login" in s.lower() or "cookies" in s.lower() or "需要登录" in s or "大会员" in s:
+            die("這個網站要登入或要瀏覽器 cookie 才給下載／高畫質：用 Firefox 登入過該站後加 `--cookies-from-browser firefox`，或用「Get cookies.txt LOCALLY」類擴充套件在該站匯出 cookies.txt 後加 `--cookies 檔案`（Windows 的 Chrome cookie yt-dlp 解不開）。原文：" + s[:200], 3)
+        if "Unable to extract initial state" in s:
+            die("這個站的抓取器目前壞了（Bilibili 2026-10-21 起，yt-dlp issue #17879／PR #17898）：先 `python -m pip install -U yt-dlp` 看有沒有修好；沒有就等新版，或用 BV 網址加 cookies 再試。原文：" + s[:150], 3)
+        _ydl_error(e)
+    size = path.stat().st_size / 1e6 if path.exists() else 0
+    res = f"{info.get('width')}x{info.get('height')}" if info.get("height") else (info.get("resolution") or "?")
+    print(f"已下載：{path}")
+    print(f"來源站：{info.get('extractor')}；標題：{info.get('title')}；畫質：{res}；長度：{hms(info['duration']) if info.get('duration') else '?'}；大小：{size:.0f} MB")
+    print("提醒：只供個人使用；再散布或商用須取得著作權人授權。")
+    return 0
+
+
 def cmd_clean(a) -> int:
     n, freed = clean_cache(a.older_than, None if a.media_only else a.older_than, force_all=a.all, media_only=a.media_only)
     print(f"清理 {n} 個快取資料夾，釋放 {freed / 1e6:.0f} MB（{cache_root()}）")
@@ -1004,6 +1051,14 @@ def main(argv=None) -> int:
     p.add_argument("--clip", nargs=2, metavar=("開始", "結束"), help="只看這段，例如 --clip 1:20 3:00")
     p.add_argument("--live", type=int, metavar="秒", help="直播：先錄 N 秒再給 Gemini 看")
     p.set_defaults(fn=cmd_ask)
+    p = sub.add_parser("download", help="使用者要存檔時：最高畫質下載到資料夾（預設 ~/Downloads）")
+    p.add_argument("src")
+    p.add_argument("--out", help="輸出資料夾")
+    p.add_argument("--max-height", type=int, help="畫質上限，例如 1080；不給＝最高")
+    p.add_argument("--audio-only", action="store_true", help="只要聲音（m4a）")
+    p.add_argument("--cookies-from-browser", metavar="firefox", help="需要登入的站（Bilibili 高畫質、抖音等）用你瀏覽器的登入狀態；Windows 的 Chrome 系列解不開，用 firefox")
+    p.add_argument("--cookies", metavar="cookies.txt", help="用擴充套件匯出的 Netscape 格式 cookies.txt（任何瀏覽器都可）")
+    p.set_defaults(fn=cmd_download)
     p = sub.add_parser("clean", help="清快取（預設只清 30 天沒動的；--media-only 只刪影音檔留逐字稿）")
     p.add_argument("--older-than", type=float, default=30, metavar="天")
     p.add_argument("--all", action="store_true")

@@ -2,6 +2,13 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.6.1（2026-10-27）
+
+- `video.py download`：使用者明說要存檔時，最高畫質影像＋最佳音訊合併 mp4 存到 `--out`（預設 `~/Downloads`）；`--max-height`、`--audio-only`、`--cookies-from-browser`、`--cookies cookies.txt`；DRM／需登入／抓取器壞掉三種錯誤各給中文指引。實測 YouTube 1080p 4.5 分鐘 154 MB 約 4 分鐘；抖音回「需要 cookie」；Bilibili 回抓取器壞掉（yt-dlp issue #17879、PR #17898，2026-10-21 起）。
+- `ydl_opts` 啟用 JS runtime：沒有 deno 時用 node（yt-dlp wiki/EJS：YouTube 需 JS runtime 解挑戰，否則缺格式或限速）；實測 node 24 解挑戰成功。
+- 查證寫進規則：Windows 上 Chrome／Edge 127+ 的 cookie yt-dlp 解不開（issue #10927、#15401），改用 Firefox 或擴充套件匯出 cookies.txt。來源：使用者問「可以貼任何網址（YouTube、Bilibili、抖音、一般網站）用最高畫質下載嗎？」
+- 附記：本日測試中 exa 免金鑰模式首次撞到 429（「You've hit Exa's free MCP rate limit」），印證規則「撞 429 再考慮註冊」。
+
 ## 0.6.0（2026-10-27）
 
 - `video.py` 新增：`--live 秒數`（transcript／frames／ask；進行中的直播用 ffmpeg 錄 10–900 秒成本機檔再處理，記錄擷取時間；實測台視／東森新聞台 45 秒錄 33 秒、語音辨識正確）、`frames --at 12:30,14:05`（指定時間點截圖）、`info` 顯示直播狀態；自動清理納入 `live_*.mp4`。

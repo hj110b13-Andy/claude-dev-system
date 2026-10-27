@@ -31,6 +31,7 @@ $V stats https://www.youtube.com/watch?v=XXXX                  # 需 youtube 金
 $V comments https://www.youtube.com/watch?v=XXXX -n 20         # 需 youtube 金鑰
 $V ask https://www.youtube.com/watch?v=XXXX "影片裡的招牌寫什麼？" --clip 0:00 1:30   # 需 gemini 金鑰
 $V transcript "D:\影片\demo.mp4"               # 本機檔案同樣可用（transcript／frames／ask）
+$V download https://www.youtube.com/watch?v=XXXX --out "D:\影片"   # 使用者要存檔：最高畫質 mp4；--max-height 1080、--audio-only、--cookies cookies.txt
 $V clean --media-only                          # 刪快取裡的影音檔、留逐字稿
 ```
 
@@ -67,10 +68,19 @@ $V clean --media-only                          # 刪快取裡的影音檔、留�
 
 `--live 秒數`（10–900）用 ffmpeg 從 HLS 串流錄一段成 mp4，之後當本機檔跑逐字稿／截圖／Gemini。這不是持續監看，每次只錄一段；錄的片段存在該影片的快取資料夾 `live_<時間>.mp4`，`live_captures.txt` 記錄每次擷取時間，7 天沒用自動刪。2026-10-27 實測台視與東森 24 小時新聞台：45 秒錄 33 秒，語音辨識中文正確。
 
+## 下載存檔（`download`）
+
+只在使用者明說要「下載／存檔」時用；分析用途一律走快取。最高畫質影像＋最佳音訊合併成 mp4，預設存 `~/Downloads`。實測（2026-10-27）：YouTube 1080p 4.5 分鐘 154 MB 約 4 分鐘；4K 約 4 倍大、速度相同，所以超過 1080p 先告知預估。支援站點同 yt-dlp（1,700+）；已知限制：
+- **DRM** 串流平台（Netflix、Disney+ 等）不可能。
+- **Bilibili**：2026-10-21 起 yt-dlp 抓取器壞掉（「Unable to extract initial state」，issue #17879、修復 PR #17898 待合併）；`python -m pip install -U yt-dlp` 更新後再試，或 BV 網址加 cookies。
+- **抖音**：要瀏覽器 cookie（「Fresh cookies … are needed」）。
+- **cookie 怎麼給**：`--cookies-from-browser firefox`（Firefox 登入過該站即可），或在 Chrome 裝「Get cookies.txt LOCALLY」類擴充套件、在該站匯出 Netscape 格式後 `--cookies cookies.txt`。**Windows 上 Chrome／Edge 127+ 的 cookie yt-dlp 解不開**（程序綁定加密；yt-dlp issue #10927、#15401），工具會直接警告。cookies.txt 含你所有站的登入狀態，不要外流。
+- 下載只供個人使用；再散布或商用須著作權人授權。
+
 ## 不做的事
 
 - 不裝第三方 YouTube MCP：都是本機常駐程序＋各自依賴，底層同樣是 yt-dlp；單檔 CLI 沒有背景程序、跨裝置只要 pip。
-- 不保存、不散布影片；快取只為分析，`clean` 可清。
+- 分析用途不保存影片（快取自動清）；`download` 只在使用者明說存檔時用，且只供個人使用。
 - 不繞 YouTube 的 bot check：被擋（429／「Sign in to confirm you're not a bot」）就停，不換 IP、不塞 cookies。家用網路正常，雲端或 VPN IP 會被擋。
 
 ## 故障排除
