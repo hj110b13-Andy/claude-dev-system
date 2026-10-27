@@ -21,6 +21,7 @@ def empty() -> dict:
         "claudeMd": {"blockSha256": None, "sep": "", "createdFile": False},
         "settings": {"hooksAdded": [], "hooksSkippedExisting": [], "createdKeys": [], "createdFile": False},
         "web": {"enabled": False, "mcpAdded": [], "envCreatedKeys": [], "skipped": []},  # 聯網來源（選用）
+        "video": {"enabled": False, "packages": [], "python": None},  # 影片來源（選用；0.5.0）
         "backups": [],
     }
 
@@ -44,7 +45,14 @@ def _m1_to_2(m: dict) -> dict:
     return m
 
 
-MIGRATIONS = {0: _m0_to_1, 1: _m1_to_2}  # 新增 schema 版本時在這裡加 {舊版: 函式}，並寫進 CHANGELOG
+def _m2_to_3(m: dict) -> dict:
+    """2 → 3：補 video 紀錄（0.5.0 影片來源）；舊安裝視為未啟用。"""
+    m.setdefault("video", empty()["video"])
+    m["schemaVersion"] = 3
+    return m
+
+
+MIGRATIONS = {0: _m0_to_1, 1: _m1_to_2, 2: _m2_to_3}  # 新增 schema 版本時在這裡加 {舊版: 函式}，並寫進 CHANGELOG
 
 
 def migrate(m: dict) -> dict:

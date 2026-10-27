@@ -17,3 +17,4 @@
 - 已有你自己的 `usage_guard.py` hook 時不重複註冊（verify 會顯示「使用者既有條目在作用」）。想改由本工具管理：先從 settings.json 移除你自己的那兩條，再 `update`。
 - 不在 settings.json 加任何非官方鍵；版本與安裝紀錄放在 `~/.claude/claude-dev-system/manifest.json`。
 - 不碰 MCP 設定與 `env`——除非你加 `--with-web`（或之後跑 `install.py web`）；那時也只用官方 `claude mcp add --scope user` 註冊、只寫 `env` 裡本工具登記的鍵，見 `docs/web-sources.md`。
+- 不 pip 裝任何套件——除非你加 `--with-video`（或之後跑 `install.py video`）；那時用執行安裝器的 Python 裝 `config/video.json` 列的套件，`video --off` 只取消登記不解除安裝，見 `docs/video.md`。

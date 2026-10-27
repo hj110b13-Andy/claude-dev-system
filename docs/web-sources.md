@@ -37,6 +37,7 @@ python installer/install.py web --off                               # 關閉：�
 - **環境部空品**：https://data.moenv.gov.tw/ 註冊取 api_key（台灣各測站官方 AQI）。
 - **OpenAQ**：https://explore.openaq.org/register 免費金鑰（全球官方測站空品）。
 - **TDX（交通部）**：https://tdx.transportdata.tw/ 註冊 → 會員中心 → 資料服務 → API 金鑰，取「API 金鑰內容」的 Client Id／Secret：`web --key tdx_id=… --key tdx_secret=…`。免費 5 次／分，只用於停車場等靜態資料單筆查詢。
+- **YouTube Data API（`youtube`）與 Gemini（`gemini`）**：影片來源用，步驟（含實際畫面核對）見 `docs/video.md`。
 
 ## 安裝器怎麼避免動到你的東西
 

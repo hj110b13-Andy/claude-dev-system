@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "_comment": "影片來源（選用）唯一來源。安裝器 `--with-video`／`install.py video` 讀 packages 用執行安裝器的 Python 做 pip install；tools/video.py 讀其餘鍵當預設值。faster-whisper 不在 packages：體積大（ctranslate2＋模型）、GPU 另需 nvidia-cublas-cu12／nvidia-cudnn-cu12，由使用者決定要不要裝（沒裝時只有「沒字幕的影片」無法轉逐字稿）。金鑰 youtube／gemini 在 local.json（web-sources.json localKeys 有列）。",
+  "packages": [
+    "yt-dlp[default,curl-cffi]",
+    "youtube-transcript-api"
+  ],
+  "optionalPackages": {
+    "faster-whisper": "沒字幕時的本機語音辨識（離線、免費、無額度）；NVIDIA GPU 另加 nvidia-cublas-cu12 nvidia-cudnn-cu12"
+  },
+  "cacheDir": "claude-dev-system/cache/video",
+  "whisperModel": "medium",
+  "geminiModel": "gemini-flash-latest",
+  "geminiFallbackModels": ["gemini-2.5-flash", "gemini-3.5-flash"],
+  "preferLangs": ["zh-TW", "zh-Hant", "zh", "zh-Hans", "en", "ja"],
+  "previewLines": 40,
+  "maxFrames": 40,
+  "sceneThreshold": 0.35,
+  "downloadHeight": 720,
+  "sleepBetweenRequests": 1
+}

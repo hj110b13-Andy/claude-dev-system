@@ -206,16 +206,24 @@ class Units(unittest.TestCase):
 
     def test_manifest_migration_from_v0(self):
         m = mf.migrate({"version": "0.0.9", "files": {"a": "b"}})
-        self.assertEqual(m["schemaVersion"], 2)
+        self.assertEqual(m["schemaVersion"], 3)
         self.assertEqual(m["files"], {"a": "b"})
         self.assertIn("settings", m)
         self.assertEqual(m["web"], {"enabled": False, "mcpAdded": [], "envCreatedKeys": [], "skipped": []})
+        self.assertEqual(m["video"], {"enabled": False, "packages": [], "python": None})
 
     def test_manifest_migration_from_v1_keeps_fields(self):
         m = mf.migrate({"schemaVersion": 1, "version": "0.2.1", "files": {"a": "b"}, "skills": ["x"]})
-        self.assertEqual(m["schemaVersion"], 2)
+        self.assertEqual(m["schemaVersion"], 3)
         self.assertEqual(m["skills"], ["x"])
         self.assertFalse(m["web"]["enabled"])
+        self.assertFalse(m["video"]["enabled"])
+
+    def test_manifest_migration_from_v2_keeps_web(self):
+        m = mf.migrate({"schemaVersion": 2, "version": "0.4.9", "files": {}, "web": {"enabled": True, "mcpAdded": ["exa"], "envCreatedKeys": [], "skipped": []}})
+        self.assertEqual(m["schemaVersion"], 3)
+        self.assertEqual(m["web"]["mcpAdded"], ["exa"])
+        self.assertFalse(m["video"]["enabled"])
 
     def test_newer_manifest_schema_rejected(self):
         with self.assertRaises(RuntimeError):
@@ -441,6 +449,105 @@ class WebSources(Base):
         self.assertTrue(any(x.startswith("❌") and "parallel" in x for x in out))
         self.apply(mode="update")  # 重跑會補回
         self.assertEqual(self.verify()[0], 0)
+
+
+def fake_pip(calls: list, fail: bool = False):
+    def run(python: str, packages: list[str]):
+        calls.append((python, list(packages)))
+        return (1, "ERROR: No matching distribution") if fail else (0, "")
+    return run
+
+
+def fake_importer(installed: dict):
+    return lambda mod: installed.get(mod)
+
+
+class VideoSource(Base):
+    PACKAGES = ["yt-dlp[default,curl-cffi]", "youtube-transcript-api"]  # config/video.json
+    FULL = {"yt_dlp": "2026.10.26", "youtube_transcript_api": "", "faster_whisper": "1.2.1"}
+
+    def setUp(self):
+        super().setUp()
+        self.pip_calls: list = []
+
+    def apply(self, mode="install", with_video=None, fail=False):
+        code, log = commands.apply(self.lay, PY, repo=REPO, mode=mode, with_video=with_video, pip=fake_pip(self.pip_calls, fail),
+                                   runner=fake_mcp_runner(self.lay, []))
+        return code, log
+
+    def verify(self, installed=None, ffmpeg="/usr/bin/ffmpeg"):
+        return commands.verify(self.lay, repo=REPO, check_claude=False, importer=fake_importer(installed if installed is not None else self.FULL),
+                               ffmpeg=lambda: ffmpeg)
+
+    def test_default_install_touches_no_video(self):
+        code, _ = self.apply()
+        self.assertEqual(code, 0)
+        self.assertEqual(self.pip_calls, [])
+        self.assertFalse(mf.load(self.lay.manifest)["video"]["enabled"])
+        code, out = self.verify(installed={})
+        self.assertEqual(code, 0, "\n".join(out))
+        self.assertTrue(any("影片來源：未啟用" in x for x in out))
+
+    def test_with_video_installs_records_and_verifies(self):
+        code, log = self.apply(with_video=True)
+        self.assertEqual(code, 0, "\n".join(log))
+        self.assertEqual(self.pip_calls, [(PY, self.PACKAGES)])
+        m = mf.load(self.lay.manifest)
+        self.assertEqual(m["video"], {"enabled": True, "packages": self.PACKAGES, "python": PY})
+        self.assertTrue((self.lay.payload / "config" / "video.json").exists())
+        self.assertTrue((self.lay.payload / "tools" / "video.py").exists())
+        code, out = self.verify()
+        self.assertEqual(code, 0, "\n".join(out))
+        self.assertTrue(any(x.startswith("✅") and "yt-dlp 2026.10.26" in x for x in out))
+        self.assertTrue(any(x.startswith("✅") and "faster-whisper 1.2.1" in x for x in out))
+
+    def test_update_keeps_video_enabled(self):
+        self.apply(with_video=True)
+        code, _ = self.apply(mode="update")
+        self.assertEqual(code, 0)
+        self.assertEqual(len(self.pip_calls), 2, "update 沿用啟用狀態並重跑 pip（升級）")
+        self.assertTrue(mf.load(self.lay.manifest)["video"]["enabled"])
+
+    def test_missing_whisper_is_warning_missing_ytdlp_is_error(self):
+        self.apply(with_video=True)
+        code, out = self.verify(installed={"yt_dlp": "2026.10.26", "youtube_transcript_api": ""})
+        self.assertEqual(code, 0, "\n".join(out))
+        self.assertTrue(any(x.startswith("⚠️") and "faster-whisper" in x for x in out))
+        code, out = self.verify(installed={"youtube_transcript_api": ""})
+        self.assertEqual(code, 1)
+        self.assertTrue(any(x.startswith("❌") and "yt-dlp" in x for x in out))
+        code, out = self.verify(ffmpeg=None)
+        self.assertEqual(code, 1)
+        self.assertTrue(any(x.startswith("❌") and "ffmpeg" in x for x in out))
+
+    def test_pip_failure_sets_exit_code(self):
+        code, log = self.apply(with_video=True, fail=True)
+        self.assertEqual(code, 1)
+        self.assertTrue(any(x.startswith("❌") and "影片套件安裝失敗" in x for x in log))
+        self.assertEqual(mf.load(self.lay.manifest)["video"]["packages"], [])
+
+    def test_video_subcommand_enable_show_off(self):
+        self.apply()
+        code, log = commands.video_config(self.lay, PY, pip=fake_pip(self.pip_calls), importer=fake_importer(self.FULL), ffmpeg=lambda: "ffmpeg")
+        self.assertEqual(code, 0, "\n".join(log))
+        self.assertEqual(self.pip_calls, [(PY, self.PACKAGES)])
+        self.assertTrue(mf.load(self.lay.manifest)["video"]["enabled"])
+        code, log = commands.video_config(self.lay, PY, show=True, importer=fake_importer(self.FULL), ffmpeg=lambda: "ffmpeg")
+        self.assertEqual(code, 0)
+        self.assertTrue(any("yt-dlp" in x for x in log))
+        code, log = commands.video_config(self.lay, PY, off=True, pip=fake_pip(self.pip_calls))
+        self.assertEqual(code, 0)
+        self.assertFalse(mf.load(self.lay.manifest)["video"]["enabled"])
+        self.assertEqual(len(self.pip_calls), 1, "--off 不跑 pip")
+        self.assertTrue(any("pip 套件未移除" in x for x in log))
+
+    def test_keys_listed_in_verify(self):
+        self.apply(with_video=True)
+        web.save_local(self.lay, {"keys": {"youtube": "AIzaX", "gemini": "AQ.Y"}, "enable": [], "disable": [], "env": {}})
+        code, out = self.verify()
+        self.assertEqual(code, 0, "\n".join(out))
+        self.assertTrue(any("影片金鑰：gemini, youtube" in x for x in out))
+        self.assertFalse(any("AIzaX" in x or "AQ.Y" in x for x in out), "金鑰值不得出現在輸出")
 
 
 if __name__ == "__main__":

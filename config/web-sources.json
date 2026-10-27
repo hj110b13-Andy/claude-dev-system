@@ -10,7 +10,9 @@
     "moenv": "環境部 data.moenv.gov.tw api_key",
     "openaq": "OpenAQ explore.openaq.org X-API-Key",
     "tdx_id": "TDX 運輸資料流通服務 API 金鑰 Client Id",
-    "tdx_secret": "TDX API 金鑰 Client Secret（OAuth2 client_credentials 換 token）"
+    "tdx_secret": "TDX API 金鑰 Client Secret（OAuth2 client_credentials 換 token）",
+    "youtube": "YouTube Data API v3 金鑰（Google Cloud 專案；tools/video.py 的 stats／comments／search --api；每天 100 次搜尋＋10,000 單位）",
+    "gemini": "Gemini API 金鑰（Google AI Studio；tools/video.py 的 ask：真的看影片；免費層 YouTube 每天 8 小時）"
   },
   "mcpServers": {
     "parallel": {

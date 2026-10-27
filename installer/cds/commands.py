@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 
 from . import HOOK_MARK, SKILL_MARKER_FILE
-from . import claudemd, manifest as mf, payload, settings_ops, web
+from . import claudemd, manifest as mf, payload, settings_ops, video, web
 from .checks import claude_code_status, parse_ver
 from .fsio import atomic_write_bytes, read_json, sha256_bytes, sha256_file, write_json
 from .paths import REPO, Layout, repo_version
@@ -162,8 +162,8 @@ def _sync_web(lay: Layout, old: dict, new: dict, enable: bool, runner, log: list
 
 
 def apply(lay: Layout, python: str, repo: Path = REPO, force: bool = False, mode: str = "install",
-          with_web: bool | None = None, runner=web.default_runner) -> tuple:
-    """with_web：True 開啟聯網來源、False 關閉、None 沿用已安裝的狀態。"""
+          with_web: bool | None = None, runner=web.default_runner, with_video: bool | None = None, pip=video.default_pip) -> tuple:
+    """with_web／with_video：True 開啟、False 關閉、None 沿用已安裝的狀態。"""
     log: list = []
     old = mf.load(lay.manifest)
     if mode == "install" and old and old.get("version"):
@@ -188,6 +188,8 @@ def apply(lay: Layout, python: str, repo: Path = REPO, force: bool = False, mode
     _sync_claude_md(lay, repo, version, old, new, force, log)
     enable = bool((old.get("web") or {}).get("enabled")) if with_web is None else with_web
     _sync_web(lay, old, new, enable, runner, log)
+    v_enable = bool((old.get("video") or {}).get("enabled")) if with_video is None else with_video
+    new["video"] = video.sync(lay, python, v_enable, pip, log)
     mf.save(lay.manifest, new)
     failed = any(x.startswith(BAD) for x in log)
     log.append(f"{BAD if failed else OK} {'安裝' if mode == 'install' else '更新'}{'完成但有項目失敗（見上方 ❌）' if failed else '完成'} v{version}；安裝紀錄 {lay.manifest}")
@@ -240,6 +242,33 @@ def web_config(lay: Layout, keys=(), enable=(), disable=(), env=(), off: bool = 
     mf.save(lay.manifest, new)
     log.append(f"{OK} 聯網來源{'已關閉並移除' if off else '已套用'}；重開 Claude Code 對話後生效（`/mcp` 可看連線狀態）")
     return (1 if any(x.startswith(BAD) for x in log) else 0), log
+
+
+def video_config(lay: Layout, python: str, off: bool = False, show: bool = False, pip=video.default_pip,
+                 importer=video.default_importer, ffmpeg=video.ffmpeg_path) -> tuple:
+    """`install.py video`：啟用（pip 安裝套件並登記）／--off 取消登記／--show 只檢查。"""
+    m = mf.load(lay.manifest)
+    if not m:
+        return 2, ["尚未安裝（找不到 manifest），請先 `install`"]
+    log: list = []
+    try:
+        keys = (web.load_local(lay).get("keys") or {})
+    except ValueError as e:
+        return 2, [str(e)]
+    if show:
+        rows = video.verify_rows(lay, m.get("video") or video.empty_record(), importer, keys, ffmpeg)
+        if not (m.get("video") or {}).get("enabled"):
+            rows += video.verify_rows(lay, {"enabled": True}, importer, keys, ffmpeg)
+        return 0, [f"{a} {b}" for a, b in rows]
+    new = copy.deepcopy(m)
+    new["video"] = video.sync(lay, python, not off, pip, log)
+    new["updatedAt"] = _dt.datetime.now().isoformat(timespec="seconds")
+    mf.save(lay.manifest, new)
+    if off:
+        log.append(f"{WARN} 已取消登記影片來源；pip 套件未移除（可能被其他程式使用），要刪請自行 `{python} -m pip uninstall yt-dlp youtube-transcript-api`")
+    failed = any(x.startswith(BAD) for x in log)
+    log.append(f"{BAD if failed else OK} 影片來源{'已關閉' if off else ('安裝有誤（見上方 ❌）' if failed else '已啟用；`py -3 ~/.claude/claude-dev-system/tools/video.py setup` 可檢查')}")
+    return (1 if failed else 0), log
 
 
 def uninstall(lay: Layout, force: bool = False, restore_backup: bool = False, runner=web.default_runner) -> tuple:
@@ -326,7 +355,8 @@ def uninstall(lay: Layout, force: bool = False, restore_backup: bool = False, ru
     return 0, log
 
 
-def verify(lay: Layout, repo: Path | None = REPO, check_claude: bool = True) -> tuple:
+def verify(lay: Layout, repo: Path | None = REPO, check_claude: bool = True, importer=video.default_importer,
+           ffmpeg=video.ffmpeg_path) -> tuple:
     rows: list = []
     m = mf.load(lay.manifest)
     if not m:
@@ -367,6 +397,11 @@ def verify(lay: Layout, repo: Path | None = REPO, check_claude: bool = True) -> 
         else:
             rows.append((BAD, f"{event} hook 不存在"))
     rows.extend(web.verify_rows(lay, m.get("web") or {}, s))
+    try:
+        vkeys = web.load_local(lay).get("keys") or {}
+    except ValueError:
+        vkeys = {}
+    rows.extend(video.verify_rows(lay, m.get("video") or {}, importer, vkeys, ffmpeg))
     try:
         cfile = lay.payload / "_verify.pyc"
         py_compile.compile(str(lay.payload / "hooks" / "usage_guard.py"), cfile=str(cfile), doraise=True)
@@ -411,5 +446,6 @@ def status(lay: Layout, repo: Path = REPO) -> tuple:
         f"檔案 {len(m['files'])} 個；skills：{', '.join(m.get('skills', []))}",
         f"本工具 hook 條目 {marked} 條；沿用使用者既有 hook {len(m['settings'].get('hooksSkippedExisting', []))} 條（標記 {HOOK_MARK}）",
         f"聯網來源：{'已啟用，MCP ' + (', '.join(m['web'].get('mcpAdded', [])) or '無') if m.get('web', {}).get('enabled') else '未啟用（`install.py web` 可開）'}",
+        f"影片來源：{'已啟用（' + ', '.join(m['video'].get('packages', [])) + '）' if m.get('video', {}).get('enabled') else '未啟用（`install.py video` 可開）'}",
         f"備份 {len(m.get('backups', []))} 次，最近：{last.get('settings')}",
     ]

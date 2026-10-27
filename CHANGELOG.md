@@ -2,6 +2,14 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.5.0（2026-10-27）
+
+- 新增**影片來源**（選用）：`tools/video.py` 單檔 CLI——`search`（yt-dlp `ytsearch` 免金鑰；`--api` 走 YouTube Data API）、`info`、`transcript`（手動字幕 → YouTube 原生自動字幕，語言須與影片語言一致，否則視為誤判 → 本機 faster-whisper；只印前 40 行、`--grep` 帶 `&t=` 連結、`--start/--end`、`--full`）、`frames`（下載 ≤720p → ffmpeg 場景截圖、自動退回等距、上限張數、index.txt 時間點）、`stats`／`comments`（Data API）、`ask`（Gemini：YouTube 網址免下載、本機檔走 Files API 可續傳上傳、`--clip`、503 重試並換備用模型）、`setup`、`clean`。本機 mp4 走同一入口（併入原 `~/.claude/tools/process_video.py` 的 GPU DLL 預載與 CPU 退回）。實測：車埕搜尋 3 筆、30 分鐘中文影片 GPU 辨識約 3 分鐘、手動字幕 6 行、截圖 12 張可 Read、Data API 數據與留言、Gemini 看 YouTube 與本機片段皆正確。
+- 安裝器：`--with-video`、`install.py video [--off|--show]`、manifest schema 3（`video` 紀錄；2→3 遷移）、`config/video.json`（套件清單與工具預設值）、verify 新增套件／ffmpeg／faster-whisper（⚠️）／金鑰列；`web-sources.json` localKeys 加 `youtube`、`gemini`。7 個新測試，共 43 個通過。
+- 規則：`core.md` 加「影片」與「教使用者操作任何網站或軟體前，先看到那個畫面」兩條；`web-sources.md` 第 9 節（影片：指令表、可判定的選擇規則、IP 等級 bot check 的禮儀、回答格式）、第 10 節（教操作先核對畫面：觸發、做法、分工、寫進文件要標核對日期）。來源：使用者 2026-10-27 原話「教我怎麼做之前，要實際去看我看到的畫面會不會跟你說的完全一樣，這個優化系統都要改」——憑記憶寫的 Google Cloud 步驟漏了兩步驟驗證強制、歡迎條款視窗與建立金鑰側欄表單。
+- 文件：`docs/video.md`（用法、兩把金鑰註冊步驟逐畫面核對、不做的事、故障排除）、README 選用段與新裝置流程第 5 步（影片、faster-whisper）、金鑰表加兩列、cross-device、install、web-sources。
+- 查證來源：Claude Vision 只收四種圖片格式（platform.claude.com/docs/en/build-with-claude/vision）、Gemini 免費層 YouTube 每天 8 小時且預覽版定價會變（ai.google.dev/gemini-api/docs/video-understanding）、YouTube Data API 每天 100 次 search.list（developers.google.com/youtube/data/determine_quota_cost）、額度按專案計（ai.google.dev/gemini-api/docs/rate-limits）、yt-dlp bot check 為 IP 等級（yt-dlp issues #16147、#17904）。
+
 ## 0.4.9（2026-10-27）
 
 - 根本解：規則與 README 新增「裝 PowerShell 7（MSI 版）」——Claude Code 自動偵測 pwsh（官方 tools-reference），MSIX／Store 版偵測不到（issue #55041）；本機以 winget `--installer-type wix` 裝 7.6.9 實測 JSON 中文、三元運算子、無 BOM `Get-Content` 全部正常。README 新裝置流程加第 7 步（問要不要裝 PS7；MU 系統設定由使用者自行開）。

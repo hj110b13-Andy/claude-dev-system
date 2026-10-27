@@ -8,9 +8,11 @@
   --restore-backup  uninstall 後用第一次安裝前的備份還原 settings.json
   --no-claude       verify 時不呼叫 claude --version（測試用）
   --with-web        install／update：同時啟用聯網來源（免金鑰搜尋 MCP＋WebSearch 上限 env；細節 docs/web-sources.md）
+  --with-video      install／update：同時啟用影片來源（pip 裝 yt-dlp 等，讓 tools/video.py 可用；細節 docs/video.md）
 web 子命令（改本機偏好並立即套用；偏好存 <CLAUDE_HOME>/claude-dev-system/config/local.json，不進 repo）：
-  --key 名稱=值     存金鑰（tavily、exa、cwa…）   --enable／--disable 名稱   開關某個 MCP
+  --key 名稱=值     存金鑰（tavily、exa、cwa、youtube、gemini…）   --enable／--disable 名稱   開關某個 MCP
   --env 鍵=值       覆寫 env 值                   --off  關閉聯網來源並移除   --show  只顯示不套用
+video 子命令：不帶參數＝啟用（pip 安裝並登記）；--off 取消登記；--show 只檢查依賴與金鑰
 結束碼：0 成功／全部通過；1 check 或 verify 有 ❌；2 用法或狀態錯誤。
 """
 from __future__ import annotations
@@ -36,12 +38,13 @@ def main(argv=None) -> int:
         return 2
     ap = argparse.ArgumentParser(description="claude-dev-system 安裝器")
     ap.add_argument("--claude-home")
-    ap.add_argument("cmd", choices=["check", "install", "verify", "update", "uninstall", "status", "web"])
+    ap.add_argument("cmd", choices=["check", "install", "verify", "update", "uninstall", "status", "web", "video"])
     ap.add_argument("--python", default=Path(sys.executable).as_posix())
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--restore-backup", action="store_true")
     ap.add_argument("--no-claude", action="store_true")
     ap.add_argument("--with-web", action="store_true")
+    ap.add_argument("--with-video", action="store_true")
     ap.add_argument("--key", action="append", default=[], metavar="名稱=值")
     ap.add_argument("--enable", action="append", default=[], metavar="MCP名稱")
     ap.add_argument("--disable", action="append", default=[], metavar="MCP名稱")
@@ -58,9 +61,12 @@ def main(argv=None) -> int:
         return 1 if any(ok is False for _, ok, _ in rows) else 0
     try:
         if a.cmd in ("install", "update"):
-            code, log = commands.apply(lay, a.python, force=a.force, mode=a.cmd, with_web=True if a.with_web else None)
+            code, log = commands.apply(lay, a.python, force=a.force, mode=a.cmd, with_web=True if a.with_web else None,
+                                       with_video=True if a.with_video else None)
         elif a.cmd == "web":
             code, log = commands.web_config(lay, keys=a.key, enable=a.enable, disable=a.disable, env=a.env, off=a.off, show=a.show)
+        elif a.cmd == "video":
+            code, log = commands.video_config(lay, a.python, off=a.off, show=a.show)
         elif a.cmd == "uninstall":
             code, log = commands.uninstall(lay, force=a.force, restore_backup=a.restore_backup)
         elif a.cmd == "verify":
