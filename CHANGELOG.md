@@ -2,6 +2,11 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.6.2（2026-10-28）
+
+- 新增 repo 根目錄 `CLAUDE.md`：新裝置 clone 後在此目錄開 Claude Code 會自動載入，指示它照 README「新裝置安裝流程」逐項詢問選用項目與金鑰、不印金鑰值、verify 全過才算完成。來源：使用者問「clone 到新裝置請該裝置的 Claude Code 架設就可以了嗎？也會詢問各項選用、金鑰、工具嗎？」——此前只有 README 有流程，沒有自動載入的入口。
+- 查證：掃描全部 38 個 commit，本機 8 把金鑰的真實值與 AIza／AQ.／tvly-／CWA-／ctx7sk-／Bearer／gmail 等樣式皆 0 命中（以 YOUR_API_KEY 等對照字串確認掃描有效）；repo 為 PRIVATE；temp CLAUDE_HOME 模擬新裝置 install → verify 全過 → uninstall 乾淨。
+
 ## 0.6.1（2026-10-27）
 
 - `video.py download`：使用者明說要存檔時，最高畫質影像＋最佳音訊合併 mp4 存到 `--out`（預設 `~/Downloads`）；`--max-height`、`--audio-only`、`--cookies-from-browser`、`--cookies cookies.txt`；DRM／需登入／抓取器壞掉三種錯誤各給中文指引。實測 YouTube 1080p 4.5 分鐘 154 MB 約 4 分鐘；抖音回「需要 cookie」；Bilibili 回抓取器壞掉（yt-dlp issue #17879、PR #17898，2026-10-21 起）。
