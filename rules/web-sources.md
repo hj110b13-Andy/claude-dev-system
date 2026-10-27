@@ -64,9 +64,9 @@ Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔�
 | 名稱 | 預設 | 類型 | 金鑰 | 限制（官方說法） |
 |---|---|---|---|---|
 | parallel | 開 | 搜尋 | 不需要 | 匿名層速率較低，數字未公開 |
-| exa | 開 | 搜尋 | 不需要；有則 `x-api-key` header | 免金鑰有每日與每秒上限，數字未公開；註冊後每月 $10 額度 |
+| exa | 開 | 搜尋 | 不需要；有則 `x-api-key` header | 免金鑰官方只寫「Free rate-limited usage」（數字未公開）；註冊後每月 1 日重置 $10 額度（約 2,500 次 Lite 搜尋），**用完回 402、不會自動退回免金鑰**，撞 402 就 `web --key exa=` 清掉金鑰（exa.ai/docs/admin/billing，2026-10-27 查） |
 | tavily | 關（有金鑰者開） | 搜尋／擷取 | 免金鑰需 header `X-Tavily-Access-Mode: keyless`（只開 search／extract）；有金鑰 `?tavilyApiKey=` | 免費方案 1,000 credits／月（基本搜尋 1、進階 2） |
-| context7 | 開 | 程式庫文件 | 不需要；有則 `CONTEXT7_API_KEY` header | 免金鑰有速率限制（未公開）；免費註冊提高 |
+| context7 | 開 | 程式庫文件 | 不需要；有則 `Authorization: Bearer <key>` header | 免金鑰官方只寫「Low rate limits」（數字未公開）；免費帳號每月 1,000 次、用完每天補 20 次（context7.com/plans，2026-10-27 查） |
 | deepwiki | 開 | GitHub repo 文件 | 不需要 | 未公開；只能查已被 deepwiki.com 索引的公開 repo（沒索引的到該站輸入 repo 即可） |
 | mslearn | 開 | 微軟官方文件 | 不需要 | 未公開 |
 | firecrawl | 關 | JS 頁面抓取 | 不需要 | 依 IP 滾動限流；「while eligible」可能收回 |

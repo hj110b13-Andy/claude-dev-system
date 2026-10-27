@@ -2,6 +2,11 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.5.1（2026-10-27）
+
+- 修正：Context7 金鑰 header 改為官方現行的 `Authorization: Bearer <key>`（原寫 `CONTEXT7_API_KEY`；context7.com/docs/resources/all-clients 的 Claude Code 範例為 `--header "Authorization: Bearer YOUR_API_KEY"`）。`web-sources.json` 新增 `keyHeaderPrefix`，`desired_servers` 支援；加測試（含 `web --key context7=` 清空金鑰回免金鑰）。尚無人填過此金鑰，無實際影響。
+- 補查證：Exa 免金鑰官方只寫「Free rate-limited usage」；有金鑰免費層每月 1 日重置 $10（約 2,500 次 Lite 搜尋），**用完回 402 Payment Required、不會自動退回免金鑰**（exa.ai/docs/admin/billing）；Context7 免費帳號每月 1,000 次、用完每天補 20 次（context7.com/plans）。寫進 MCP 一覽與 docs。來源：使用者問「exa 的每月 10 美元額度用完後就繼續用免費的是嗎？context7 有用跟沒用金鑰的差異？」
+
 ## 0.5.0（2026-10-27）
 
 - 新增**影片來源**（選用）：`tools/video.py` 單檔 CLI——`search`（yt-dlp `ytsearch` 免金鑰；`--api` 走 YouTube Data API）、`info`、`transcript`（手動字幕 → YouTube 原生自動字幕，語言須與影片語言一致，否則視為誤判 → 本機 faster-whisper；只印前 40 行、`--grep` 帶 `&t=` 連結、`--start/--end`、`--full`）、`frames`（下載 ≤720p → ffmpeg 場景截圖、自動退回等距、上限張數、index.txt 時間點）、`stats`／`comments`（Data API）、`ask`（Gemini：YouTube 網址免下載、本機檔走 Files API 可續傳上傳、`--clip`、503 重試並換備用模型）、`setup`、`clean`。本機 mp4 走同一入口（併入原 `~/.claude/tools/process_video.py` 的 GPU DLL 預載與 CPU 退回）。實測：車埕搜尋 3 筆、30 分鐘中文影片 GPU 辨識約 3 分鐘、手動字幕 6 行、截圖 12 張可 Read、Data API 數據與留言、Gemini 看 YouTube 與本機片段皆正確。

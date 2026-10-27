@@ -349,6 +349,17 @@ class WebSources(Base):
         self.assertEqual(e["url"], "https://mcp.exa.ai/mcp")
         self.assertEqual(e["headers"], {"x-api-key": "EXAKEY"})
 
+    def test_context7_key_goes_to_bearer_header(self):
+        self.write_settings(USER_SETTINGS)
+        self.apply(with_web=True)
+        code, log = commands.web_config(self.lay, keys=["context7=ctx7sk-abc"], runner=self.runner)
+        self.assertEqual(code, 0, "\n".join(log))
+        self.assertEqual(self.servers()["context7"]["headers"], {"Authorization": "Bearer ctx7sk-abc"})
+        self.assertFalse(any("ctx7sk-abc" in x for x in log))
+        code, log = commands.web_config(self.lay, keys=["context7="], runner=self.runner)  # 清掉金鑰 → 回免金鑰
+        self.assertEqual(code, 0, "\n".join(log))
+        self.assertNotIn("headers", self.servers()["context7"])
+
     def test_user_own_server_and_env_untouched(self):
         p = web.user_config_path(self.lay)
         p.write_text(json.dumps({"oauth": "keep", "mcpServers": {"exa": {"type": "http", "url": "https://my.exa/mcp"}}}), encoding="utf-8")

@@ -32,7 +32,7 @@
         "web_fetch_exa"
       ],
       "keyHeader": "x-api-key",
-      "note": "免金鑰語意搜尋（用意思找而非關鍵字），與 Parallel／內建索引互補；免金鑰有每日與每秒上限（數字未公開）。有金鑰時以 x-api-key header 傳。"
+      "note": "免金鑰語意搜尋（用意思找而非關鍵字），與 Parallel／內建索引互補；免金鑰官方寫「Free rate-limited usage」（數字未公開）。有金鑰時以 x-api-key header 傳：免費層每月 1 日重置 $10 額度（search 每千次 $4 起，約 2,500 次 Lite 搜尋），額度用完回 402 Payment Required、不會自動退回免金鑰（exa.ai/docs/admin/billing，2026-10-27 查）——撞 402 就 `web --key exa=` 清掉金鑰改回免金鑰。"
     },
     "context7": {
       "url": "https://mcp.context7.com/mcp",
@@ -41,8 +41,9 @@
         "resolve-library-id",
         "query-docs"
       ],
-      "keyHeader": "CONTEXT7_API_KEY",
-      "note": "免金鑰；任何程式庫的最新官方文件（寫程式時查 API 現況，不靠模型過期記憶）。免費註冊 context7.com/dashboard 拿金鑰可提高速率，以 CONTEXT7_API_KEY header 傳。2026-10-26 實測端點存活。"
+      "keyHeader": "Authorization",
+      "keyHeaderPrefix": "Bearer ",
+      "note": "免金鑰；任何程式庫的最新官方文件（寫程式時查 API 現況，不靠模型過期記憶）。免費帳號每月 1,000 次呼叫、用完每天補 20 次（context7.com/plans）；免金鑰官方只寫「Low rate limits」沒給數字。金鑰以 `Authorization: Bearer <key>` header 傳（context7.com/docs/resources/all-clients，2026-10-27 查；金鑰 ctx7sk- 開頭）。2026-10-26 實測端點存活。"
     },
     "deepwiki": {
       "url": "https://mcp.deepwiki.com/mcp",

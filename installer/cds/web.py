@@ -87,7 +87,7 @@ def desired_servers(src: dict, local: dict) -> dict[str, dict]:
             url += ("&" if "?" in url else "?") + f"{spec['keyParam']}={key}"
             headers = dict(spec.get("keyedHeaders") if spec.get("keyedHeaders") is not None else headers)
         elif key and spec.get("keyHeader"):
-            headers[spec["keyHeader"]] = key
+            headers[spec["keyHeader"]] = spec.get("keyHeaderPrefix", "") + key
         out[name] = {"url": url, "headers": headers}
     return out
 
