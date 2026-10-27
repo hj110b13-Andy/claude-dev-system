@@ -245,6 +245,8 @@ Claude 不能直接「看」影片（Claude API 只收 JPEG／PNG／GIF／WebP �
 | 觀看／按讚／留言數 | `stats 網址` | YouTube Data API `videos.list`，1 單位 |
 | 留言 | `comments 網址 -n 20` | YouTube Data API，1 單位；留言是網友說法 |
 | 逐幀理解、畫面動作、招牌文字、無聲影片 | `ask 網址 "問題" [--clip 1:20 3:00]` | Gemini（需 `gemini` 金鑰）：公開 YouTube 免下載；本機檔案走 Files API 上傳。免費層 YouTube 每天 8 小時；官方標示預覽版「Pricing and rate limits are likely to change」（https://ai.google.dev/gemini-api/docs/video-understanding ） |
+| 指定時間點的畫面 | `frames 網址 --at 12:30,14:05` | 逐字稿說「這個／這裡／看一下」時，截那一秒的畫面；每個時間點一張 |
+| 進行中的直播 | `transcript／frames／ask 網址 --live 300` | 用 ffmpeg 錄 N 秒（10–900）成本機檔再處理；**不是持續監看**，是「錄一段」。實測 24 小時新聞台 45 秒錄 33 秒、語音辨識正確。回答標「直播擷取時間 YYYY-MM-DD HH:MM、N 秒」 |
 | 本機 mp4 | 以上 `transcript`／`frames`／`ask` 都收檔案路徑 | 雲端分享連結要先請使用者下載到本機 |
 
 **選擇規則（可判定）**：
@@ -253,6 +255,9 @@ Claude 不能直接「看」影片（Claude API 只收 JPEG／PNG／GIF／WebP �
 - 問「畫面上出現什麼、他做了什麼動作、招牌寫什麼」→ 先 `frames`（免費、可核對）；要跨整段影片或要精確到秒 → `ask`。
 - 語音辨識稿的專有名詞、同音字會錯（實測「肉圓」寫成「肉丸」）：`--grep` 找不到時再試至多 2 個同音字或相關詞，都沒有才寫「逐字稿未提到」；回答時標「語音辨識，專有名詞可能有誤」。
 - 要「數據」（多少人看、什麼時候發、熱門留言）→ `stats`／`comments`；沒 `youtube` 金鑰就用 `info`（觀看數有、按讚留言沒有）並說明。
+- **什麼時候主動找影片（可判定，任一成立）**：①使用者明說查影片；②問題含「實際狀況／現場／體驗／排隊／好不好走／值不值得／大不大／人多不多」這類體驗型字眼；③第 1 節的網頁查證鏈走完仍要寫〔未能確認〕。否則一般事實（營業時間、票價、地址）走網頁，影片成本高（下載＋語音辨識）且較不準。
+- **看幾支**：單一事實 1 支；使用者說「全面／多方／比較各家／整理網友經驗」最多 5 支，每支先只拿逐字稿（不截圖、不 Gemini），要超過 5 支先問使用者。挑選：`search` 結果中近 2 年、觀看數高者優先；長度不限，長片先 `info` 看章節再 `--start/--end` 取段。
+- **語音與畫面相關時**：逐字稿裡要引用的那句含「這個／這裡／這邊／看一下／這間／這條／如畫面／像這樣」等指示詞 → 這句光靠文字不完整，**必做** `frames --at 該時間戳`（可多個時間點一次給）看圖後再寫；要看動作過程才 `ask --clip 前後 30 秒`。
 - 找影片：先 `search`（免金鑰）；要「最近一週」這種日期條件或頻道篩選才 `--api`。跨平台（Bilibili、Vimeo、FB、IG、TikTok、Threads）：`parallel`／`exa` 加 `site:` 找到網址後，同樣丟給 `transcript`／`frames`（yt-dlp 支援 1,700+ 站；FB／IG 登入牆後的拿不到）。
 
 **限制與禮儀**：YouTube 的 bot check 是 IP 等級（家用網路正常，雲端／VPN IP 被擋；yt-dlp 維護者原話「If you download a lot … YouTube is likely to ban you, there's nothing we can do」，https://github.com/yt-dlp/yt-dlp/issues/16147 ）：一題最多下載 3 支、同一支不重複抓（有快取）、收到 429／「Sign in to confirm you're not a bot」就停下告訴使用者，不換 IP、不塞 cookies。只做分析，不保存或散布影片檔；快取在 `~/.claude/claude-dev-system/cache/video/`：每次執行工具會自動刪超過 7 天沒用的影音檔、30 天沒用的整個資料夾（`video.json` 的 `autoCleanMediaDays`／`autoCleanAllDays`）；要立刻清用 `clean --media-only`。yt-dlp 失效多半是版本舊：`python -m pip install -U yt-dlp` 後重試一次，仍不行就查 yt-dlp issues（第 2b 節）。

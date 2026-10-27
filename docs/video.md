@@ -25,6 +25,8 @@ $V info https://www.youtube.com/watch?v=XXXX  # 標題、長度、章節、字�
 $V transcript https://www.youtube.com/watch?v=XXXX            # 字幕優先，沒字幕自動語音辨識；只印前 40 行
 $V transcript https://www.youtube.com/watch?v=XXXX --grep 肉圓  # 找關鍵字，附 &t= 連結
 $V frames https://www.youtube.com/watch?v=XXXX --max 12        # 場景截圖，Claude 用 Read 看
+$V frames https://www.youtube.com/watch?v=XXXX --at 12:30,14:05 # 只截指定時間點（逐字稿說「這個／這裡」時）
+$V transcript https://www.youtube.com/watch?v=LIVEID --live 300 # 進行中的直播：先錄 5 分鐘再轉逐字稿（frames／ask 也可加 --live）
 $V stats https://www.youtube.com/watch?v=XXXX                  # 需 youtube 金鑰
 $V comments https://www.youtube.com/watch?v=XXXX -n 20         # 需 youtube 金鑰
 $V ask https://www.youtube.com/watch?v=XXXX "影片裡的招牌寫什麼？" --clip 0:00 1:30   # 需 gemini 金鑰
@@ -60,6 +62,10 @@ $V clean --media-only                          # 刪快取裡的影音檔、留�
 5. 回到憑證清單應看到一列：名稱 `claude-youtube`、限制「YouTube Data API v3」、「顯示金鑰」按鈕。
 6. 終端機自己輸入 `python installer/install.py web --key youtube=金鑰`。
 配額：每天 100 次 `search.list`、其他讀取共 10,000 單位（`videos.list`、`commentThreads.list` 各 1），太平洋時間午夜重置（https://developers.google.com/youtube/data/determine_quota_cost ）。`video.py` 的 `search` 預設不用它。
+
+## 直播
+
+`--live 秒數`（10–900）用 ffmpeg 從 HLS 串流錄一段成 mp4，之後當本機檔跑逐字稿／截圖／Gemini。這不是持續監看，每次只錄一段；錄的片段存在該影片的快取資料夾 `live_<時間>.mp4`，`live_captures.txt` 記錄每次擷取時間，7 天沒用自動刪。2026-10-27 實測台視與東森 24 小時新聞台：45 秒錄 33 秒，語音辨識中文正確。
 
 ## 不做的事
 

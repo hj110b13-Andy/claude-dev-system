@@ -1,7 +1,7 @@
 # claude-dev-system
 
 把 Stock-web 專案系統優化中「成熟且驗證過」的通用流程，封裝成可跨專案、跨裝置安裝的 Claude Code 全域工具。
-版本見 `config/VERSION`（目前 0.5.2），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
+版本見 `config/VERSION`（目前 0.6.0），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
 
 ## 內容與分層
 
@@ -57,7 +57,7 @@ python installer/install.py update --with-video          # pip 裝 yt-dlp、yout
 python installer/install.py web --key youtube=… --key gemini=…   # 選用：YouTube Data API（數據、留言）、Gemini（真的看畫面）
 python ~/.claude/claude-dev-system/tools/video.py setup  # 檢查 ffmpeg、faster-whisper、金鑰（Windows 用 py -3）
 ```
-讓 Claude 找影片、拿逐字稿（字幕優先，沒字幕用本機 faster-whisper）、切關鍵畫面截圖、查觀看數與留言、用 Gemini 逐幀看影片；YouTube 以外的網站與本機 mp4 同一套。全部免費，不裝第三方 YouTube MCP。細節與金鑰註冊步驟：`docs/video.md`。
+讓 Claude 找影片、拿逐字稿（字幕優先，沒字幕用本機 faster-whisper）、切關鍵畫面或指定時間點截圖、錄一段進行中的直播、查觀看數與留言、用 Gemini 逐幀看影片；YouTube 以外的網站與本機 mp4 同一套。全部免費，不裝第三方 YouTube MCP。細節與金鑰註冊步驟：`docs/video.md`。
 
 ## 新裝置安裝流程（給在新裝置上執行安裝的 Claude Code 看）
 

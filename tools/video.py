@@ -10,7 +10,8 @@
   info    網址                                      標題、頻道、長度、上傳日、章節、有哪些字幕語言
   transcript 網址|檔案 [--lang zh-TW,zh-Hant,zh,en] [--asr] [--model medium] [--grep 字] [--full]
                                                      逐字稿：字幕 → 沒有就 ASR；印路徑＋前 40 行；--grep 找關鍵字帶時間戳
-  frames  網址|檔案 [--mode scene|interval] [--interval 10] [--max 40]   關鍵畫面截圖到快取，印每張的時間點
+  frames  網址|檔案 [--mode scene|interval] [--interval 10] [--max 40] [--at 12:30,14:05]   關鍵畫面截圖到快取，印每張的時間點；--at 只截指定時間點
+  （transcript／frames／ask 都可加 --live 秒數：進行中的直播先錄一段再處理，10–900 秒）
   stats   網址                                      觀看／按讚／留言數、發布時間（YouTube Data API，需 `youtube` 金鑰）
   comments 網址 [-n 20]                             熱門留言（YouTube Data API，需 `youtube` 金鑰）
   ask     網址|檔案 "問題" [--model gemini-flash-latest] [--clip 開始 結束]   Gemini 真的看影片（需 `gemini` 金鑰；公開 YouTube 免下載）
@@ -300,6 +301,42 @@ def download(src: str, kind: str) -> Path:
     return target
 
 
+def capture_live(src: str, seconds: int) -> Path:
+    """直播：用 ffmpeg 從 HLS 串流錄 N 秒（≤720p 影像＋音訊）成 mp4，之後當本機檔處理。不是持續監看，是「錄一段」。"""
+    ff = find_ffmpeg()
+    if not ff:
+        die("缺 ffmpeg（winget install Gyan.FFmpeg）", 2)
+    seconds = max(10, min(int(seconds), 900))
+    yt_dlp = need_ytdlp()
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts({"skip_download": True})) as y:
+            info = y.extract_info(canonical(src), download=False)
+    except Exception as e:  # noqa: BLE001
+        _ydl_error(e)
+    if not info.get("is_live"):
+        die(f"這不是進行中的直播（live_status={info.get('live_status')}），直接用一般的 transcript／frames 即可", 2)
+    fmts = info.get("formats") or []
+    aud = [f for f in fmts if f.get("vcodec") == "none" and f.get("url")]
+    vid = [f for f in fmts if f.get("vcodec") not in (None, "none") and (f.get("height") or 0) <= CFG["downloadHeight"] and f.get("url")]
+    both = [f for f in fmts if f.get("vcodec") not in (None, "none") and f.get("acodec") not in (None, "none") and f.get("url")]
+    d = cache_dir(src)
+    out = d / f"live_{time.strftime('%Y%m%d-%H%M%S')}.mp4"
+    if vid and aud:
+        v, a = sorted(vid, key=lambda f: f.get("height") or 0)[-1], aud[-1]
+        cmd = [ff, "-y", "-loglevel", "error", "-i", v["url"], "-i", a["url"], "-t", str(seconds), "-map", "0:v", "-map", "1:a", "-c", "copy", str(out)]
+    elif both:
+        cmd = [ff, "-y", "-loglevel", "error", "-i", both[-1]["url"], "-t", str(seconds), "-c", "copy", str(out)]
+    else:
+        die("直播串流找不到可用的影音格式", 3)
+    print(f"錄直播 {seconds} 秒（{info.get('title', '')[:40]}）…", file=sys.stderr)
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=seconds + 300)
+    if r.returncode != 0 or not out.exists():
+        die("直播擷取失敗：" + r.stderr.strip()[-300:], 3)
+    (d / "live_captures.txt").open("a", encoding="utf-8").write(f"{out.name}\t{time.strftime('%Y-%m-%d %H:%M:%S')}\t{seconds}s\n")
+    print(f"直播片段已存 {out}（擷取時間 {time.strftime('%Y-%m-%d %H:%M')}，{seconds} 秒）", file=sys.stderr)
+    return out
+
+
 # ---------- 時間格式 ----------
 
 def hms(sec: float) -> str:
@@ -492,6 +529,27 @@ def get_transcript(src: str, prefer: list[str], asr: bool, model_size: str, lang
 
 
 # ---------- 畫面 ----------
+
+def frames_at(src: str, times: list[float]) -> tuple[Path, list[tuple[str, float]]]:
+    """指定時間點各截一張（逐字稿裡出現「這個／這裡／看一下」時用）。存到 frames_at/，不動場景截圖。"""
+    ff = find_ffmpeg()
+    if not ff:
+        die("缺 ffmpeg（winget install Gyan.FFmpeg）", 2)
+    media = download(src, "video")
+    d = cache_dir(src)
+    out = d / "frames_at"
+    out.mkdir(exist_ok=True)
+    pairs = []
+    for t in times:
+        name = f"at_{hms(t).replace(':', '')}.jpg"
+        r = subprocess.run([ff, "-y", "-loglevel", "error", "-ss", f"{t:.2f}", "-i", str(media), "-frames:v", "1", "-q:v", "3", str(out / name)],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if r.returncode == 0 and (out / name).exists():
+            pairs.append((name, t))
+        else:
+            warn(f"{hms(t)} 截圖失敗（超過影片長度？）")
+    return out, pairs
+
 
 def extract_frames(src: str, mode: str, interval: float, max_frames: int) -> tuple[Path, list[tuple[str, float]]]:
     ff = find_ffmpeg()
@@ -735,7 +793,7 @@ def cmd_info(a) -> int:
     info = info_cached(a.src)
     print(f"標題：{info.get('title')}")
     print(f"頻道：{info.get('channel') or info.get('uploader') or '?'}；長度：{hms(info['duration']) if info.get('duration') else '?'}；上傳：{info.get('upload_date') or '?'}；觀看：{info.get('view_count') or '?'}；語言欄：{info.get('language') or '?'}")
-    print(f"網址：{info.get('webpage_url')}；來源站：{info.get('extractor')}")
+    print(f"網址：{info.get('webpage_url')}；來源站：{info.get('extractor')}；直播狀態：{info.get('live_status') or '非直播'}" + ("（進行中：用 --live 秒數 錄一段）" if info.get("live_status") == "is_live" else ""))
     print(f"手動字幕：{', '.join(info.get('subtitles') or []) or '無'}")
     auto = info.get("automatic_captions") or []
     print(f"自動字幕：{', '.join(auto[:12]) + ('…' if len(auto) > 12 else '') if auto else '無'}")
@@ -754,6 +812,8 @@ def cmd_info(a) -> int:
 def cmd_transcript(a) -> int:
     prefer = [x.strip() for x in a.lang.split(",")] if a.lang else list(CFG["preferLangs"])
     asr_lang = a.asr_lang
+    if a.live:
+        a.src = str(capture_live(a.src, a.live))
     p, tag, lang = get_transcript(a.src, prefer, a.asr, a.model, asr_lang, lang_explicit=bool(a.lang))
     lines = p.read_text(encoding="utf-8").splitlines()
     kind = {"youtube_manual": "YouTube 手動字幕", "youtube_auto": "YouTube 自動字幕（機器產生，可能有錯）", "subs_manual": "站方字幕",
@@ -786,7 +846,15 @@ def cmd_transcript(a) -> int:
 
 
 def cmd_frames(a) -> int:
-    frames, pairs = extract_frames(a.src, a.mode, a.interval, a.max)
+    src = str(capture_live(a.src, a.live)) if a.live else a.src
+    if a.at:
+        times = sorted({parse_time(x.strip()) for x in a.at.split(",") if x.strip()})
+        frames, pairs = frames_at(src, times)
+        print(f"指定時間點截圖 {len(pairs)} 張 → {frames}（用 Read 看圖）")
+        for n, t in pairs:
+            print(f"  {n}\t[{hms(t)}]")
+        return 0
+    frames, pairs = extract_frames(src, a.mode, a.interval, a.max)
     print(f"截圖 {len(pairs)} 張 → {frames}（index.txt 有每張時間點；用 Read 看圖）")
     for n, t in pairs:
         print(f"  {n}\t[{hms(t)}]")
@@ -827,8 +895,9 @@ def cmd_comments(a) -> int:
 
 def cmd_ask(a) -> int:
     clip = tuple(a.clip) if a.clip else None
+    src = str(capture_live(a.src, a.live)) if a.live else a.src
     try:
-        ans = gemini_ask(a.src, a.question, a.model, clip)
+        ans = gemini_ask(src, a.question, a.model, clip)
     except GeminiError as e:
         die(str(e), 3)
     print(f"〔以下是 Gemini（{a.model}）看影片後的回答，不是 Claude 親眼所見；關鍵事實請對回逐字稿或截圖〕")
@@ -855,7 +924,7 @@ def clean_cache(media_days: float | None, all_days: float | None, force_all: boo
             n += 1
             continue
         if media_days is not None and (force_all or age > media_days):
-            media = list(d.glob("video.*")) + list(d.glob("audio*"))
+            media = list(d.glob("video.*")) + list(d.glob("audio*")) + list(d.glob("live_*.mp4"))
             if media:
                 freed += sum(p.stat().st_size for p in media)
                 for p in media:
@@ -910,12 +979,15 @@ def main(argv=None) -> int:
     p.add_argument("--start")
     p.add_argument("--end")
     p.add_argument("--full", action="store_true", help="全部印出（預設只印前幾行）")
+    p.add_argument("--live", type=int, metavar="秒", help="直播：先錄 N 秒（10–900）再轉逐字稿")
     p.set_defaults(fn=cmd_transcript)
     p = sub.add_parser("frames", help="關鍵畫面截圖")
     p.add_argument("src")
     p.add_argument("--mode", choices=["scene", "interval"], default="scene")
     p.add_argument("--interval", type=float, default=10.0)
     p.add_argument("--max", type=int, default=CFG["maxFrames"])
+    p.add_argument("--at", help="只截這些時間點，逗號分隔，例如 12:30,14:05（逐字稿說「這個／這裡」時用）")
+    p.add_argument("--live", type=int, metavar="秒", help="直播：先錄 N 秒再截圖")
     p.set_defaults(fn=cmd_frames)
     p = sub.add_parser("stats", help="官方數據（需 youtube 金鑰）")
     p.add_argument("src")
@@ -930,6 +1002,7 @@ def main(argv=None) -> int:
     p.add_argument("question")
     p.add_argument("--model", default=CFG["geminiModel"])
     p.add_argument("--clip", nargs=2, metavar=("開始", "結束"), help="只看這段，例如 --clip 1:20 3:00")
+    p.add_argument("--live", type=int, metavar="秒", help="直播：先錄 N 秒再給 Gemini 看")
     p.set_defaults(fn=cmd_ask)
     p = sub.add_parser("clean", help="清快取（預設只清 30 天沒動的；--media-only 只刪影音檔留逐字稿）")
     p.add_argument("--older-than", type=float, default=30, metavar="天")
