@@ -32,7 +32,7 @@ $V transcript "D:\影片\demo.mp4"               # 本機檔案同樣可用（tr
 $V clean --media-only                          # 刪快取裡的影音檔、留逐字稿
 ```
 
-快取：`~/.claude/claude-dev-system/cache/video/<影片ID>/`（info.json、transcript.*.txt、audio.m4a、video.mp4、frames/）。同一支影片不重抓。
+快取：`~/.claude/claude-dev-system/cache/video/<影片ID>/`（info.json、transcript.*.txt、audio.m4a、video.mp4、frames/）。同一支影片不重抓。**自動清理**：每次執行時刪超過 7 天沒用的影音檔（最大宗，30 分鐘音訊約 30 MB、4 分鐘 720p 影片約 83 MB）、30 天沒用的整個資料夾；`video.json` 可改天數，`clean` 可手動。
 
 ## 兩把選用金鑰怎麼註冊（2026-10-27 以 Claude in Chrome 核對實際畫面；標〔未核對畫面〕的步驟是使用者自行完成、Claude 沒看到）
 

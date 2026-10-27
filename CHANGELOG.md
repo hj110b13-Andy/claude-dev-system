@@ -2,6 +2,11 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.5.2（2026-10-27）
+
+- `video.py` 自動清快取：每次執行刪超過 `autoCleanMediaDays`（預設 7）天沒用的影音檔、超過 `autoCleanAllDays`（預設 30）天的整個資料夾；`clean` 子命令改用同一函式。來源：使用者問「閱讀完影片所產生的檔案會刪除嗎？避免佔用空間」——實測 30 分鐘音訊 30 MB、4 分鐘 720p 影片 83 MB。
+- 規則：被問「整支影片講什麼／提到哪些」必須 Read 整份逐字稿檔再答，螢幕前 40 行只是預覽。來源：使用者問「只印前 40 行，後面都看不到嗎？」——檔案本來就完整，但要防止只憑預覽寫摘要。
+
 ## 0.5.1（2026-10-27）
 
 - 修正：Context7 金鑰 header 改為官方現行的 `Authorization: Bearer <key>`（原寫 `CONTEXT7_API_KEY`；context7.com/docs/resources/all-clients 的 Claude Code 範例為 `--header "Authorization: Bearer YOUR_API_KEY"`）。`web-sources.json` 新增 `keyHeaderPrefix`，`desired_servers` 支援；加測試（含 `web --key context7=` 清空金鑰回免金鑰）。尚無人填過此金鑰，無實際影響。

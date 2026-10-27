@@ -15,7 +15,7 @@
   comments 網址 [-n 20]                             熱門留言（YouTube Data API，需 `youtube` 金鑰）
   ask     網址|檔案 "問題" [--model gemini-flash-latest] [--clip 開始 結束]   Gemini 真的看影片（需 `gemini` 金鑰；公開 YouTube 免下載）
   setup                                              檢查依賴與金鑰
-  clean   [--older-than 30] [--all] [--media-only]    清快取（影音檔大，逐字稿小）
+  clean   [--older-than 30] [--all] [--media-only]    清快取（影音檔大，逐字稿小）；每次執行也會自動清超過 7 天沒用的影音檔、30 天的整個資料夾
 
 金鑰讀 <CLAUDE_HOME>/claude-dev-system/config/local.json 的 keys.youtube／keys.gemini（`install.py web --key youtube=…`）。
 快取：<CLAUDE_HOME>/claude-dev-system/cache/video/<影片ID>/（info.json、transcript.*.txt、audio.m4a、video.mp4、frames/）。
@@ -58,6 +58,8 @@ DEFAULTS = {
     "sceneThreshold": 0.35,
     "downloadHeight": 720,
     "sleepBetweenRequests": 1,
+    "autoCleanMediaDays": 7,
+    "autoCleanAllDays": 30,
 }
 
 
@@ -834,26 +836,47 @@ def cmd_ask(a) -> int:
     return 0
 
 
-def cmd_clean(a) -> int:
+def _dir_age_days(d: Path, now: float) -> float:
+    return (now - max((p.stat().st_mtime for p in d.rglob("*") if p.is_file()), default=d.stat().st_mtime)) / 86400
+
+
+def clean_cache(media_days: float | None, all_days: float | None, force_all: bool = False, media_only: bool = False) -> tuple[int, int]:
+    """刪快取：影音檔（video.*／audio*）超過 media_days 沒用就刪；整個資料夾超過 all_days 沒用就刪。回 (資料夾數, 位元組)。"""
     root = cache_root()
     now = time.time()
     freed, n = 0, 0
     for d in root.iterdir():
         if not d.is_dir():
             continue
-        age_days = (now - max((p.stat().st_mtime for p in d.rglob("*") if p.is_file()), default=d.stat().st_mtime)) / 86400
-        if a.all or age_days > a.older_than:
-            size = sum(p.stat().st_size for p in d.rglob("*") if p.is_file())
-            if a.media_only:
-                for p in list(d.glob("video.*")) + list(d.glob("audio*")):
-                    freed += p.stat().st_size
-                    p.unlink()
+        age = _dir_age_days(d, now)
+        if not media_only and (force_all or (all_days is not None and age > all_days)):
+            freed += sum(p.stat().st_size for p in d.rglob("*") if p.is_file())
+            shutil.rmtree(d, ignore_errors=True)
+            n += 1
+            continue
+        if media_days is not None and (force_all or age > media_days):
+            media = list(d.glob("video.*")) + list(d.glob("audio*"))
+            if media:
+                freed += sum(p.stat().st_size for p in media)
+                for p in media:
+                    p.unlink(missing_ok=True)
                 n += 1
-            else:
-                shutil.rmtree(d, ignore_errors=True)
-                freed += size
-                n += 1
-    print(f"清理 {n} 個快取資料夾，釋放 {freed / 1e6:.0f} MB（{root}）")
+    return n, freed
+
+
+def auto_clean() -> None:
+    """每次執行時順手清：超過 autoCleanMediaDays 沒用的影音檔、超過 autoCleanAllDays 沒用的整個資料夾（逐字稿很小，留久一點）。"""
+    try:
+        n, freed = clean_cache(CFG.get("autoCleanMediaDays"), CFG.get("autoCleanAllDays"))
+        if freed > 50e6:
+            warn(f"自動清理舊快取 {n} 個資料夾，釋放 {freed / 1e6:.0f} MB")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def cmd_clean(a) -> int:
+    n, freed = clean_cache(a.older_than, None if a.media_only else a.older_than, force_all=a.all, media_only=a.media_only)
+    print(f"清理 {n} 個快取資料夾，釋放 {freed / 1e6:.0f} MB（{cache_root()}）")
     return 0
 
 
@@ -914,6 +937,8 @@ def main(argv=None) -> int:
     p.add_argument("--media-only", action="store_true")
     p.set_defaults(fn=cmd_clean)
     a = ap.parse_args(argv)
+    if a.cmd not in ("clean", "setup"):
+        auto_clean()
     return a.fn(a)
 
 

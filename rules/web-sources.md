@@ -248,14 +248,14 @@ Claude 不能直接「看」影片（Claude API 只收 JPEG／PNG／GIF／WebP �
 | 本機 mp4 | 以上 `transcript`／`frames`／`ask` 都收檔案路徑 | 雲端分享連結要先請使用者下載到本機 |
 
 **選擇規則（可判定）**：
-- 使用者問「這支影片講什麼／有沒有提到 X」→ `transcript`（必要時 `--grep X`）。**不可**拿搜尋引擎摘要、標題、留言當影片內容。
+- 使用者問「這支影片講什麼／提到哪些店、哪些重點」→ `transcript` 後**必須 Read 整份逐字稿檔**（路徑印在第一行）再寫摘要；螢幕上的前 40 行只是預覽，只憑預覽寫摘要＝轉述不完整。問「有沒有提到 X」→ `--grep X`。**不可**拿搜尋引擎摘要、標題、留言當影片內容。
 - 逐字稿多半是歌詞、「[音樂]」、或每 10 分鐘影片不到 20 行 → 影片靠畫面傳達 → `frames`；看完截圖仍答不出問題且有 `gemini` 金鑰 → `ask`。
 - 問「畫面上出現什麼、他做了什麼動作、招牌寫什麼」→ 先 `frames`（免費、可核對）；要跨整段影片或要精確到秒 → `ask`。
 - 語音辨識稿的專有名詞、同音字會錯（實測「肉圓」寫成「肉丸」）：`--grep` 找不到時再試至多 2 個同音字或相關詞，都沒有才寫「逐字稿未提到」；回答時標「語音辨識，專有名詞可能有誤」。
 - 要「數據」（多少人看、什麼時候發、熱門留言）→ `stats`／`comments`；沒 `youtube` 金鑰就用 `info`（觀看數有、按讚留言沒有）並說明。
 - 找影片：先 `search`（免金鑰）；要「最近一週」這種日期條件或頻道篩選才 `--api`。跨平台（Bilibili、Vimeo、FB、IG、TikTok、Threads）：`parallel`／`exa` 加 `site:` 找到網址後，同樣丟給 `transcript`／`frames`（yt-dlp 支援 1,700+ 站；FB／IG 登入牆後的拿不到）。
 
-**限制與禮儀**：YouTube 的 bot check 是 IP 等級（家用網路正常，雲端／VPN IP 被擋；yt-dlp 維護者原話「If you download a lot … YouTube is likely to ban you, there's nothing we can do」，https://github.com/yt-dlp/yt-dlp/issues/16147 ）：一題最多下載 3 支、同一支不重複抓（有快取）、收到 429／「Sign in to confirm you're not a bot」就停下告訴使用者，不換 IP、不塞 cookies。只做分析，不保存或散布影片檔；快取在 `~/.claude/claude-dev-system/cache/video/`，`clean --media-only` 刪影音留逐字稿。yt-dlp 失效多半是版本舊：`python -m pip install -U yt-dlp` 後重試一次，仍不行就查 yt-dlp issues（第 2b 節）。
+**限制與禮儀**：YouTube 的 bot check 是 IP 等級（家用網路正常，雲端／VPN IP 被擋；yt-dlp 維護者原話「If you download a lot … YouTube is likely to ban you, there's nothing we can do」，https://github.com/yt-dlp/yt-dlp/issues/16147 ）：一題最多下載 3 支、同一支不重複抓（有快取）、收到 429／「Sign in to confirm you're not a bot」就停下告訴使用者，不換 IP、不塞 cookies。只做分析，不保存或散布影片檔；快取在 `~/.claude/claude-dev-system/cache/video/`：每次執行工具會自動刪超過 7 天沒用的影音檔、30 天沒用的整個資料夾（`video.json` 的 `autoCleanMediaDays`／`autoCleanAllDays`）；要立刻清用 `clean --media-only`。yt-dlp 失效多半是版本舊：`python -m pip install -U yt-dlp` 後重試一次，仍不行就查 yt-dlp issues（第 2b 節）。
 
 **回答格式**：事實旁附 `[mm:ss]` 與逐字稿原句（第 7 節的「逐字短引」在影片就是這個），並寫明來源種類：「YouTube 手動字幕」「YouTube 自動字幕（機器）」「本機語音辨識（機器）」「截圖第 N 張 [mm:ss]」「Gemini 看影片的回答（非 Claude 親眼所見）」。Gemini 的回答是另一個模型的轉述：要寫進回答的數字、名稱、是／否結論都要對回逐字稿或截圖；對不回去的標「Gemini 說法，未核對」。
 
