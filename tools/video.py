@@ -15,7 +15,7 @@
   stats   網址                                      觀看／按讚／留言數、發布時間（YouTube Data API，需 `youtube` 金鑰）
   comments 網址 [-n 20]                             熱門留言（YouTube Data API，需 `youtube` 金鑰）
   ask     網址|檔案 "問題" [--model gemini-flash-latest] [--clip 開始 結束]   Gemini 真的看影片（需 `gemini` 金鑰；公開 YouTube 免下載）
-  download 網址 [--out 資料夾] [--max-height 1080] [--audio-only] [--cookies-from-browser firefox | --cookies cookies.txt]   使用者要存檔時：最高畫質下載（預設 ~/Downloads）
+  download 網址 [--out 資料夾] [--max-height 1080] [--audio-only] [--cookies-from-browser firefox | --cookies cookies.txt]   使用者要存檔時：最高畫質下載（預設 local.json video.downloadDir，未設為 ~/Downloads）
   setup                                              檢查依賴與金鑰
   clean   [--older-than 30] [--all] [--media-only]    清快取（影音檔大，逐字稿小）；每次執行也會自動清超過 7 天沒用的影音檔、30 天的整個資料夾
 
@@ -85,7 +85,25 @@ def load_keys() -> dict:
         return {}
 
 
+def load_local_video() -> dict:
+    """local.json 的 video 區塊：本機覆寫（例如 downloadDir），不進 repo。"""
+    if not LOCAL_PATH.exists():
+        return {}
+    try:
+        v = json.loads(LOCAL_PATH.read_text(encoding="utf-8")).get("video") or {}
+        return v if isinstance(v, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def download_dir(out: str | None = None) -> Path:
+    """--out ＞ local.json video.downloadDir ＞ video.json downloadDir ＞ ~/Downloads。"""
+    d = out or CFG.get("downloadDir")
+    return Path(d).expanduser() if d else Path.home() / "Downloads"
+
+
 CFG = load_config()
+CFG.update(load_local_video())
 KEYS = load_keys()
 
 
@@ -948,9 +966,9 @@ def auto_clean() -> None:
 
 
 def cmd_download(a) -> int:
-    """使用者明說要「下載／存檔」時才用：最高畫質影像＋最佳音訊合併 mp4，存到 --out（預設 ~/Downloads）。分析用途不走這裡（走快取）。"""
+    """使用者明說要「下載／存檔」時才用：最高畫質影像＋最佳音訊合併 mp4，存到 --out（預設 download_dir()）。分析用途不走這裡（走快取）。"""
     yt_dlp = need_ytdlp()
-    out_dir = Path(a.out).expanduser() if a.out else Path.home() / "Downloads"
+    out_dir = download_dir(a.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     h = f"[height<={a.max_height}]" if a.max_height else ""
     fmt = "bestaudio/best" if a.audio_only else f"bestvideo{h}+bestaudio/best{h}/best"
@@ -1051,7 +1069,7 @@ def main(argv=None) -> int:
     p.add_argument("--clip", nargs=2, metavar=("開始", "結束"), help="只看這段，例如 --clip 1:20 3:00")
     p.add_argument("--live", type=int, metavar="秒", help="直播：先錄 N 秒再給 Gemini 看")
     p.set_defaults(fn=cmd_ask)
-    p = sub.add_parser("download", help="使用者要存檔時：最高畫質下載到資料夾（預設 ~/Downloads）")
+    p = sub.add_parser("download", help="使用者要存檔時：最高畫質下載到資料夾（預設 local.json video.downloadDir，未設為 ~/Downloads）")
     p.add_argument("src")
     p.add_argument("--out", help="輸出資料夾")
     p.add_argument("--max-height", type=int, help="畫質上限，例如 1080；不給＝最高")

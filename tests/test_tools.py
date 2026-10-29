@@ -123,3 +123,24 @@ class UsageGuardConfig(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VideoDownloadDir(unittest.TestCase):
+    """download 預設資料夾：--out ＞ local.json video.downloadDir ＞ ~/Downloads（使用者要求下載預設存 D 槽）。"""
+
+    def run_dir(self, home: Path, out: str | None = None) -> str:
+        code = f"import video; print(video.download_dir({out!r}))"
+        r = subprocess.run([sys.executable, "-c", code], cwd=str(REPO / "tools"), capture_output=True, text=True,
+                           encoding="utf-8", env={**ENV, "CLAUDE_CONFIG_DIR": str(home)})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.strip()
+
+    def test_order(self):
+        home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, home, ignore_errors=True)
+        self.assertEqual(self.run_dir(home), str(Path.home() / "Downloads"))
+        cfg = home / "claude-dev-system" / "config"
+        cfg.mkdir(parents=True)
+        (cfg / "local.json").write_text('{"keys": {}, "video": {"downloadDir": "' + (home / "dl").as_posix() + '"}}', encoding="utf-8")
+        self.assertEqual(Path(self.run_dir(home)), home / "dl")
+        self.assertEqual(Path(self.run_dir(home, str(home / "x"))), home / "x")

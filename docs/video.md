@@ -70,7 +70,7 @@ $V clean --media-only                          # 刪快取裡的影音檔、留�
 
 ## 下載存檔（`download`）
 
-只在使用者明說要「下載／存檔」時用；分析用途一律走快取。最高畫質影像＋最佳音訊合併成 mp4，預設存 `~/Downloads`。實測（2026-10-27）：YouTube 1080p 4.5 分鐘 154 MB 約 4 分鐘；4K 約 4 倍大、速度相同，所以超過 1080p 先告知預估。支援站點同 yt-dlp（1,700+）；已知限制：
+只在使用者明說要「下載／存檔」時用；分析用途一律走快取。最高畫質影像＋最佳音訊合併成 mp4，預設存 `~/.claude/claude-dev-system/config/local.json` 的 `"video": {"downloadDir": "D:\影片"}`（每台裝置自訂、不進 repo；未設為 `~/Downloads`）。實測（2026-10-27）：YouTube 1080p 4.5 分鐘 154 MB 約 4 分鐘；4K 約 4 倍大、速度相同，所以超過 1080p 先告知預估。支援站點同 yt-dlp（1,700+）；已知限制：
 - **DRM** 串流平台（Netflix、Disney+ 等）不可能。
 - **Bilibili**：2026-10-21 起 yt-dlp 抓取器壞掉（「Unable to extract initial state」，issue #17879、修復 PR #17898 待合併）；`python -m pip install -U yt-dlp` 更新後再試，或 BV 網址加 cookies。
 - **抖音**：要瀏覽器 cookie（「Fresh cookies … are needed」）。

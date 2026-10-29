@@ -2,6 +2,10 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.6.4（2026-10-29）
+
+- `video.py download` 預設資料夾可由本機 `local.json` 的 `"video": {"downloadDir": "…"}` 設定（順序：`--out` ＞ local.json ＞ `video.json` 的 `downloadDir`（預設空）＞ `~/Downloads`）；local.json 的 `video` 區塊也可覆寫其他 video.json 鍵。規則 core／web-sources 與 docs/video.md 同步。來源：使用者原話「預設改為存到 D 槽，專門在D槽建一個資料夾放下載的影片」（C 槽剩約 7GB）。測試：`tests/test_tools.py` VideoDownloadDir 三種順序。
+
 ## 0.6.3（2026-10-28）
 
 - 移除 `hooks/task-board/`、`hooks/.claude-plugin/marketplace.json`、`hooks/board_server.py`：三者是 Stock-web 專案專屬（寫死本機路徑與使用者帳號名 7 處），且 Stock-web 已有逐位元相同的副本在 `tools/claude-setup/`，該專案 settings 也只引用自己的 `stockweb-tools` marketplace，本 repo 這份沒有任何引用。安裝器 payload 本來就不含它們，安裝行為不變。來源：使用者問「假設把 repo 公開會有什麼風險」→ 掃出唯一含個人路徑的檔就是這個 mod；使用者指示「做第①項」。

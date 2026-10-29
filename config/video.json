@@ -17,6 +17,7 @@
   "maxFrames": 40,
   "sceneThreshold": 0.35,
   "downloadHeight": 720,
+  "downloadDir": "",
   "sleepBetweenRequests": 1,
   "autoCleanMediaDays": 7,
   "autoCleanAllDays": 30
