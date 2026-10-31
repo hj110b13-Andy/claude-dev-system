@@ -51,8 +51,9 @@ class App:
         base_font = ("Microsoft JhengHei UI", 11) if sys.platform == "win32" else ("", 11)
         root.option_add("*Font", base_font)
         st = ttk.Style(root)
-        for cls in (".", "TLabel", "TButton", "TCheckbutton", "TEntry", "TCombobox", "TSpinbox", "TLabelframe.Label"):
+        for cls in (".", "TLabel", "TButton", "TCheckbutton", "TEntry", "TCombobox", "TSpinbox"):
             st.configure(cls, font=base_font)
+        st.configure("TLabelframe.Label", font=(base_font[0], 12, "bold"), foreground="#1f4e79")
         self._build()
         self.refresh()
         root.protocol("WM_DELETE_WINDOW", self.on_close)  # 有未套用的變更時關閉要先問
@@ -132,8 +133,10 @@ class App:
         self.log.bind("<MouseWheel>", lambda e: (self.log.yview_scroll(-int(e.delta / 120), "units"), "break")[1])
 
     def _section(self, title: str) -> ttk.LabelFrame:
-        f = ttk.LabelFrame(self.inner, text=title, padding=8)
-        f.pack(fill="x", pady=4)
+        """每一區：上方一條分隔線、粗體大標、區內留白加大，讓各區看起來不是擠成一坨（使用者回饋）。"""
+        ttk.Separator(self.inner, orient="horizontal").pack(fill="x", pady=(14, 0))
+        f = ttk.LabelFrame(self.inner, text=f"  {title}  ", padding=(14, 10, 14, 12))
+        f.pack(fill="x", pady=(6, 4))
         return f
 
     def _no_wheel_change(self, w):
@@ -178,7 +181,9 @@ class App:
         # 環境
         env = self._section("環境（每次開啟實際偵測）")
         for i, (k, it) in enumerate(s["env"].items()):
-            ttk.Label(env, text=f"{MARK[it.ok]} {it.detail}", wraplength=1000, justify="left").grid(row=i, column=0, sticky="w")
+            lb = ttk.Label(env, text=f"{MARK[it.ok]} {it.detail}", wraplength=1000, justify="left")
+            lb.grid(row=i, column=0, sticky="w")
+            self.notes.append(lb)  # 讓換行寬跟著視窗（ffmpeg 長路徑原本在寬螢幕也提早斷行）
             if it.action in ("ffmpeg", "pwsh7", "faster_whisper"):
                 txt = {"ffmpeg": "安裝 ffmpeg（winget）", "pwsh7": "安裝 PowerShell 7（MSI，會跳 UAC）", "faster_whisper": "安裝 faster-whisper（pip）"}[it.action]
                 ttk.Button(env, text=txt, command=lambda a=it.action: self.do_install(a)).grid(row=i, column=1, sticky="e", padx=4)
@@ -219,9 +224,9 @@ class App:
         # 聯網
         webf = self._section("聯網來源（免金鑰搜尋／文件 MCP ＋ WebSearch 上限）")
         self.web_var = tk.BooleanVar(value=f.web_enabled)
-        ttk.Checkbutton(webf, text="啟用聯網來源", variable=self.web_var, command=self.update_diff).grid(row=0, column=0, columnspan=4, sticky="w")
+        ttk.Checkbutton(webf, text="啟用聯網來源", variable=self.web_var, command=self.update_diff).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
         row = 1
-        for n, sv in s["web"]["servers"].items():
+        for n, sv in s["web"]["servers"].items():  # 每個 MCP 兩列：名稱＋功能、狀態＋工具（原本塞一行會被擠到最右邊、工具名從中間斷行）
             var = tk.BooleanVar(value=f.servers.get(n, sv["wanted"]))
             self.server_vars[n] = var
             st = "已註冊" if sv["registered"] else "未註冊"
@@ -231,24 +236,29 @@ class App:
                 st += "（純免費服務，沒有金鑰機制）"
             elif sv["registered"]:
                 st += "（免金鑰版；填金鑰後會多註冊金鑰版）"
-            ttk.Checkbutton(webf, text=n, variable=var, command=self.update_diff).grid(row=row, column=0, sticky="w")
-            self._note(webf, f"{gm.MCP_DESC.get(n, '')}　｜　{st}　｜　工具：{', '.join(sv['tools'])}", wrap=600, row=row, column=1, columnspan=2, sticky="w", padx=8)
-            row += 1
+            ttk.Checkbutton(webf, text=n, variable=var, command=self.update_diff, width=12).grid(row=row, column=0, sticky="nw")
+            self._note(webf, gm.MCP_DESC.get(n, ""), wrap=900, row=row, column=1, sticky="w", padx=8)
+            self._note(webf, f"狀態：{st}　　工具：{', '.join(sv['tools'])}", wrap=900, row=row + 1, column=1, sticky="w", padx=8, pady=(0, 8))
+            row += 2
+        ef = ttk.Frame(webf)  # env 列自己一個格線，長變數名不會把上面 MCP 的欄位撐開
+        ef.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Label(ef, text="環境變數（寫進 settings.json 的 env）", font=("", 10, "bold")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        erow = 1
         for k, dv in s["web"]["env_defaults"].items():
             var = tk.StringVar(value=f.env.get(k, dv))
             self.env_vars[k] = var
             var.trace_add("write", lambda *a: self.update_diff())
-            ttk.Label(webf, text=k).grid(row=row, column=0, sticky="w", pady=(6, 0))
-            ent = ttk.Entry(webf, textvariable=var, width=12)
-            ent.grid(row=row, column=1, sticky="w", padx=8, pady=(6, 0))
+            ttk.Label(ef, text=k).grid(row=erow, column=0, sticky="w")
+            ent = ttk.Entry(ef, textvariable=var, width=12)
+            ent.grid(row=erow, column=1, sticky="w", padx=8)
             if k in gm.ENV_READONLY:  # 編碼設定固定值，只顯示不可改（使用者回饋：不知道該填什麼）
                 ent.state(["readonly"])
                 desc = f"{gm.ENV_DESC.get(k, '')}；固定值，不可改；目前 settings.json：{s['web']['env'].get(k) or '未寫入'}"
             else:
                 desc = f"{gm.ENV_DESC.get(k, '')}；預設 {dv}；目前 settings.json：{s['web']['env'].get(k) or '未寫入'}"
-            self._note(webf, desc, wrap=900, row=row + 1, column=0, columnspan=3, sticky="w", padx=(24, 0))
-            row += 2
-        webf.columnconfigure(2, weight=1)
+            self._note(ef, desc, wrap=900, row=erow + 1, column=0, columnspan=2, sticky="w", padx=(24, 0), pady=(0, 6))
+            erow += 2
+        webf.columnconfigure(1, weight=1)
 
         # 影片
         vf = self._section("影片來源（YouTube／網路影片／本機 mp4）")
