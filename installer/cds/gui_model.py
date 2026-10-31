@@ -28,18 +28,18 @@ from .paths import REPO, Layout, repo_version
 # ---------- 常數 ----------
 
 KEY_INFO = {  # 名稱 → (顯示名, 類別, 說明, 註冊網址)。類別 search 的金鑰有免費優先模式；data 類沒有免金鑰版。
-    "cwa": ("中央氣象署", "data", "台灣鄉鎮預報、潮汐、地震、警特報", "https://opendata.cwa.gov.tw/"),
-    "moenv": ("環境部空品", "data", "台灣官方測站 AQI", "https://data.moenv.gov.tw/"),
-    "openaq": ("OpenAQ", "data", "國外官方測站空品", "https://explore.openaq.org/register"),
-    "tdx_id": ("TDX Client Id", "data", "交通部停車場等靜態資料", "https://tdx.transportdata.tw/"),
+    "cwa": ("中央氣象署", "data", "台灣鄉鎮預報、潮汐、地震、警特報；一般會員每天 2 萬次／2 GB", "https://opendata.cwa.gov.tw/"),
+    "moenv": ("環境部空品", "data", "台灣官方測站 AQI；每個 API 每天 5,000 次", "https://data.moenv.gov.tw/"),
+    "openaq": ("OpenAQ", "data", "國外官方測站空品；每分鐘 60、每小時 2,000 次", "https://explore.openaq.org/register"),
+    "tdx_id": ("TDX Client Id", "data", "交通部停車場等靜態資料；基礎會員每分鐘 5 次、每月約 4,500 次", "https://tdx.transportdata.tw/"),
     "tdx_secret": ("TDX Client Secret", "data", "與 tdx_id 成對", "https://tdx.transportdata.tw/"),
-    "youtube": ("YouTube Data API", "data", "影片觀看數、留言、日期篩選搜尋", "https://console.cloud.google.com/apis/credentials"),
-    "gemini": ("Gemini", "data", "真的看影片畫面", "https://aistudio.google.com/api-keys"),
-    "tavily": ("Tavily", "search", "搜尋＋擷取＋整站爬；免費 1,000 credits／月", "https://app.tavily.com/"),
-    "exa": ("Exa", "search", "語意搜尋；免費每月 $10", "https://dashboard.exa.ai/api-keys"),
-    "context7": ("Context7", "search", "程式庫文件；免費 1,000 次／月", "https://context7.com/dashboard"),
-    "parallel": ("Parallel", "search", "搜尋；註冊送 $20（到期日見 Billing）；每月 $5 要綁卡才解鎖；有金鑰多 web_research", "https://platform.parallel.ai/"),
-    "firecrawl": ("Firecrawl", "search", "JS 頁面抓取；免費 1,000 credits／月", "https://www.firecrawl.dev/app/api-keys"),
+    "youtube": ("YouTube Data API", "data", "影片觀看數、留言、日期篩選搜尋；每天 100 次搜尋、其他 10,000 單位", "https://console.cloud.google.com/apis/credentials"),
+    "gemini": ("Gemini", "data", "真的看影片畫面；免費層 3.8 Flash 每天 20 次、3.5 Flash Lite 每天 500 次", "https://aistudio.google.com/api-keys"),
+    "tavily": ("Tavily", "search", "搜尋＋乾淨擷取＋整站爬；免費 1,000 credits／月（Pay as you go 預設關）", "https://app.tavily.com/"),
+    "exa": ("Exa", "search", "語意搜尋（描述想找的頁面）；免費每月 1 日重置 $10", "https://dashboard.exa.ai/api-keys"),
+    "context7": ("Context7", "search", "程式庫官方文件；免費 1,000 次／月", "https://context7.com/dashboard"),
+    "parallel": ("Parallel", "search", "一般網頁搜尋＋抓頁；註冊送 $20 一次性、綁卡後每月 $5（自動儲值預設關、只在主動買額度時收費）；有金鑰多 web_research", "https://platform.parallel.ai/"),
+    "firecrawl": ("Firecrawl", "search", "JS 動態頁面抓取（讀整頁第三步）；免費 1,000 credits／月", "https://www.firecrawl.dev/app/api-keys"),
 }
 ENV_DESC = {
     "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION": "內建 WebSearch 每場對話上限（官方預設 200）",
@@ -48,6 +48,22 @@ ENV_DESC = {
     "PYTHONIOENCODING": "Python 輸入輸出編碼（配合上面，固定 utf-8）",
 }
 ENV_READONLY = {"PYTHONUTF8", "PYTHONIOENCODING"}  # 固定值：視窗只顯示不給改
+MCP_DESC = {  # 視窗 MCP 列的功能說明（一句話）
+    "parallel": "一般網頁搜尋＋抓頁，台灣在地事實的起手式；一次可下多個查詢",
+    "exa": "語意搜尋：用「描述想找的頁面」找，另有論文／公司索引；與 parallel 互補",
+    "context7": "程式庫官方文件（寫程式查 API 現況、版本差異）",
+    "deepwiki": "任何公開 GitHub repo 的自動文件，可直接問「這個 repo 的 X 怎麼運作」",
+    "mslearn": "微軟官方文件（Windows、PowerShell、.NET、Azure、Office）",
+    "tavily": "搜尋＋去廣告的乾淨擷取；有金鑰多整站爬",
+    "firecrawl": "會執行 JavaScript 的網頁抓取，動態頁面抓不到時的第三步",
+}
+TOOL_DESC = {  # 其他功能說明
+    "core": "規則（查證格式、上網查資料分流、派工原則）合併進全域 CLAUDE.md；4 個 skill（派工、安全重構、文件治理、回饋稽核）",
+    "usage_guard": "每次對話與工具後讀用量，到門檻才注入「收尾」提醒；沒到完全不動",
+    "task_check": "有背景任務時每 N 分鐘用 CronCreate 醒來檢查，全部結束就刪排程",
+    "video": "video.py：搜影片、字幕／語音辨識逐字稿、場景截圖、直播錄一段、觀看數留言、Gemini 看畫面、最高畫質下載",
+    "chrome": "Claude in Chrome：實際開網頁看、操作需登入網站、測自己的網站、教你操作前先核對畫面",
+}
 CHROME_EXT_ID = "fcoeoabgfenejglbffodgkkbkcdhcgfn"
 NATIVE_HOST_KEY = r"Software\Google\Chrome\NativeMessagingHosts\com.anthropic.claude_browser_extension"
 DEFAULT_THRESHOLDS = {"fiveHour": 80, "sevenDay": 97}

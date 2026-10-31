@@ -31,7 +31,7 @@ python installer/install.py web --usage-guard off                   # 關閉用�
 每次 `web` 都會先備份 settings.json，改完立即套用並更新安裝紀錄。金鑰在安裝器所有輸出中都遮成 `***`，也不會寫進 manifest；但**必然以明文**存在 `local.json`、`~/.claude.json` 的 MCP URL（Tavily）或 header（Exa），以及當下執行的 `claude mcp add` 命令列——這兩個檔請勿分享或 commit。`claude` 不在 PATH 或註冊失敗時，`install`／`update --with-web` 會印 ❌ 並以結束碼 1 結束（其他部分仍已套用，修好後重跑即可補齊）。
 
 註冊方式：
-- **中央氣象署**：https://opendata.cwa.gov.tw/ 加入會員 → 登入 → 開發指南 →「API 授權碼」→ 取得（`CWA-` 開頭）。免費；試用額度 1,000 次／天。
+- **中央氣象署**：https://opendata.cwa.gov.tw/ 加入會員 → 登入 → 開發指南 →「API 授權碼」→ 取得（`CWA-` 開頭）。免費；一般會員 24 小時內 2 萬次、每日 2 GB（2026-11-01 於會員「使用統計」頁實看）。
 - **Tavily**：https://app.tavily.com/ 用 Google／GitHub 登入，dashboard 自動產生金鑰。免費 1,000 credits／月、不用信用卡。不註冊也能用（免金鑰模式只開 search／extract）。
 - **Exa**：不註冊即可用；https://dashboard.exa.ai/api-keys 註冊後每月 1 日重置 $10 額度（≈2,500 次）。金鑰版額度用完回 402，但 0.7.0 起預設「免費優先」，免金鑰版 `exa` 照常可用、`exa-key` 只在限流時用，所以不會整個停擺。
 - **Parallel**：不註冊即可用；https://platform.parallel.ai/ 建金鑰：註冊送一次性 $20（有到期日，Billing 頁可看），「每月 $5」要綁信用卡才解鎖，不綁卡額度用完就只剩免金鑰版：`--key parallel=…`，多 `web_research` 工具、速率較高。

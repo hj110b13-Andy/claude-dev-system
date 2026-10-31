@@ -169,15 +169,15 @@ urllib.request.urlopen(url, context=ctx)
 
 | 金鑰名 | 來源 | 用途 | 額度 | 註冊 |
 |---|---|---|---|---|
-| `cwa` | 中央氣象署開放資料 | 台灣鄉鎮預報、觀測站、警特報、**地震報告** | 試用 1,000 次／天；會員額度未公開 | https://opendata.cwa.gov.tw/ 會員 → 開發指南 →「API 授權碼」（`CWA-` 開頭） |
+| `cwa` | 中央氣象署開放資料 | 台灣鄉鎮預報、觀測站、警特報、**地震報告** | 一般會員 24 小時內 2 萬次、每日 2 GB（資料擷取 API 與檔案下載分開計；非會員 1,000 次；官方「會員權益」頁與本機「使用統計」頁 2026-11-01 實看） | https://opendata.cwa.gov.tw/ 會員 → 開發指南 →「API 授權碼」（`CWA-` 開頭） |
 | `moenv` | 環境部環境資料開放平臺 | 台灣各測站官方 AQI、PM2.5（實測值） | 官方未公開 | https://data.moenv.gov.tw/ 註冊取 api_key |
-| `openaq` | OpenAQ | 全球各國官方測站空品實測值 | 第三方說法 60 次／分、2,000 次／時 | https://explore.openaq.org/register，金鑰放 `X-API-Key` header |
+| `openaq` | OpenAQ | 全球各國官方測站空品實測值 | 官方 60 次／分、2,000 次／時（docs.openaq.org/using-the-api/rate-limits，2026-11-01 查）；超過回 429，屢犯可能被封 | https://explore.openaq.org/register，金鑰放 `X-API-Key` header |
 | `tavily`、`exa`、`context7` | 見第 2 節 | 提高對應 MCP 額度 | | 由安裝器 `install.py web --key 名稱=值` 寫入並重註冊 MCP |
 | `tdx_id`＋`tdx_secret` | TDX 運輸資料流通服務（交通部） | **停車場結構化靜態資料**：類型（平面／立體／地下／機械）、車位數、地址、電話；部分縣市另有營業時間、出入口限高、費率。也有公車／台鐵／高鐵站點靜態資料 | 基礎會員 **5 次／分／金鑰**、3 點／月（基礎服務 1,500 次＝1 點）；訂閱頁無「學術方案」級別，學術／加盟單位是付費方案的費用減免（需核定） | https://tdx.transportdata.tw/ 註冊 → 會員中心 → 資料服務 → API 金鑰（用「API 金鑰內容」的 Client Id／Secret，不是 MQTT 那組） |
 
 用法（Claude 用 `Read` 讀 `local.json` 取金鑰；**金鑰不可出現在回覆或 commit**，引用網址時遮成 `***`）：
 - CWA：`https://opendata.cwa.gov.tw/api/v1/rest/datastore/<資料集ID>?Authorization=<金鑰>&locationName=臺北市`。常用：36 小時預報 `F-C0032-001`、鄉鎮一週 `F-D0047-091`、**顯著有感地震報告 `E-A0015-001`**（回應 `records.Earthquake[].ReportContent`）、警特報 `W-C0033-001`、**潮汐預報 `F-A0021-001`**（參數 `LocationName=臺中市梧棲區` 等沿海鄉鎮；回 `records.TideForecasts[].Location.TimePeriods.Daily[]`，每日有 `Date`、`LunarDate`、**`TideRange`（大／中／小）**、`Time[]` 潮時與潮高，一次約 32 天、**日期未排序要自己 sort**；2026-10-27 實測）。
-- 環境部：`https://data.moenv.gov.tw/api/v2/aqx_p_432?api_key=<金鑰>&limit=100&format=JSON`（`aqx_p_432` 為各測站即時 AQI；回應**最外層是陣列**，欄位 `sitename`、`county`、`aqi`、`pm2.5`、`status`、`publishtime`，每小時更新）。該站憑證鏈在 Python 3.13+ `urllib` 會被擋（Missing Subject Key Identifier，TWCA 根憑證缺 SKI）：用 `WebFetch`／`curl`，或 Python 依第 2b 節只清 `VERIFY_X509_STRICT`；不可關閉憑證驗證。2026-10-26 以本機金鑰實測 200。
+- 環境部（會員金鑰每個 API 每天 5,000 次、非會員 300 次；官方 API 介接服務條款，2026-11-01 查）：`https://data.moenv.gov.tw/api/v2/aqx_p_432?api_key=<金鑰>&limit=100&format=JSON`（`aqx_p_432` 為各測站即時 AQI；回應**最外層是陣列**，欄位 `sitename`、`county`、`aqi`、`pm2.5`、`status`、`publishtime`，每小時更新）。該站憑證鏈在 Python 3.13+ `urllib` 會被擋（Missing Subject Key Identifier，TWCA 根憑證缺 SKI）：用 `WebFetch`／`curl`，或 Python 依第 2b 節只清 `VERIFY_X509_STRICT`；不可關閉憑證驗證。2026-10-26 以本機金鑰實測 200。
 - OpenAQ：`https://api.openaq.org/v3/locations?coordinates=25.03,121.56&radius=10000&limit=5`（header `X-API-Key`；2026-10-26 以本機金鑰實測 200，台北 10 km 內 3 站），再以 location id 查 `/v3/locations/<id>/latest`。
 
 TDX 用法（2026-10-27 以本機金鑰實測）：
@@ -186,7 +186,7 @@ TDX 用法（2026-10-27 以本機金鑰實測）：
    - 基本資料（**最可靠**）：`CarPark/City/{City}?$filter=contains(CarParkName/Zh_tw,'車埕')&$format=JSON` → 回 `CarParks[]`，欄位 `CarParkID`、`CarParkName.Zh_tw`、`Address`、`Telephone`、`Description`（含車位數）、**`FareDescription`（費率文字，常已足夠，先看這裡再決定要不要查 `ParkingRate`）**、`ChargeTypes`、`IsPublic`、`OvernightPermitted`、**`CarParkType`**：`1` 平面、`2` 立體、`3` 地下、`4` 立體停車塔、`5` 立體機械式、`6` 同時涵蓋 2 種以上、`254` 其他、`255` 未知。
    - 營業時間 `ParkingServiceTime/City/{City}?$filter=CarParkID eq 'NAN_018'`（回 `ServiceTimes[]`）、出入口限高 `ParkingEntranceExit/...`（`ParkingEntranceExits[]`，欄位 `MaxAllowedHeight`）、費率 `ParkingRate/...`（`ParkingRates[]`）、車位數 `ParkingSpace/...`、即時剩餘 `ParkingAvailability/...`。**各縣市填寫完整度不同**：南投車埕兩座 2026-10-27 實測這三個端點皆 0 筆，台中等大縣市較齊。空筆就退回第 1 節的網頁升級鏈，不要重試。
    - 觀光景點停車場不分縣市：`CarPark/Tourism`；台鐵／高鐵站停車場：`CarPark/Rail/Station/TRA`、`.../THSR`；國道服務區：`CarPark/Road/Freeway/ServiceArea`。
-3. **只用於單筆或少量靜態查詢**（一題不超過 4 次呼叫，含換 token 不計）；5 次／分不夠排路線或迴圈掃描，那種需求不要用 TDX。回應 header `RateLimit-Remaining` 低於 1 就等 60 秒或改走網頁。回覆標「來源：交通部 TDX，資料版本 `UpdateTime`」。
+3. **只用於單筆或少量靜態查詢**（一題不超過 4 次呼叫，含換 token 不計）。額度（官方「訂閱收費」頁 2026-11-01 查）：基礎會員 0 元、存取頻率 **5 次／分／金鑰**、每月 3 點，停車場等基礎服務 1,500 次＝1 點（約 4,500 次／月），超過 105% 當月停用；5 次／分不夠排路線或迴圈掃描，那種需求不要用 TDX。回應 header `RateLimit-Remaining` 低於 1 就等 60 秒或改走網頁。回覆標「來源：交通部 TDX，資料版本 `UpdateTime`」。
 4. 回應以 gzip 壓縮時要解壓（Python `urllib` 需自行處理；`WebFetch`／`curl --compressed` 自動）。
 
 **Windows 亂碼的三個根源與修法**（2026-10-27 實測＋官方文件查證）：

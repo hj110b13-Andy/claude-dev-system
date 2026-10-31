@@ -156,7 +156,7 @@ class App:
         self._fit_job = None
         try:
             self.root.update_idletasks()  # 先讓版面定位，rootx 才準
-            right = self.inner.winfo_rootx() + self.inner.winfo_width() - 24
+            right = self.inner.winfo_rootx() + self.inner.winfo_width() - 56  # 留出捲軸與邊框，字不貼邊
             for lb in self.notes:
                 if not lb.winfo_exists():
                     continue
@@ -188,6 +188,7 @@ class App:
         # 核心
         core = self._section("核心（規則、skill）——安裝後永遠啟用")
         ttk.Label(core, text=f"{MARK[s['installed']]} {'已安裝' if s['installed'] else '尚未安裝（按套用會安裝）'}").pack(anchor="w")
+        self.notes.append(ttk.Label(core, text=gm.TOOL_DESC["core"], foreground="#555", wraplength=900, justify="left")); self.notes[-1].pack(anchor="w")
         self.guard_var = tk.BooleanVar(value=f.usage_guard)
         ttk.Checkbutton(core, text=f"用量守門 hook（到門檻才提示收尾，沒到完全不動；目前 settings.json：{'已註冊' if s['hooks']['usage_guard'] else '未註冊'}）",
                         variable=self.guard_var, command=self.update_diff).pack(anchor="w")
@@ -226,7 +227,7 @@ class App:
             elif sv["registered"]:
                 st += "（免金鑰版；填金鑰後會多註冊金鑰版）"
             ttk.Checkbutton(webf, text=n, variable=var, command=self.update_diff).grid(row=row, column=0, sticky="w")
-            self._note(webf, f"{st}　工具：{', '.join(sv['tools'])}", wrap=600, row=row, column=1, columnspan=2, sticky="w", padx=8)
+            self._note(webf, f"{gm.MCP_DESC.get(n, '')}　｜　{st}　｜　工具：{', '.join(sv['tools'])}", wrap=600, row=row, column=1, columnspan=2, sticky="w", padx=8)
             row += 1
         for k, dv in s["web"]["env_defaults"].items():
             var = tk.StringVar(value=f.env.get(k, dv))
@@ -245,7 +246,8 @@ class App:
         webf.columnconfigure(2, weight=1)
 
         # 影片
-        vf = self._section("影片來源（YouTube／網路影片／本機 mp4：搜尋、逐字稿、截圖、直播、下載）")
+        vf = self._section("影片來源（YouTube／網路影片／本機 mp4）")
+        self.notes.append(ttk.Label(vf, text=gm.TOOL_DESC["video"], foreground="#555", wraplength=900, justify="left")); self.notes[-1].grid(row=2, column=0, columnspan=3, sticky="w", pady=(4, 0))
         self.video_var = tk.BooleanVar(value=f.video_enabled)
         ttk.Checkbutton(vf, text="啟用影片來源（pip 裝 yt-dlp、youtube-transcript-api）", variable=self.video_var, command=self.update_diff).grid(row=0, column=0, sticky="w")
         pk = s["video"]["packages"]
