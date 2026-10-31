@@ -5,7 +5,7 @@
 ## 0.9.3（2026-11-01）
 
 - YouTube 配額頁由使用者在 Google Cloud 控制台（IAM 配額、篩選 per day）實看：Queries per day 10,000、Search Queries per day 100、Video Batch Get Stats 10,000、Video Uploads 100，與官方文件一致。至此 12 把金鑰的額度全部以實際頁面核對。
-- 無頭 `claude -p` 全新 session 實測規則是否生效（三題）：①車埕停車場——先寫 Python 帶 TDX 金鑰查，再 parallel → exa → tavily → firecrawl → WebSearch → Agent，符合「TDX 第一步＋跨索引升級鏈」；②PowerShell 編碼——mslearn 兩次＋parallel web_fetch，附 learn.microsoft.com 來源，符合「版本事實必查」；③YouTube 影片——先用 PowerShell 工具跑 `video.py` 被安全檢查擋（`$HOME` expandable strings），改 Bash 又卡在無頭模式沒有權限提示。修：`core.md` 影片條明寫 Windows 用 Bash 工具跑 `py -3 ~/.claude/...`，不用 PowerShell 工具。來源：使用者「確定一下安裝完後 Claude Code 是不是都會如你預期地去使用每個工具、MCP、API」。
+- 無頭 `claude -p` 全新 session 實測規則是否生效（三題）：①車埕停車場——先寫 Python 帶 TDX 金鑰查，再 parallel → exa → tavily → firecrawl → WebSearch → Agent，符合「TDX 第一步＋跨索引升級鏈」；②PowerShell 編碼——mslearn 兩次＋parallel web_fetch，附 learn.microsoft.com 來源，符合「版本事實必查」；③YouTube 影片——先用 PowerShell 工具跑 `video.py` 被安全檢查擋（`$HOME` expandable strings），改 Bash 又卡在無頭模式沒有權限提示。修：`core.md` 影片條明寫 Windows 用 Bash 工具跑 `py -3 ~/.claude/...`，不用 PowerShell 工具。補測三題（同樣全新無頭 session）：④汐止 AQI／板橋明天雨／日圓匯率——自己寫 Python 打環境部 `aqx_p_432`（汐止 AQI 61）、氣象署 `F-D0047-069`（板橋逐時降雨機率）、匯率用 firecrawl 抓台銀牌告；⑤requests timeout 與 yt-dlp Bilibili extractor 位置——context7 resolve＋query、deepwiki ask_wiki_question；⑥集集線影片觀看數、熱門留言、11:32–12:30 招牌——`video.py stats`／`comments`（YouTube Data API）、`frames --at` 15 張逐一 Read，讀出「水里 謝 肉圓」招牌。六題合計約 4 美元等值用量。未在無頭測試中觸發的：openaq（國外空品）、Gemini `ask`（截圖已足夠時規則不用）、Claude in Chrome（本對話已大量互動使用）。來源：使用者「確定一下安裝完後 Claude Code 是不是都會如你預期地去使用每個工具、MCP、API」。
 
 ## 0.9.2（2026-11-01）
 
