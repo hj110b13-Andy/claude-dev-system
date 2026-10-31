@@ -1,38 +1,74 @@
 {
-  "$說明": "用量門檻、方案期間與派工模型／努力程度表的單一來源（與 Stock-web .claude/dispatch-config.json 同結構）。讀取順序：專案 .claude/dispatch-config.json（cwd 往上找）→ 本檔 → 內建預設 80／97。專案檔只要寫要覆蓋的區塊即可，但用量門檻要完整寫 plan＋usageThresholdPct。安裝後複製到 <CLAUDE_HOME>/claude-dev-system/config/，可直接改；update 偵測到改過會保留並把新版放 .new。",
-  "version": 1,
-  "updated": "2026-10-17",
-  "plan": {
-    "current": "pro",
-    "max5x": { "from": "", "until": "", "note": "範例：升級方案的期間。填 until（YYYY-MM-DD）後，到該日（含）起自動改用 plan.after 的門檻。" },
-    "after": "pro"
-  },
+  "$說明": "用量門檻與派工模型／努力程度表的單一來源。讀取順序：專案 .claude/dispatch-config.json（cwd 往上找）→ 本檔 → 內建預設 80／97。0.7.0 起沒有「訂閱方案」概念：usageThresholdPct 直接給兩個數字，沒到門檻完全不動也不提示；GUI／執行檔可直接改。安裝後複製到 <CLAUDE_HOME>/claude-dev-system/config/，可直接改；update 偵測到改過會保留並把新版放 .new。",
+  "version": 2,
+  "updated": "2026-10-31",
   "usageThresholdPct": {
-    "$說明": "觸發收尾的門檻：5 小時用量 >= fiveHour 或 7 天用量 >= sevenDay（7 天觸發要做詳細版收尾）。依 plan.current 選用。",
-    "max5x": { "fiveHour": 95, "sevenDay": 99 },
-    "pro": { "fiveHour": 80, "sevenDay": 97 }
+    "$說明": "觸發收尾的門檻（%）：5 小時用量 >= fiveHour 或 7 天用量 >= sevenDay（7 天觸發要做詳細版收尾）。沒到就什麼都不做。",
+    "fiveHour": 80,
+    "sevenDay": 97
   },
-  "boardMeterMarks": { "fiveHour": 80, "sevenDay": 97, "$說明": "任務看板用量條的標線，與觸發門檻是兩回事" },
-  "concurrency": {
-    "max5x": "不碰同一檔案／同一份未提交變更就並行派 agent，不設上限",
-    "pro": "最多 1～2 個 agent 同時跑"
-  },
+  "concurrency": "不碰同一檔案／同一份未提交變更就可並行派 agent；用量接近門檻時降到 1～2 個",
   "dispatchUsageAdjust": {
     "$說明": "派工第二步依用量微調模型；usage_guard 也用 fiveHourBelowPct／sevenDayAbovePct 決定何時改為每分鐘查一次用量",
     "fiveHourBelowPct": 70,
-    "fiveHourMidRangePct": [70, 90],
+    "fiveHourMidRangePct": [
+      70,
+      90
+    ],
     "fiveHourAbovePct": 90,
     "sevenDayAbovePct": 90
   },
   "modelTable": {
-    "A": { "type": "改核心業務規則、AI 回答流程／提示詞", "model": "opus", "effort": "high" },
-    "B": { "type": "多個分支合併、解衝突、版本號對齊", "model": "opus", "effort": "high" },
-    "C": { "type": "研究設計（事先登錄、診斷失敗原因、重設計）", "model": "opus", "effort": "high", "effortIfRerunOnly": "medium" },
-    "D": { "type": "跨模組的新功能實作（規格已寫清楚）", "model": "opus", "effort": "medium" },
-    "E": { "type": "單一模組、規格明確的修正（版面、文字、單一 API）", "model": "sonnet", "effort": "medium" },
-    "F": { "type": "實際操作驗證（Playwright 照清單操作、讀 API 比對）", "model": "sonnet", "effort": "medium" },
-    "G": { "type": "資料抓取／回填腳本（來源與格式已知）", "model": "sonnet", "effort": "medium" },
-    "H": { "type": "唯讀盤點、讀報告整理、查紀錄", "model": "sonnet", "effort": "low", "listOnly": { "model": "haiku", "effort": "low" } },
-    "I": { "type": "單純查狀態、grep、讀單一檔", "model": null, "effort": null, "note": "不派 agent，主對話自己做" }
+    "A": {
+      "type": "改核心業務規則、AI 回答流程／提示詞",
+      "model": "opus",
+      "effort": "high"
+    },
+    "B": {
+      "type": "多個分支合併、解衝突、版本號對齊",
+      "model": "opus",
+      "effort": "high"
+    },
+    "C": {
+      "type": "研究設計（事先登錄、診斷失敗原因、重設計）",
+      "model": "opus",
+      "effort": "high",
+      "effortIfRerunOnly": "medium"
+    },
+    "D": {
+      "type": "跨模組的新功能實作（規格已寫清楚）",
+      "model": "opus",
+      "effort": "medium"
+    },
+    "E": {
+      "type": "單一模組、規格明確的修正（版面、文字、單一 API）",
+      "model": "sonnet",
+      "effort": "medium"
+    },
+    "F": {
+      "type": "實際操作驗證（Playwright 照清單操作、讀 API 比對）",
+      "model": "sonnet",
+      "effort": "medium"
+    },
+    "G": {
+      "type": "資料抓取／回填腳本（來源與格式已知）",
+      "model": "sonnet",
+      "effort": "medium"
+    },
+    "H": {
+      "type": "唯讀盤點、讀報告整理、查紀錄",
+      "model": "sonnet",
+      "effort": "low",
+      "listOnly": {
+        "model": "haiku",
+        "effort": "low"
+      }
+    },
+    "I": {
+      "type": "單純查狀態、grep、讀單一檔",
+      "model": null,
+      "effort": null,
+      "note": "不派 agent，主對話自己做"
+    }
   }
 }

@@ -197,7 +197,7 @@ def apply(lay: Layout, python: str, repo: Path = REPO, force: bool = False, mode
 
 
 def web_config(lay: Layout, keys=(), enable=(), disable=(), env=(), off: bool = False, show: bool = False,
-               runner=web.default_runner) -> tuple:
+               runner=web.default_runner, key_mode=()) -> tuple:
     """`install.py web`：改本機偏好（local.json）後立即套用；--off 關閉並移除；--show 只顯示。"""
     m = mf.load(lay.manifest)
     if not m:
@@ -216,6 +216,8 @@ def web_config(lay: Layout, keys=(), enable=(), disable=(), env=(), off: bool = 
             web.set_key_arg(local, kv)
         for kv in env:
             web.set_env_arg(local, kv)
+        for kv in key_mode:
+            web.set_key_mode_arg(local, kv)
     except ValueError as e:
         return 2, [str(e)]
     for n in enable:
@@ -224,7 +226,7 @@ def web_config(lay: Layout, keys=(), enable=(), disable=(), env=(), off: bool = 
     for n in disable:
         local["disable"] = sorted(set(local.get("disable", [])) | {n})
         local["enable"] = [x for x in local.get("enable", []) if x != n]
-    if keys or env or enable or disable:
+    if keys or env or enable or disable or key_mode:
         web.save_local(lay, local)
         log.append(f"本機偏好已寫入 {web.local_path(lay)}（不進 repo、update／uninstall 不動）")
     if show:
@@ -233,6 +235,10 @@ def web_config(lay: Layout, keys=(), enable=(), disable=(), env=(), off: bool = 
         log.append(head + (", ".join(f"{n} → {web.mask(v['url'], local)}" for n, v in want.items()) or "無"))
         log.append("env：" + ", ".join(f"{k}={v}" for k, v in web.desired_env(web.sources(lay), local).items()))
         log.append("本機金鑰：" + (", ".join(sorted(k for k, v in (local.get('keys') or {}).items() if v)) or "無"))
+        keyed = sorted(n for n in want if n.endswith("-key"))
+        always = sorted(n for n, v in (local.get("keyMode") or {}).items() if v == "always")
+        log.append("金鑰模式：免費優先（免金鑰版＋-key 版並存）" + (f"：{', '.join(k[:-4] for k in keyed)}" if keyed else "：無")
+                   + ("；一律用金鑰：" + ", ".join(always) if always else ""))
         log.append(f"目前狀態：{'已啟用' if m['web'].get('enabled') else '未啟用'}；已註冊 {', '.join(m['web'].get('mcpAdded', [])) or '無'}")
         return 0, log
     new = copy.deepcopy(m)

@@ -3,9 +3,12 @@
   "_comment": "聯網來源唯一來源。安裝器 `install.py web`／`--with-web` 讀這裡決定要註冊哪些 HTTP MCP 與寫入哪些環境變數；本機偏好（金鑰、啟用／停用、覆寫 env）寫在 <CLAUDE_HOME>/claude-dev-system/config/local.json，不進 repo。工具用法與開放 API 清單見 rules/web-sources.md。MCP 工具 schema 由 Claude Code 延後載入（每場對話只佔工具名稱），所以預設開多個遠端 MCP 的 token 成本很低；真正要省的是本機執行型 MCP 的背景程序。",
   "localKeys": {
     "_comment": "local.json 的 keys 可放的名稱（不在此列的也會存，但規則檔只認這些）。MCP 用的在 mcpServers 各項 keyParam／keyHeader；其餘由 rules/web-sources.md 指示 Claude 讀取使用。",
-    "tavily": "Tavily（MCP）",
-    "exa": "Exa（MCP）",
-    "context7": "Context7（MCP）",
+    "tavily": "Tavily（MCP；免費 1,000 credits／月）",
+    "exa": "Exa（MCP；免費每月 $10，用完 402）",
+    "context7": "Context7（MCP；免費 1,000 次／月）",
+    "parallel": "Parallel（MCP；免費每月 $5；有金鑰多 web_research）",
+    "firecrawl": "Firecrawl（MCP；免費 1,000 credits／月；有金鑰開全部工具）",
+    "_keyMode": "搜尋類金鑰預設「免費優先」：local.json 的 keyMode[名稱] 為 fallback（預設）時同時註冊免金鑰版 <名稱> 與金鑰版 <名稱>-key，規則先用免金鑰、回 429／5xx／402 才用 -key 版；設 always 則只註冊金鑰版。",
     "cwa": "中央氣象署 opendata.cwa.gov.tw 授權碼",
     "moenv": "環境部 data.moenv.gov.tw api_key",
     "openaq": "OpenAQ explore.openaq.org X-API-Key",
@@ -22,7 +25,9 @@
         "web_search",
         "web_fetch"
       ],
-      "note": "免金鑰；自建索引，回傳壓縮過的相關段落；匿名層速率較低（數字未公開）。2026-10-26 實測端點存活。"
+      "keyHeader": "Authorization",
+      "keyHeaderPrefix": "Bearer ",
+      "note": "免金鑰；自建索引，回傳壓縮過的相關段落；匿名層速率較低（數字未公開）。官方新網址 https://mcp.parallel.ai/mcp（舊網址仍可用，2026-10-26 實測）。有金鑰以 Authorization: Bearer 傳（docs.parallel.ai/integrations/mcp/quickstart，2026-10-31 查）：多 web_research 工具、速率較高，呼叫計入帳號額度（免費每月 $5）。"
     },
     "exa": {
       "url": "https://mcp.exa.ai/mcp",
@@ -81,13 +86,15 @@
     },
     "firecrawl": {
       "url": "https://mcp.firecrawl.dev/v2/mcp",
-      "default": false,
+      "default": true,
       "tools": [
         "firecrawl_search",
         "firecrawl_scrape",
         "firecrawl_parse"
       ],
-      "note": "選用。免金鑰，依 IP 滾動限流，官方標示免費資格「while eligible」可能收回；強項是 JS 渲染頁面抓取。與 Parallel web_fetch 功能重疊，故預設關。"
+      "keyHeader": "Authorization",
+      "keyHeaderPrefix": "Bearer ",
+      "note": "0.7.0 起預設開，只當「讀整頁」的第三步（WebFetch 空白 → Jina 空白 → firecrawl_scrape），強項是 JS 渲染頁面。免金鑰依 IP 每日限流、只開 search／scrape／parse、「while eligible」可能收回；有金鑰以 Authorization: Bearer 傳（docs.firecrawl.dev/mcp-server/keyless，2026-10-31 查），免費 1,000 credits／月、開全部工具。"
     }
   },
   "env": {

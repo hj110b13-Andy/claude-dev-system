@@ -6,7 +6,8 @@
 2. 寫進 <CLAUDE_HOME>/state/usage.json（只有百分比與重置時間，不含權杖）。
 3. 達門檻時注入「立刻收尾」提醒。門檻讀取順序（先找到者為準）：①專案 `.claude/dispatch-config.json`（從 hook 的 cwd 往上層找）
    →②全域 <CLAUDE_HOME>/claude-dev-system/config/dispatch-config.json →③內建預設 80／97。
-   設定檔結構：plan.current 指定目前方案，usageThresholdPct[方案] 給 fiveHour／sevenDay；方案若有 until 日期，
+   設定檔結構（0.7.0 起）：usageThresholdPct 直接給 fiveHour／sevenDay 兩個數字，沒到門檻完全不動、不提示。
+   舊結構仍支援：plan.current 指定目前方案，usageThresholdPct[方案] 給 fiveHour／sevenDay；方案若有 until 日期，
    到期日（含）起自動改用 plan.after。--print 會印出實際採用的是哪一份。
 4. 若有任務看板檔（<CLAUDE_HOME>/state/task-board.md），對標「該追問」的 agent 注入逾時提醒；沒有就略過。
 
@@ -56,9 +57,12 @@ def find_project_config(start):
 
 
 def pick_thresholds(cfg, today=None):
-    """依 plan.current 取 usageThresholdPct；該方案 until 日期（含）之後改用 plan.after。回 (五小時, 七天) 或 None。"""
+    """取 usageThresholdPct。0.7.0 起的扁平格式：{"fiveHour": 95, "sevenDay": 99}（沒有方案概念，GUI 直接改數字）。
+    舊格式（依 plan.current 選方案、until 到期改用 plan.after）仍支援。回 (五小時, 七天) 或 None。"""
     plan = cfg.get("plan") or {}
     table = cfg.get("usageThresholdPct") or {}
+    if isinstance(table.get("fiveHour"), (int, float)) and isinstance(table.get("sevenDay"), (int, float)):
+        return float(table["fiveHour"]), float(table["sevenDay"])
     cur = plan.get("current")
     today = today or time.strftime("%Y-%m-%d")
     until = (plan.get(cur) or {}).get("until") if isinstance(plan.get(cur), dict) else None

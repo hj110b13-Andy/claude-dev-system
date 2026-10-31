@@ -69,8 +69,29 @@ def installed_servers(lay: Layout) -> dict:
         return {}
 
 
+KEY_MODES = ("fallback", "always")  # fallback：免金鑰版＋金鑰版（<名稱>-key）同時註冊，規則先用免金鑰；always：只註冊金鑰版
+
+
+def _entry(spec: dict, key: str | None = None) -> dict:
+    url = spec["url"]
+    headers = dict(spec.get("headers") or {})
+    if key and spec.get("keyParam"):
+        url += ("&" if "?" in url else "?") + f"{spec['keyParam']}={key}"
+        headers = dict(spec.get("keyedHeaders") if spec.get("keyedHeaders") is not None else headers)
+    elif key and spec.get("keyHeader"):
+        headers[spec["keyHeader"]] = spec.get("keyHeaderPrefix", "") + key
+    return {"url": url, "headers": headers}
+
+
+def key_mode(local: dict, name: str) -> str:
+    m = (local.get("keyMode") or {}).get(name)
+    return m if m in KEY_MODES else "fallback"
+
+
 def desired_servers(src: dict, local: dict) -> dict[str, dict]:
-    """名稱 → {url, headers}；default 與 local 的 enable／disable 決定開關，有金鑰時切到有金鑰的連線方式。"""
+    """名稱 → {url, headers}；default 與 local 的 enable／disable 決定開關。
+    有金鑰時依 keyMode：fallback（預設）＝免金鑰版 `<名稱>` 與金鑰版 `<名稱>-key` 都註冊，規則先用免金鑰、撞限流才用 -key；
+    always＝只註冊金鑰版 `<名稱>`。"""
     out: dict[str, dict] = {}
     for name, spec in (src.get("mcpServers") or {}).items():
         on = bool(spec.get("default"))
@@ -80,15 +101,15 @@ def desired_servers(src: dict, local: dict) -> dict[str, dict]:
             on = False
         if not on:
             continue
-        url = spec["url"]
-        headers = dict(spec.get("headers") or {})
         key = (local.get("keys") or {}).get(spec.get("keyName") or name)
-        if key and spec.get("keyParam"):
-            url += ("&" if "?" in url else "?") + f"{spec['keyParam']}={key}"
-            headers = dict(spec.get("keyedHeaders") if spec.get("keyedHeaders") is not None else headers)
-        elif key and spec.get("keyHeader"):
-            headers[spec["keyHeader"]] = spec.get("keyHeaderPrefix", "") + key
-        out[name] = {"url": url, "headers": headers}
+        keyable = bool(spec.get("keyParam") or spec.get("keyHeader"))
+        if key and keyable and key_mode(local, name) == "always":
+            out[name] = _entry(spec, key)
+        elif key and keyable:
+            out[name] = _entry(spec)
+            out[name + "-key"] = _entry(spec, key)
+        else:
+            out[name] = _entry(spec)
     return out
 
 
@@ -241,6 +262,13 @@ def set_key_arg(local: dict, kv: str) -> None:
     if not m:
         raise ValueError(f"--key 格式應為 名稱=值：{kv}")
     local.setdefault("keys", {})[m.group(1)] = m.group(2)
+
+
+def set_key_mode_arg(local: dict, kv: str) -> None:
+    m = re.fullmatch(r"([A-Za-z0-9_-]+)=(fallback|always)", kv.strip())
+    if not m:
+        raise ValueError(f"--key-mode 格式應為 名稱=fallback|always：{kv}")
+    local.setdefault("keyMode", {})[m.group(1)] = m.group(2)
 
 
 def set_env_arg(local: dict, kv: str) -> None:

@@ -266,7 +266,7 @@ def fake_mcp_runner(lay: Layout, calls: list):
 
 class WebSources(Base):
     ENV_KEYS = ("CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION", "CLAUDE_CODE_WEB_SEARCH_REFILLS_PER_HOUR")
-    DEFAULTS = {"parallel", "exa", "context7", "deepwiki", "mslearn"}  # web-sources.json 的 default:true 項目
+    DEFAULTS = {"parallel", "exa", "context7", "deepwiki", "mslearn", "firecrawl"}  # web-sources.json 的 default:true 項目
 
     def setUp(self):
         super().setUp()
@@ -330,35 +330,59 @@ class WebSources(Base):
         self.assertEqual(t["headers"], {"X-Tavily-Access-Mode": "keyless"})
         code, log = commands.web_config(self.lay, keys=["tavily=SECRET123"], runner=self.runner)
         self.assertEqual(code, 0, "\n".join(log))
-        t = self.servers()["tavily"]
-        self.assertIn("tavilyApiKey=SECRET123", t["url"])
-        self.assertNotIn("headers", t, "有金鑰時應拿掉 keyless header")
+        t = self.servers()["tavily"]  # 免費優先：免金鑰版留著
+        self.assertEqual(t["headers"], {"X-Tavily-Access-Mode": "keyless"})
+        k = self.servers()["tavily-key"]  # 金鑰版另外註冊
+        self.assertIn("tavilyApiKey=SECRET123", k["url"])
+        self.assertNotIn("headers", k, "金鑰版應拿掉 keyless header")
         self.assertFalse(any("SECRET123" in x for x in log), "輸出不可印出金鑰")
+        code, log = commands.web_config(self.lay, key_mode=["tavily=always"], runner=self.runner)
+        self.assertEqual(code, 0, "\n".join(log))
+        self.assertNotIn("tavily-key", self.servers(), "always 模式只留金鑰版")
+        self.assertIn("tavilyApiKey=SECRET123", self.servers()["tavily"]["url"])
+        code, log = commands.web_config(self.lay, key_mode=["tavily=fallback"], runner=self.runner)
+        self.assertIn("tavily-key", self.servers())
         self.assertEqual(json.loads(web.local_path(self.lay).read_text(encoding="utf-8"))["keys"]["tavily"], "SECRET123")
         code, log = commands.web_config(self.lay, disable=["tavily"], runner=self.runner)
         self.assertEqual(code, 0, "\n".join(log))
         self.assertNotIn("tavily", self.servers())
+        self.assertNotIn("tavily-key", self.servers(), "關掉時金鑰版一起移除")
         self.assertEqual(set(self.servers()), self.DEFAULTS)
         code, log = commands.web_config(self.lay, enable=["nope"], runner=self.runner)
         self.assertEqual(code, 2)
 
-    def test_exa_key_goes_to_header(self):
+    def test_exa_key_goes_to_header_as_key_variant(self):
         self.apply(with_web=True)
         commands.web_config(self.lay, keys=["exa=EXAKEY"], runner=self.runner)
-        e = self.servers()["exa"]
+        self.assertNotIn("headers", self.servers()["exa"], "免金鑰版不帶金鑰")
+        e = self.servers()["exa-key"]
         self.assertEqual(e["url"], "https://mcp.exa.ai/mcp")
         self.assertEqual(e["headers"], {"x-api-key": "EXAKEY"})
+        code, out = self.verify()
+        self.assertEqual(code, 0, "\n".join(out))
+        self.assertTrue(any("MCP exa-key 已註冊" in x for x in out))
+        commands.web_config(self.lay, keys=["exa="], runner=self.runner)  # 清掉金鑰 → -key 版移除
+        self.assertNotIn("exa-key", self.servers())
+
+    def test_parallel_and_firecrawl_keys_use_bearer(self):
+        self.apply(with_web=True)
+        commands.web_config(self.lay, keys=["parallel=PK", "firecrawl=FK"], runner=self.runner)
+        self.assertEqual(self.servers()["parallel-key"]["headers"], {"Authorization": "Bearer PK"})
+        self.assertEqual(self.servers()["firecrawl-key"]["headers"], {"Authorization": "Bearer FK"})
+        code, log = commands.web_config(self.lay, key_mode=["exa=bogus"], runner=self.runner)
+        self.assertEqual(code, 2)
 
     def test_context7_key_goes_to_bearer_header(self):
         self.write_settings(USER_SETTINGS)
         self.apply(with_web=True)
         code, log = commands.web_config(self.lay, keys=["context7=ctx7sk-abc"], runner=self.runner)
         self.assertEqual(code, 0, "\n".join(log))
-        self.assertEqual(self.servers()["context7"]["headers"], {"Authorization": "Bearer ctx7sk-abc"})
-        self.assertFalse(any("ctx7sk-abc" in x for x in log))
-        code, log = commands.web_config(self.lay, keys=["context7="], runner=self.runner)  # 清掉金鑰 → 回免金鑰
-        self.assertEqual(code, 0, "\n".join(log))
+        self.assertEqual(self.servers()["context7-key"]["headers"], {"Authorization": "Bearer ctx7sk-abc"})
         self.assertNotIn("headers", self.servers()["context7"])
+        self.assertFalse(any("ctx7sk-abc" in x for x in log))
+        code, log = commands.web_config(self.lay, keys=["context7="], runner=self.runner)  # 清掉金鑰 → 只剩免金鑰
+        self.assertEqual(code, 0, "\n".join(log))
+        self.assertNotIn("context7-key", self.servers())
 
     def test_user_own_server_and_env_untouched(self):
         p = web.user_config_path(self.lay)

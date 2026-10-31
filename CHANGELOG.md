@@ -2,6 +2,14 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.7.0（2026-10-31）
+
+- **免費優先雙註冊**：有搜尋類金鑰（exa、tavily、context7、parallel、firecrawl）時預設同時註冊免金鑰版 `<名稱>` 與金鑰版 `<名稱>-key`；`web --key-mode 名稱=always` 改為只註冊金鑰版。規則第 2c 節（可判定）：先免金鑰，回 429／5xx／402 才用 `-key`，之後連續 3 次用 `-key`、第 4 次再試免金鑰；`core.md` 加一句。來源：使用者「免費優先雙註冊，要注意有時候可能是免費被限流而不是用完，每次都先看免費能不能用」。
+- parallel、firecrawl 新增金鑰模式（皆 `Authorization: Bearer`，官方文件 2026-10-31 查）；`localKeys` 補五個搜尋類金鑰的額度說明。
+- **firecrawl 預設開**，但規則限定只當「讀整頁」第三步：WebFetch／parallel web_fetch → Jina → `firecrawl_scrape`（第 1 節第 4 點改寫為可判定三步）。來源：使用者問「能不能當 parallel 不能用時自動改用 firecrawl」。
+- **用量門檻扁平化**：`dispatch-config.json` 的 `usageThresholdPct` 直接是 `fiveHour`／`sevenDay` 兩個數字，移除 `plan`（訂閱方案）與 `boardMeterMarks`；`usage_guard.py` 兩種格式都讀（舊格式仍相容）。本機設定改為 95／99。規則、skill、README 第 10 步同步。來源：使用者「用量守門與 WebSearch 上限也要能自己改數值，就不用訂閱方案了，然後要到該 % 數才會開始守門，沒到的時候完全不用提示」——實查 hook 原本就是門檻以下不注入。
+- 測試 47 個通過（新增雙註冊、always／fallback 切換、parallel／firecrawl Bearer、扁平門檻格式）。這是「設定 GUI／執行檔」計畫的階段 0。
+
 ## 0.6.4（2026-10-29）
 
 - `video.py download` 預設資料夾可由本機 `local.json` 的 `"video": {"downloadDir": "…"}` 設定（順序：`--out` ＞ local.json ＞ `video.json` 的 `downloadDir`（預設空）＞ `~/Downloads`）；local.json 的 `video` 區塊也可覆寫其他 video.json 鍵。規則 core／web-sources 與 docs/video.md 同步。來源：使用者原話「預設改為存到 D 槽，專門在D槽建一個資料夾放下載的影片」（C 槽剩約 7GB）。測試：`tests/test_tools.py` VideoDownloadDir 三種順序。

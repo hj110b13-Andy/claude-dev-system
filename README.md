@@ -1,7 +1,7 @@
 # claude-dev-system
 
 把 Stock-web 專案系統優化中「成熟且驗證過」的通用流程，封裝成可跨專案、跨裝置安裝的 Claude Code 全域工具。
-版本見 `config/VERSION`（目前 0.6.3），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
+版本見 `config/VERSION`（目前 0.7.0），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
 
 ## 內容與分層
 
@@ -45,6 +45,7 @@ python installer/install.py verify     # 全部 ✅ 才算完成；重開 Claude
 ```bash
 python installer/install.py update --with-web            # 放寬內建 WebSearch 上限＋UTF-8 env＋註冊免金鑰 MCP（搜尋 parallel、exa；文件 context7、deepwiki、mslearn）
 python installer/install.py web --key cwa=… --key moenv=… --key openaq=… --key tdx_id=… --key tdx_secret=… --key tavily=… --enable tavily
+python installer/install.py web --key exa=… --key context7=… --key parallel=… --key firecrawl=…   # 搜尋類金鑰預設「免費優先」：免金鑰版與 <名稱>-key 版並存，規則撞限流才用 -key；--key-mode exa=always 改為一律用金鑰
 python installer/install.py web --enable firecrawl       # 選用：JS 頁面抓取，與 parallel 重疊，預設關
 ```
 預設不啟用。用官方 `claude mcp add --scope user` 註冊，不覆蓋你自己同名的 MCP 或 env；`web --off` 或 `uninstall` 只移除本工具登記過的。規則 `rules/web-sources.md` 列出實測過的免金鑰開放 API（天氣、空氣品質、地震、潮汐、匯率、加密貨幣、台股／美股、全球新聞、論文、假日、百科、地理編碼、航班位置、停車場）、社群論壇與程式難題的查法、查證型回答格式、教操作前先核對畫面。細節：`docs/web-sources.md`。
@@ -72,6 +73,7 @@ python ~/.claude/claude-dev-system/tools/video.py setup  # 檢查 ffmpeg、faste
    | `openaq` | OpenAQ：國外官方測站空品 | 同上 |
    | `tdx_id`＋`tdx_secret` | 交通部 TDX：停車場平面／立體、車位、費率 | 停車場只能靠網頁 |
    | `tavily` | 搜尋＋擷取＋整站爬（填了要加 `--enable tavily`） | 少一個搜尋索引；可改免金鑰模式 `--enable tavily` 不填金鑰 |
+   | `exa`、`context7`、`parallel`、`firecrawl` | 搜尋／文件／抓頁的「加大額度」金鑰，全部免費（exa 每月 $10、context7 1,000 次、parallel $5、firecrawl 1,000 credits）；預設免費優先，撞限流才用 | 完全不影響功能，只是免金鑰的限流較緊 |
    | `youtube` | YouTube Data API：觀看／按讚／留言數、熱門留言、日期篩選搜尋（影片來源用） | 影片仍能搜、拿逐字稿、截圖；只少數據與留言 |
    | `gemini` | Gemini：真的逐幀看影片、招牌文字、無聲影片（影片來源用） | 只能靠逐字稿＋截圖理解影片 |
    金鑰由使用者**自己在終端機**輸入 `web --key 名稱=值`，不要請使用者貼在對話裡。Google 兩把的註冊步驟（含第一次進 Google Cloud 會遇到的兩步驟驗證與條款畫面）在 `docs/video.md`；**要教使用者點哪裡之前，先用 Claude in Chrome 開到那個畫面核對**（規則第 10 節），不可憑記憶寫步驟。
@@ -81,7 +83,7 @@ python ~/.claude/claude-dev-system/tools/video.py setup  # 檢查 ffmpeg、faste
 7. **問：要不要啟用 Claude in Chrome？**（開網頁看狀況、操作需登入的網站、FB 社團、測自己的網站都靠它）→ 要就請使用者裝 Chrome 擴充「Claude in Chrome」、同帳號登入、在對話打 `/chrome` 開「Enabled by default」。這不是安裝器能做的。
 8. **問：要不要裝 PowerShell 7？**（Windows 建議要；5.1 的 JSON 中文亂碼、`Get-Content` 編碼、不支援 `&&`／三元運算子等坑在 7 全部消失，Claude Code 會自動改用它）→ `winget install --id Microsoft.PowerShell --source winget --installer-type wix`（**要 MSI 版**，Store 版 Claude Code 偵測不到；會跳 UAC）。PowerShell 自身走 Microsoft Update 更新是安裝預設；若使用者想讓 Windows Update 一併接收其他 Microsoft 產品更新，請他自己到「設定 → Windows Update → 進階選項」打開，Claude 不代改。裝完重開 Claude Code。
 9. **告知（不代做）：Windows 系統碼頁**。安裝器已用 env 修好 Python 子程序的中文輸出；若使用者還常遇到 PowerShell 5.1 讀無 BOM 檔亂碼，可自行開啟 Windows「Beta: 使用 Unicode UTF-8 提供全球語言支援」並重開機；副作用與取捨見 `rules/web-sources.md`「Windows 亂碼的三個根源與修法」。Claude 不可代改系統設定。
-10. **問：訂閱方案與用量門檻**。`config/dispatch-config.json` 預設 pro（80／97%）；使用者若是 Max 方案，請他改 `plan.current`、`plan.until` 與門檻（例如 max5x 95／99），安裝器之後 update 會保留他的版本。
+10. **問：用量門檻要設多少？** `config/dispatch-config.json` 的 `usageThresholdPct` 預設 5 小時 80%、7 天 97%；沒到門檻完全不提示也不動作，到了才注入收尾提醒。Max 方案的人常改 95／99。直接改兩個數字即可（0.7.0 起沒有方案概念），安裝器之後 update 會保留他的版本。
 11. 已裝過舊版的機器：`git pull` → `update --with-web --with-video` → 補金鑰 → `verify`。
 
 ## 更新

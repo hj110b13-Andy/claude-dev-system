@@ -15,8 +15,8 @@
    - `parallel`（`web_search`／`web_fetch`）：自建索引，回傳壓縮過的相關段落，省 token；一次可下多個查詢。
    - `exa`（`web_search_exa`／`web_fetch_exa`）：**語意搜尋**，用「描述想找的頁面」而非關鍵字。
    - `tavily`（`tavily_search`／`extract`；有金鑰多 `crawl`／`map`／`research`）：回傳已去導覽列與廣告，最省 token；要讀整站文件用 `crawl`。
-   - 選用 `firecrawl`：JS 渲染頁面抓不下來時用。
-4. 讀網頁備援：內建 `WebFetch` 抓到空白、亂碼或被擋時，在網址前加 `https://r.jina.ai/` 重抓，回純 Markdown。免金鑰，約 20 次／分。
+   - `firecrawl`（`firecrawl_scrape`／`search`／`parse`）：**只當讀整頁的第三步**（見 4），不當搜尋起手。
+4. 讀整頁的三步（可判定）：①內建 `WebFetch`（注意它是摘要不是原文，官方「lossy by design」）或 `parallel` `web_fetch`；②抓到空白、亂碼、被擋 → 網址前加 `https://r.jina.ai/` 重抓（免金鑰，約 20 次／分）；③Jina 仍空白或只剩「請啟用 JavaScript」→ `firecrawl_scrape`（會執行頁面 JS）。三步都空才可寫「抓不到」。
 5. 即時數值：第 3 節的開放 API，直接 `WebFetch` 拿 JSON。搜尋引擎索引有延遲、回的是網頁不是數值，不要用它查「現在幾度」「今天匯率」「比特幣多少」。
 6. 同一題不要同時開三個搜尋工具重複查；一個不夠再換下一個，並在回覆說明用了哪個來源。
 
@@ -63,13 +63,13 @@ Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔�
 
 | 名稱 | 預設 | 類型 | 金鑰 | 限制（官方說法） |
 |---|---|---|---|---|
-| parallel | 開 | 搜尋 | 不需要 | 匿名層速率較低，數字未公開 |
+| parallel | 開 | 搜尋 | 不需要；有則 `Authorization: Bearer <key>`（多 `web_research`） | 匿名層速率較低，數字未公開；有金鑰免費每月 $5，呼叫計入額度（docs.parallel.ai/integrations/mcp/quickstart，2026-10-31 查） |
 | exa | 開 | 搜尋 | 不需要；有則 `x-api-key` header | 免金鑰官方只寫「Free rate-limited usage」（數字未公開）；註冊後每月 1 日重置 $10 額度（約 2,500 次 Lite 搜尋），**用完回 402、不會自動退回免金鑰**，撞 402 就 `web --key exa=` 清掉金鑰（exa.ai/docs/admin/billing，2026-10-27 查） |
 | tavily | 關（有金鑰者開） | 搜尋／擷取 | 免金鑰需 header `X-Tavily-Access-Mode: keyless`（只開 search／extract）；有金鑰 `?tavilyApiKey=` | 免費方案 1,000 credits／月（基本搜尋 1、進階 2） |
 | context7 | 開 | 程式庫文件 | 不需要；有則 `Authorization: Bearer <key>` header | 免金鑰官方只寫「Low rate limits」（數字未公開）；免費帳號每月 1,000 次、用完每天補 20 次（context7.com/plans，2026-10-27 查） |
 | deepwiki | 開 | GitHub repo 文件 | 不需要 | 未公開；只能查已被 deepwiki.com 索引的公開 repo（沒索引的到該站輸入 repo 即可） |
 | mslearn | 開 | 微軟官方文件 | 不需要 | 未公開 |
-| firecrawl | 關 | JS 頁面抓取 | 不需要 | 依 IP 滾動限流；「while eligible」可能收回 |
+| firecrawl | 開（0.7.0 起） | JS 頁面抓取（讀整頁第三步） | 不需要；有則 `Authorization: Bearer <key>`（開全部工具） | 免金鑰依 IP 每日限流、只開 search／scrape／parse、「while eligible」可能收回；有金鑰免費 1,000 credits／月（docs.firecrawl.dev/mcp-server/keyless，2026-10-31 查） |
 
 不列入：Brave（2026-02 起取消免費方案、需信用卡）、博查 Bocha（需中國平台金鑰、簡體索引）、DuckDuckGo 社群 MCP（爬網頁，前端改版即壞）、Perplexity Sonar 與 Parallel Task API（付費，且多步規劃 Claude Code 自己會做）、Apify 新聞聚合 MCP（需 Apify token、按次計費）。
 瀏覽器類：**用 Claude Code 內建的 Claude in Chrome**（`mcp__claude-in-chrome__*`，接使用者真實 Chrome 與其登入狀態），不裝 Chrome DevTools MCP、Playwright。規則見第 6 節。
@@ -106,6 +106,19 @@ ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT   # 只關嚴格擴充檢查，其�
 urllib.request.urlopen(url, context=ctx)
 ```
 **不可**用 `ssl._create_unverified_context()`、`verify=False` 或 `check_hostname=False`。
+
+## 2c. 免費優先：有金鑰的搜尋服務怎麼用（0.7.0 起，可判定）
+
+安裝器對有金鑰的搜尋類服務（parallel、exa、tavily、context7、firecrawl）預設註冊**兩個** MCP：免金鑰版 `<名稱>` 與金鑰版 `<名稱>-key`（`local.json` 的 `keyMode[名稱]` 設 `always` 則只有金鑰版）。規則：
+
+1. 先用免金鑰版。
+2. 免金鑰版回 **429、5xx、逾時、402** 任一 → 這一次改用 `-key` 版重做。
+3. 之後同一服務**連續 3 次**直接用 `-key` 版（限流通常持續幾分鐘，不用每次都撞）。
+4. 第 4 次回到第 1 步再試免金鑰；成功就繼續免金鑰，失敗再進入 3 次。
+5. 沒有 `-key` 版（使用者沒填金鑰）就照第 1a 節換另一個索引。
+6. 回覆的「查證過程」寫明哪幾次用了 `-key` 版，讓使用者知道額度被用到。
+
+為什麼是 3 次不是「幾分鐘後」：Claude 沒有可靠的時鐘，次數才判得準；要改只動這個數字。exa 的金鑰版額度用完回 402，也走同一條（下月 1 日自動恢復）。
 
 ## 3. 即時數值開放 API（免金鑰、免費）
 

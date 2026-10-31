@@ -32,12 +32,18 @@ python installer/install.py web --off                               # 關閉：�
 註冊方式：
 - **中央氣象署**：https://opendata.cwa.gov.tw/ 加入會員 → 登入 → 開發指南 →「API 授權碼」→ 取得（`CWA-` 開頭）。免費；試用額度 1,000 次／天。
 - **Tavily**：https://app.tavily.com/ 用 Google／GitHub 登入，dashboard 自動產生金鑰。免費 1,000 credits／月、不用信用卡。不註冊也能用（免金鑰模式只開 search／extract）。
-- **Exa**：不註冊即可用；https://dashboard.exa.ai/ 註冊後每月 $10 額度、提高速率。注意額度用完回 402、不會自動退回免金鑰，撞到就 `web --key exa=` 清掉金鑰。
+- **Exa**：不註冊即可用；https://dashboard.exa.ai/api-keys 註冊後每月 1 日重置 $10 額度（≈2,500 次）。金鑰版額度用完回 402，但 0.7.0 起預設「免費優先」，免金鑰版 `exa` 照常可用、`exa-key` 只在限流時用，所以不會整個停擺。
+- **Parallel**：不註冊即可用；https://platform.parallel.ai/ 建金鑰（免費每月 $5）：`--key parallel=…`，多 `web_research` 工具、速率較高。
+- **Firecrawl**：不註冊即可用；https://www.firecrawl.dev/app/api-keys （免費 1,000 credits／月）：`--key firecrawl=…`，開全部工具。
 - **Context7**：不註冊即可用；https://context7.com/dashboard 免費金鑰（`ctx7sk-` 開頭）每月 1,000 次、提高速率（`--key context7=…`，以 `Authorization: Bearer` header 送）。
 - **環境部空品**：https://data.moenv.gov.tw/ 註冊取 api_key（台灣各測站官方 AQI）。
 - **OpenAQ**：https://explore.openaq.org/register 免費金鑰（全球官方測站空品）。
 - **TDX（交通部）**：https://tdx.transportdata.tw/ 註冊 → 會員中心 → 資料服務 → API 金鑰，取「API 金鑰內容」的 Client Id／Secret：`web --key tdx_id=… --key tdx_secret=…`。免費 5 次／分，只用於停車場等靜態資料單筆查詢。
 - **YouTube Data API（`youtube`）與 Gemini（`gemini`）**：影片來源用，步驟（含實際畫面核對）見 `docs/video.md`。
+
+## 免費優先（搜尋類金鑰的模式，0.7.0 起）
+
+填了 exa／tavily／context7／parallel／firecrawl 的金鑰後，安裝器預設同時註冊**免金鑰版** `<名稱>` 與**金鑰版** `<名稱>-key`；規則（`rules/web-sources.md` 第 2c 節）先用免金鑰版，回 429／5xx／402 才用 `-key` 版，之後連續 3 次用 `-key`、第 4 次再試免金鑰。想一律用金鑰：`web --key-mode exa=always`（只註冊金鑰版）；改回：`--key-mode exa=fallback`。`web --show` 會列出目前模式。
 
 ## 安裝器怎麼避免動到你的東西
 

@@ -12,6 +12,7 @@
 web 子命令（改本機偏好並立即套用；偏好存 <CLAUDE_HOME>/claude-dev-system/config/local.json，不進 repo）：
   --key 名稱=值     存金鑰（tavily、exa、cwa、youtube、gemini…）   --enable／--disable 名稱   開關某個 MCP
   --env 鍵=值       覆寫 env 值                   --off  關閉聯網來源並移除   --show  只顯示不套用
+  --key-mode 名稱=fallback|always   fallback（預設）：免金鑰版與 <名稱>-key 金鑰版並存、規則先用免金鑰；always：只用金鑰版
 video 子命令：不帶參數＝啟用（pip 安裝並登記）；--off 取消登記；--show 只檢查依賴與金鑰
 結束碼：0 成功／全部通過；1 check 或 verify 有 ❌；2 用法或狀態錯誤。
 """
@@ -49,6 +50,7 @@ def main(argv=None) -> int:
     ap.add_argument("--enable", action="append", default=[], metavar="MCP名稱")
     ap.add_argument("--disable", action="append", default=[], metavar="MCP名稱")
     ap.add_argument("--env", action="append", default=[], metavar="鍵=值")
+    ap.add_argument("--key-mode", action="append", default=[], metavar="名稱=fallback|always")
     ap.add_argument("--off", action="store_true")
     ap.add_argument("--show", action="store_true")
     a = ap.parse_args(argv)
@@ -64,7 +66,8 @@ def main(argv=None) -> int:
             code, log = commands.apply(lay, a.python, force=a.force, mode=a.cmd, with_web=True if a.with_web else None,
                                        with_video=True if a.with_video else None)
         elif a.cmd == "web":
-            code, log = commands.web_config(lay, keys=a.key, enable=a.enable, disable=a.disable, env=a.env, off=a.off, show=a.show)
+            code, log = commands.web_config(lay, keys=a.key, enable=a.enable, disable=a.disable, env=a.env, off=a.off, show=a.show,
+                                            key_mode=a.key_mode)
         elif a.cmd == "video":
             code, log = commands.video_config(lay, a.python, off=a.off, show=a.show)
         elif a.cmd == "uninstall":

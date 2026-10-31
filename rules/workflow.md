@@ -18,7 +18,7 @@
 - 同一類問題連續失敗 2 次：第 3 次同步派 2 個不同模型的 agent 查解法，與自己的嘗試交疊進行。
 
 ## 用量收尾（配合 hooks/usage_guard.py）
-- 門檻（預設 5 小時 ≥80% 或 7 天 ≥97%，數值在 `dispatch-config.json` 的 `usageThresholdPct`，專案 `.claude/dispatch-config.json` 優先於全域；方案期間見 `plan`）觸發時：不再派新 agent、不開新待辦；能在上限前做完的讓它做完，做不完的通知 agent 收尾（commit、存 patch、交報告）；更新交接紀錄；推送。
+- 門檻（預設 5 小時 ≥80% 或 7 天 ≥97%，數值在 `dispatch-config.json` 的 `usageThresholdPct`，專案 `.claude/dispatch-config.json` 優先於全域；0.7.0 起直接是兩個數字、沒有方案概念，沒到門檻不提示也不動作）觸發時：不再派新 agent、不開新待辦；能在上限前做完的讓它做完，做不完的通知 agent 收尾（commit、存 patch、交報告）；更新交接紀錄；推送。
 - 7 天門檻觸發要寫「詳細版」交接：每個待辦寫到不看對話也能做（背景、原話、根因、檔案、下一步指令、驗收標準）。
 - 開始大任務前先 `python ~/.claude/claude-dev-system/hooks/usage_guard.py --print` 估夠不夠，不夠先告訴使用者選項。
 

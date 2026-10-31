@@ -114,6 +114,10 @@ class UsageGuardConfig(unittest.TestCase):
             finally:
                 ug.CONFIG = old
 
+    def test_flat_thresholds_format(self):
+        self.assertEqual(self.ug.pick_thresholds({"usageThresholdPct": {"fiveHour": 95, "sevenDay": 99}}), (95.0, 99.0))
+        self.assertIsNone(self.ug.pick_thresholds({"usageThresholdPct": {"fiveHour": "x"}}))
+
     def test_plan_until_switches_to_after(self):
         cfg = self._cfg(95, 99, until="2026-11-13", after="p")
         cfg["plan"]["x"] = {"until": "2026-11-13"}
