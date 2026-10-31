@@ -86,6 +86,7 @@ class App:
         ttk.Label(top, textvariable=self.title_var, font=("", 12, "bold")).pack(side="left")
         ttk.Button(top, text="重新整理（重讀狀態）", command=self.refresh).pack(side="right")
         ttk.Button(top, text="檢查（verify）", command=self.do_verify).pack(side="right", padx=4)
+        ttk.Button(top, text="自我測試（9 題無頭對話，約 30 分鐘）", command=self.do_selftest).pack(side="right", padx=4)
 
         body = ttk.Frame(r)
         body.pack(fill="both", expand=True)
@@ -214,7 +215,6 @@ class App:
         self.usage_var = tk.StringVar(value=s.get("usage", {}).get("text", ""))
         self.notes.append(ttk.Label(uf, textvariable=self.usage_var, wraplength=800, justify="left")); self.notes[-1].pack(side="left")
         ttk.Button(uf, text="重新讀取用量", command=self.do_usage).pack(side="left", padx=8)
-        ttk.Button(uf, text="自我測試（9 題，約 30 分鐘）", command=self.do_selftest).pack(side="left")
 
         # 聯網
         webf = self._section("聯網來源（免金鑰搜尋／文件 MCP ＋ WebSearch 上限）")
@@ -270,11 +270,12 @@ class App:
         ttk.Label(kf, text="狀態", font=hdr).grid(row=0, column=1, sticky="w")
         ttk.Label(kf, text="金鑰值（按「顯示」看明文）", font=hdr).grid(row=0, column=2, sticky="w")
         ttk.Label(kf, text="模式", font=hdr).grid(row=0, column=5, sticky="w")
-        ttk.Label(kf, text="帳號備註（哪個帳號申請的）", font=hdr).grid(row=0, column=7, sticky="w", padx=6)
+        ttk.Label(kf, text="帳號備註（自己填：用哪個帳號申請的）", font=hdr).grid(row=0, column=7, sticky="w", padx=6)
         self.key_orig: dict[str, str] = {}
         self.note_vars: dict[str, tk.StringVar] = {}
         self.note_orig: dict[str, str] = {}
-        for i, (n, k) in enumerate(s["keys"].items(), start=1):
+        for idx, (n, k) in enumerate(s["keys"].items()):
+            i = 2 * idx + 1  # 每把金鑰兩列：第一列欄位，第二列整寬說明（右側窄欄會把說明擠成一個字一行）
             ttk.Label(kf, text=f"{k['label']}（{n}）").grid(row=i, column=0, sticky="w")
             self.key_status[n] = tk.StringVar(value="已設定" if k["present"] else "未設定")
             ttk.Label(kf, textvariable=self.key_status[n], width=18).grid(row=i, column=1, sticky="w")
@@ -306,9 +307,9 @@ class App:
             self.note_orig[n] = k.get("account", "")
             nv.trace_add("write", lambda *a: self.update_diff())
             ttk.Entry(kf, textvariable=nv, width=22).grid(row=i, column=7, sticky="w", padx=6)
-            self._note(kf, k["note"], wrap=300, row=i, column=8, sticky="w", padx=6)
-        kf.columnconfigure(8, weight=1)
-        ttk.Label(kf, text="「只能用金鑰」＝此服務沒有免金鑰版；「免費優先」＝免金鑰版與金鑰版並存、撞限流才用金鑰（沒填金鑰時不可選）；「註冊網頁」開官方申請頁，金鑰免費", foreground="#555").grid(row=len(s["keys"]) + 1, column=0, columnspan=9, sticky="w", pady=(6, 0))
+            self._note(kf, k["note"], wrap=900, row=i + 1, column=0, columnspan=8, sticky="w", padx=(24, 0), pady=(0, 6))
+        kf.columnconfigure(7, weight=1)
+        ttk.Label(kf, text="「只能用金鑰」＝此服務沒有免金鑰版；「免費優先」＝免金鑰版與金鑰版並存、撞限流才用金鑰（沒填金鑰時不可選）；「註冊網頁」開官方申請頁，金鑰免費", foreground="#555").grid(row=2 * len(s["keys"]) + 1, column=0, columnspan=8, sticky="w", pady=(6, 0))
 
         # Chrome
         cf = self._section("Claude in Chrome（開網頁看、操作需登入網站、教操作前核對畫面）")
