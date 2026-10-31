@@ -2,6 +2,10 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.8.7（2026-11-01）
+
+- 設定視窗：匯出時可選「含金鑰明文」（檔名加 -with-keys、檔內附警語），匯入含金鑰的檔會把金鑰填進輸入框、按套用才寫入；匯出匯入仍不含環境安裝（ffmpeg、PowerShell 7、faster-whisper 由新裝置的安裝鈕處理）。金鑰輸入框略縮讓說明欄更寬。來源：使用者問「匯出與匯入是全部設定與環境安裝、金鑰都包含嗎」。
+
 ## 0.8.6（2026-10-31）
 
 - 以 Claude in Chrome 實看四個服務的額度頁核對：Exa 餘額 $19.98、Free tier「$10 credits per month」、Lite 搜尋 $4／1k ✅；Context7「1/1,000 REQUESTS、COST Free」✅；Firecrawl「1,022 credits left、Resets Nov 2」✅；**Parallel 修正**：註冊送一次性 $20（本機帳號 12/30 到期），「每月 $5」須「Add a card to unlock monthly credits」，不綁卡沒有每月額度；搜尋 Turbo／Fast $1／1k、Basic／Advanced $5／1k。規則、設定檔、docs、視窗說明同步更正。來源：使用者「今天註冊的那四組金鑰，你開 Chrome 都幫我確認是不是都與你說的 API 額度一樣」。

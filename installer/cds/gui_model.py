@@ -541,11 +541,20 @@ def chrome_live_test(run=subprocess.run, timeout: int = 150) -> tuple[bool, str]
 
 # ---------- 匯出／匯入、備份 ----------
 
-def export_profile(state: dict, form: Form) -> dict:
-    """不含金鑰值；只有開關、env、模式、門檻、下載資料夾。"""
-    return {"claude-dev-system-profile": 1, "web_enabled": form.web_enabled, "servers": dict(form.servers), "env": dict(form.env),
-            "video_enabled": form.video_enabled, "key_modes": dict(form.key_modes), "thresholds": dict(form.thresholds),
-            "download_dir": form.download_dir, "chrome_default_enabled": form.chrome_default_enabled, "usage_guard": form.usage_guard}
+def export_profile(state: dict, form: Form, include_keys: bool = False, current_keys: dict | None = None) -> dict:
+    """開關、env、模式、門檻、下載資料夾、用量守門、Chrome 預設；include_keys=True 時另附金鑰明文（給搬到新裝置用，檔案要妥善保管）。
+    不含環境安裝（ffmpeg、PowerShell 7、faster-whisper 是裝在系統裡的，匯入後在新裝置按安裝鈕）。"""
+    d = {"claude-dev-system-profile": 1, "web_enabled": form.web_enabled, "servers": dict(form.servers), "env": dict(form.env),
+         "video_enabled": form.video_enabled, "key_modes": dict(form.key_modes), "thresholds": dict(form.thresholds),
+         "download_dir": form.download_dir, "chrome_default_enabled": form.chrome_default_enabled, "usage_guard": form.usage_guard}
+    if include_keys:
+        keys = dict(current_keys or {})
+        for n, v in form.keys.items():  # 表單裡尚未套用的新值優先
+            if v is not None:
+                keys[n] = v
+        d["keys"] = {n: v for n, v in keys.items() if v}
+        d["_warning"] = "此檔含金鑰明文，請勿分享或放進 repo"
+    return d
 
 
 def import_profile(form: Form, data: dict) -> Form:
@@ -558,6 +567,10 @@ def import_profile(form: Form, data: dict) -> Form:
     for k in ("servers", "env", "key_modes", "thresholds"):
         if isinstance(data.get(k), dict):
             getattr(f, k).update(data[k])
+    if isinstance(data.get("keys"), dict):
+        for n, v in data["keys"].items():
+            if n in KEY_INFO and isinstance(v, str) and v:
+                f.keys[n] = v
     return f
 
 

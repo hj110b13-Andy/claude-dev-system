@@ -169,6 +169,12 @@ class ReadAndDiff(Base):
         self.assertNotIn("SECRET", json.dumps(data))
         g = gm.import_profile(gm.form_from_state(s), data)
         self.assertFalse(g.servers["exa"])
+        self.assertTrue(all(v is None for v in g.keys.values()), "不含金鑰的檔不動金鑰")
+        data2 = gm.export_profile(s, f, include_keys=True, current_keys={"moenv": "M1"})
+        self.assertEqual(data2["keys"], {"cwa": "SECRET", "moenv": "M1"})
+        self.assertIn("_warning", data2)
+        g2 = gm.import_profile(gm.form_from_state(s), data2)
+        self.assertEqual((g2.keys["cwa"], g2.keys["moenv"]), ("SECRET", "M1"))
         with self.assertRaises(ValueError):
             gm.import_profile(f, {"foo": 1})
 

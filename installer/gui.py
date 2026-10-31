@@ -264,7 +264,7 @@ class App:
             self.key_vars[n] = var
             self.key_orig[n] = k["value"]
             self.key_dirty[n] = False
-            ent = ttk.Entry(kf, textvariable=var, width=34, show="•")
+            ent = ttk.Entry(kf, textvariable=var, width=30, show="•")
             ent.grid(row=i, column=2, sticky="w", padx=4)
             var.trace_add("write", lambda *a, n=n: self._key_typed(n))
             ttk.Button(kf, text="顯示", width=5, command=lambda e=ent: e.configure(show="" if e.cget("show") else "•")).grid(row=i, column=3)
@@ -491,11 +491,16 @@ class App:
         self._run_bg(job, refresh_after=False)
 
     def do_export(self):
-        p = filedialog.asksaveasfilename(title="匯出設定（不含金鑰）", defaultextension=".json", initialfile="claude-dev-system-profile.json")
+        inc = messagebox.askyesnocancel("匯出設定", "要把金鑰一起匯出嗎？\n\n是＝含金鑰明文（方便搬到新裝置，檔案要妥善保管、不可分享）\n否＝只匯出開關與數值\n取消＝不匯出\n\n（環境安裝如 ffmpeg、PowerShell 7 不在設定檔內，新裝置開視窗後按安裝鈕）")
+        if inc is None:
+            return
+        p = filedialog.asksaveasfilename(title="匯出設定" + ("（含金鑰）" if inc else "（不含金鑰）"), defaultextension=".json",
+                                         initialfile="claude-dev-system-profile" + ("-with-keys" if inc else "") + ".json")
         if not p:
             return
-        Path(p).write_text(json.dumps(gm.export_profile(self.state, self._collect()), ensure_ascii=False, indent=2), encoding="utf-8")
-        self._log(f"已匯出 {p}")
+        cur = gm._local(self.lay).get("keys") or {}
+        Path(p).write_text(json.dumps(gm.export_profile(self.state, self._collect(), include_keys=bool(inc), current_keys=cur), ensure_ascii=False, indent=2), encoding="utf-8")
+        self._log(f"已匯出 {p}" + ("（含金鑰明文，請妥善保管）" if inc else "（不含金鑰）"))
 
     def do_import(self):
         p = filedialog.askopenfilename(title="匯入設定", filetypes=[("JSON", "*.json")])
@@ -520,7 +525,12 @@ class App:
             mv.set("一律用金鑰" if f.key_modes.get(n) == "always" else "免費優先")
         if f.chrome_default_enabled is not None and self.state["chrome"]["default_enabled"] is not None:
             self.chrome_var.set(f.chrome_default_enabled)
-        self._log(f"已匯入 {p}（金鑰不在設定檔內，請另外填）")
+        n_keys = 0
+        for n, v in f.keys.items():
+            if v and n in self.key_vars:
+                self.key_vars[n].set(v)
+                n_keys += 1
+        self._log(f"已匯入 {p}" + (f"（含 {n_keys} 把金鑰，按套用才寫入）" if n_keys else "（不含金鑰）"))
         self.update_diff()
 
     def do_backups(self):
