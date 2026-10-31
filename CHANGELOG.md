@@ -2,6 +2,11 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.9.0（2026-11-01）
+
+- **背景任務巡檢**（可開關、可設分鐘數）：規則 `core.md` 新增——派出 Agent／背景 Bash／Monitor／Workflow 後，若 `dispatch-config.json` 的 `taskCheck.enabled`（預設 true、`minutes` 預設 10），立刻用 Claude Code 的 `CronCreate` 建一個每 N 分鐘的巡檢排程（固定 prompt：列出所有進行中任務、讀最新輸出、結束或出錯立刻處理、全部結束就 `CronDelete`），每場對話只建一個、沒有背景任務不建、巡檢不派新 agent。限制（Claude Code 的 CronCreate）：排程只在閒置時觸發、可能晚最多半個週期、僅存在於該場對話。設定視窗核心區新增勾選框與分鐘數；匯出匯入包含。來源：使用者「可以選擇要不要啟用、自己設定每過多少分鐘 Claude Code 會自動查看當前所有執行任務的狀況…沒有執行的任務時就關閉」。
+- 查證：`CronCreate` 工具說明（session-only、「Jobs only fire while the REPL is idle」、遞延最多 50% 週期、7 天到期）。
+
 ## 0.8.7（2026-11-01）
 
 - 設定視窗：匯出時可選「含金鑰明文」（檔名加 -with-keys、檔內附警語），匯入含金鑰的檔會把金鑰填進輸入框、按套用才寫入；匯出匯入仍不含環境安裝（ffmpeg、PowerShell 7、faster-whisper 由新裝置的安裝鈕處理）。金鑰輸入框略縮讓說明欄更寬。來源：使用者問「匯出與匯入是全部設定與環境安裝、金鑰都包含嗎」。

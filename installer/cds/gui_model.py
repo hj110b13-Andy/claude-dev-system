@@ -154,6 +154,33 @@ def read_thresholds(lay: Layout) -> dict:
     return dict(DEFAULT_THRESHOLDS)
 
 
+DEFAULT_TASK_CHECK = {"enabled": True, "minutes": 10}
+
+
+def read_task_check(lay: Layout) -> dict:
+    p = lay.payload / "config" / "dispatch-config.json"
+    try:
+        t = read_json(p).get("taskCheck") or {}
+    except Exception:  # noqa: BLE001
+        return dict(DEFAULT_TASK_CHECK)
+    out = dict(DEFAULT_TASK_CHECK)
+    if isinstance(t.get("enabled"), bool):
+        out["enabled"] = t["enabled"]
+    if isinstance(t.get("minutes"), (int, float)) and t["minutes"] > 0:
+        out["minutes"] = int(t["minutes"])
+    return out
+
+
+def write_task_check(lay: Layout, enabled: bool, minutes: int) -> None:
+    p = lay.payload / "config" / "dispatch-config.json"
+    d = read_json(p) if p.exists() else {}
+    t = d.get("taskCheck") if isinstance(d.get("taskCheck"), dict) else {}
+    desc = t.get("$說明") or "背景任務巡檢：有背景任務時每 minutes 分鐘用 CronCreate 醒來檢查，全部結束後刪除排程；enabled=false 完全不做。"
+    d["taskCheck"] = {"$說明": desc, "enabled": bool(enabled), "minutes": int(minutes)}
+    d["updated"] = _dt.date.today().isoformat()
+    write_json(p, d)
+
+
 def write_thresholds(lay: Layout, five: float, seven: float) -> None:
     """只改 usageThresholdPct 的兩個數字（扁平格式），其餘鍵保留；舊 plan 格式一併扁平化。"""
     p = lay.payload / "config" / "dispatch-config.json"
@@ -214,6 +241,7 @@ def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.de
                   "download_dir": ((local.get("video") or {}).get("downloadDir") or vcfg.get("downloadDir") or "")},
         "keys": keys,
         "thresholds": read_thresholds(lay) if m else dict(DEFAULT_THRESHOLDS),
+        "task_check": read_task_check(lay) if m else dict(DEFAULT_TASK_CHECK),
         "chrome": {"extension": chrome_extension_installed(), "native_host": chrome_native_host_registered(),
                    "default_enabled": chrome_default_enabled(lay)},
         "hooks": {"usage_guard": bool(m and (m.get("settings") or {}).get("hooksAdded")),
@@ -235,11 +263,13 @@ class Form:
     download_dir: str = ""
     chrome_default_enabled: bool | None = None
     usage_guard: bool = True
+    task_check: dict = field(default_factory=lambda: dict(DEFAULT_TASK_CHECK))
 
 
 def form_from_state(state: dict) -> Form:
     f = Form()
     f.usage_guard = state["hooks"]["usage_guard_pref"]
+    f.task_check = dict(state.get("task_check") or DEFAULT_TASK_CHECK)
     f.web_enabled = state["web"]["enabled"]
     f.servers = {n: s["wanted"] for n, s in state["web"]["servers"].items()}
     f.env = {k: (state["web"]["env_override"].get(k) or state["web"]["env"].get(k) or state["web"]["env_defaults"].get(k) or "")
@@ -307,6 +337,9 @@ def diff(state: dict, form: Form) -> list[Change]:
     for k in ("fiveHour", "sevenDay"):
         if float(form.thresholds.get(k, state["thresholds"][k])) != float(state["thresholds"][k]):
             ch.append(Change("thresholds", f"用量門檻 {'5 小時' if k == 'fiveHour' else '7 天'}：{state['thresholds'][k]}% → {form.thresholds[k]}%"))
+    tc0 = state.get("task_check") or DEFAULT_TASK_CHECK
+    if bool(form.task_check.get("enabled")) != bool(tc0["enabled"]) or int(form.task_check.get("minutes", tc0["minutes"])) != int(tc0["minutes"]):
+        ch.append(Change("task_check", "背景任務巡檢 → " + (f"每 {int(form.task_check['minutes'])} 分鐘" if form.task_check.get("enabled") else "關閉")))
     if (form.download_dir or "") != (state["video"]["download_dir"] or ""):
         ch.append(Change("download_dir", f"下載資料夾 → {form.download_dir or '~/Downloads（預設）'}"))
     if form.chrome_default_enabled is not None and form.chrome_default_enabled != state["chrome"]["default_enabled"]:
@@ -362,6 +395,9 @@ def apply_form(lay: Layout, python: str, state: dict, form: Form, log, repo: Pat
     if any(c.kind == "thresholds" for c in changes):
         write_thresholds(lay, float(form.thresholds["fiveHour"]), float(form.thresholds["sevenDay"]))
         log(f"用量門檻寫入 {form.thresholds['fiveHour']}／{form.thresholds['sevenDay']}")
+    if any(c.kind == "task_check" for c in changes):
+        write_task_check(lay, bool(form.task_check.get("enabled")), int(form.task_check.get("minutes", 10)))
+        log(f"背景任務巡檢寫入：{'每 ' + str(int(form.task_check['minutes'])) + ' 分鐘' if form.task_check.get('enabled') else '關閉'}")
     if any(c.kind == "download_dir" for c in changes):
         local = _local(lay)
         local.setdefault("video", {})["downloadDir"] = form.download_dir or ""
@@ -546,7 +582,8 @@ def export_profile(state: dict, form: Form, include_keys: bool = False, current_
     不含環境安裝（ffmpeg、PowerShell 7、faster-whisper 是裝在系統裡的，匯入後在新裝置按安裝鈕）。"""
     d = {"claude-dev-system-profile": 1, "web_enabled": form.web_enabled, "servers": dict(form.servers), "env": dict(form.env),
          "video_enabled": form.video_enabled, "key_modes": dict(form.key_modes), "thresholds": dict(form.thresholds),
-         "download_dir": form.download_dir, "chrome_default_enabled": form.chrome_default_enabled, "usage_guard": form.usage_guard}
+         "download_dir": form.download_dir, "chrome_default_enabled": form.chrome_default_enabled, "usage_guard": form.usage_guard,
+         "task_check": dict(form.task_check)}
     if include_keys:
         keys = dict(current_keys or {})
         for n, v in form.keys.items():  # 表單裡尚未套用的新值優先
@@ -564,7 +601,7 @@ def import_profile(form: Form, data: dict) -> Form:
     for k in ("web_enabled", "video_enabled", "download_dir", "chrome_default_enabled", "usage_guard"):
         if k in data:
             setattr(f, k, data[k])
-    for k in ("servers", "env", "key_modes", "thresholds"):
+    for k in ("servers", "env", "key_modes", "thresholds", "task_check"):
         if isinstance(data.get(k), dict):
             getattr(f, k).update(data[k])
     if isinstance(data.get("keys"), dict):

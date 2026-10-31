@@ -201,6 +201,14 @@ class App:
         ttk.Label(th, text="%").pack(side="left")
         for v in (self.five_var, self.seven_var):
             v.trace_add("write", lambda *a: self.update_diff())
+        tc = f.task_check
+        tcf = ttk.Frame(core); tcf.pack(anchor="w", pady=4)
+        self.tc_var = tk.BooleanVar(value=bool(tc.get("enabled")))
+        ttk.Checkbutton(tcf, text="背景任務巡檢：有背景任務或 agent 在跑時，每", variable=self.tc_var, command=self.update_diff).pack(side="left")
+        self.tc_min_var = tk.StringVar(value=str(int(tc.get("minutes", 10))))
+        self._no_wheel_change(ttk.Spinbox(tcf, from_=1, to=120, width=5, textvariable=self.tc_min_var, command=self.update_diff)).pack(side="left")
+        ttk.Label(tcf, text="分鐘自動檢查一次所有任務（結束或出錯就處理；全部結束就停；沒有任務時不會跑）").pack(side="left")
+        self.tc_min_var.trace_add("write", lambda *a: self.update_diff())
 
         # 聯網
         webf = self._section("聯網來源（免金鑰搜尋／文件 MCP ＋ WebSearch 上限）")
@@ -324,6 +332,10 @@ class App:
             f.thresholds = {"fiveHour": float(self.five_var.get()), "sevenDay": float(self.seven_var.get())}
         except ValueError:
             f.thresholds = dict(self.state["thresholds"])
+        try:
+            f.task_check = {"enabled": self.tc_var.get(), "minutes": max(1, int(self.tc_min_var.get()))}
+        except ValueError:
+            f.task_check = dict(self.state.get("task_check") or gm.DEFAULT_TASK_CHECK)
         if self.state["chrome"]["default_enabled"] is not None:
             f.chrome_default_enabled = self.chrome_var.get()
         return f
@@ -518,6 +530,8 @@ class App:
             v.set(f.env.get(k, v.get()))
         self.video_var.set(f.video_enabled)
         self.guard_var.set(f.usage_guard)
+        self.tc_var.set(bool(f.task_check.get("enabled")))
+        self.tc_min_var.set(str(int(f.task_check.get("minutes", 10))))
         self.dl_var.set(f.download_dir or "")
         self.five_var.set(str(f.thresholds.get("fiveHour", self.five_var.get())))
         self.seven_var.set(str(f.thresholds.get("sevenDay", self.seven_var.get())))

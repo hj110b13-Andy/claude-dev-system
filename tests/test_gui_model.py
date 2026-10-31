@@ -160,6 +160,26 @@ class ReadAndDiff(Base):
         self.assertNotIn("plan", d)
         self.assertIn("modelTable", d, "其他鍵保留")
 
+    def test_task_check_roundtrip(self):
+        s = self.state()
+        f = gm.form_from_state(s)
+        self.apply(f, s)
+        s = self.state()
+        self.assertEqual(s["task_check"], {"enabled": True, "minutes": 10})
+        f = gm.form_from_state(s)
+        f.task_check = {"enabled": True, "minutes": 5}
+        self.assertTrue(any("每 5 分鐘" in c.text for c in gm.diff(s, f)))
+        self.apply(f, s)
+        self.assertEqual(self.state()["task_check"]["minutes"], 5)
+        s = self.state()
+        f = gm.form_from_state(s)
+        f.task_check["enabled"] = False
+        self.assertTrue(any("巡檢 → 關閉" in c.text for c in gm.diff(s, f)))
+        self.apply(f, s)
+        self.assertFalse(self.state()["task_check"]["enabled"])
+        d = json.loads((self.lay.payload / "config" / "dispatch-config.json").read_text(encoding="utf-8"))
+        self.assertIn("modelTable", d, "其他鍵保留")
+
     def test_export_import_profile_has_no_keys(self):
         s = self.state()
         f = gm.form_from_state(s)

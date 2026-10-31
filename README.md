@@ -1,7 +1,7 @@
 # claude-dev-system
 
 把 Stock-web 專案系統優化中「成熟且驗證過」的通用流程，封裝成可跨專案、跨裝置安裝的 Claude Code 全域工具。
-版本見 `config/VERSION`（目前 0.8.7），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
+版本見 `config/VERSION`（目前 0.9.0），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
 
 ## 內容與分層
 
@@ -45,7 +45,7 @@ python installer/install.py verify     # 全部 ✅ 才算完成；重開 Claude
 ```bash
 python installer/install.py gui        # Windows：py -3 installer/install.py gui
 ```
-所有選用項目、金鑰（框內顯示目前值、可測試）、用量守門開關與門檻、WebSearch 上限、下載資料夾、Claude in Chrome 都在視窗裡改；底下會列「將變更 N 項」，按「套用」才動，按「取消」回到實際狀態。開啟與套用後都重讀真實檔案，畫面不會和實際不一樣。缺 ffmpeg／PowerShell 7／faster-whisper 有安裝按鈕。打包成 exe 與視窗內更新在下一版。
+所有選用項目、金鑰（框內顯示目前值、可測試）、用量守門開關與門檻、背景任務巡檢（每 N 分鐘）、WebSearch 上限、下載資料夾、Claude in Chrome 都在視窗裡改；底下會列「將變更 N 項」，按「套用」才動，按「取消」回到實際狀態。開啟與套用後都重讀真實檔案，畫面不會和實際不一樣。缺 ffmpeg／PowerShell 7／faster-whisper 有安裝按鈕。打包成 exe 與視窗內更新在下一版。
 
 ## 選用：聯網來源
 
