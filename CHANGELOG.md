@@ -2,6 +2,10 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.10.2（2026-11-01）
+
+- CI 再修：GitHub Actions 的 Windows runner 主控台是 cp1252，`build_exe.py` 最後印「產物：…」的中文炸 UnicodeEncodeError（exe 其實已打好）→ stdout 改 UTF-8、workflow 加 `PYTHONUTF8=1`。v0.10.1 標籤同樣沒有 Release。
+
 ## 0.10.1（2026-11-01）
 
 - CI 修正：GitHub Actions 的 runner 沒有 `claude` 指令，`chrome_live_test` 的單元測試在 CI 失敗（本機都過）→ 函式可注入 `which`，測試用假值；v0.10.0 的 Release 因此沒建成，改以 v0.10.1 發第一個 exe。環境列的 ffmpeg 只顯示最後兩層路徑，不再撐出視窗。

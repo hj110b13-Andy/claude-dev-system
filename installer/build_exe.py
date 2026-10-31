@@ -21,6 +21,10 @@ FILES = ("README.md", "CHANGELOG.md", "CLAUDE.md")
 
 
 def main(argv=None) -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # GitHub Actions 的 Windows runner 主控台是 cp1252，印中文會炸
+    except Exception:  # noqa: BLE001
+        pass
     ap = argparse.ArgumentParser()
     ap.add_argument("--console", action="store_true", help="保留主控台視窗（除錯用）")
     ap.add_argument("--dist", default=str(REPO / "dist"))
