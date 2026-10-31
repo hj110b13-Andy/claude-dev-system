@@ -629,13 +629,16 @@ def install_action(action: str, python: str, gpu: bool = False, run=subprocess.r
 
 
 def chrome_live_test(run=subprocess.run, timeout: int = 150) -> tuple[bool, str]:
-    """第三層：背景跑一次 claude -p --chrome 叫它截一張 about:blank。會用掉約一場對話開場的用量，只手動觸發。"""
+    """第三層：背景跑一次 claude -p --chrome 叫它開 example.com 讀標題。會用掉約一場對話開場的用量，只手動觸發。"""
     exe = shutil.which("claude")
     if not exe:
         return False, "找不到 claude 指令"
-    prompt = "用 Claude in Chrome 開一個新分頁到 about:blank 並截圖一次。成功只回答「CHROME_OK」，失敗回答「CHROME_FAIL: 原因」。不要做其他事。"
+    # 不能用 about:blank：擴充功能會拒絕「browser-internal or unparseable URLs」（2026-11-01 使用者按視窗按鈕實測失敗），改開 example.com
+    prompt = ("用 Claude in Chrome 開一個新分頁到 https://example.com ，用 get_page_text 或 read_page 確認頁面標題含 Example Domain，然後關掉這個分頁。"
+              "成功只回答「CHROME_OK」，失敗回答「CHROME_FAIL: 原因」。不要做其他事。")
+    allowed = ",".join(f"mcp__claude-in-chrome__{t}" for t in ("tabs_context_mcp", "tabs_create_mcp", "navigate", "get_page_text", "read_page", "find", "computer", "tabs_close_mcp"))
     try:
-        r = run([exe, "-p", prompt, "--chrome", "--max-turns", "6", "--output-format", "json", "--no-session-persistence"],
+        r = run([exe, "-p", prompt, "--chrome", "--max-turns", "8", "--output-format", "json", "--no-session-persistence", "--allowedTools", allowed],
                 capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return False, f"{timeout} 秒內沒有結果（Chrome 可能沒開或擴充未連線）"
