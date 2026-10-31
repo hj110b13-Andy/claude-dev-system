@@ -111,6 +111,26 @@ def find_system_python(which=shutil.which, run=subprocess.run) -> tuple[str | No
     return None, None
 
 
+def system_importer(python: str | None):
+    """exe 模式用的 importer：在系統 Python 裡 import 模組拿版本（exe 內建的 Python 沒裝 yt-dlp／faster-whisper，直接 import 會誤報未裝）。"""
+    if not python:
+        return lambda mod: None
+
+    def imp(mod: str):
+        code = ("import importlib,sys\n"
+                "try:\n m=importlib.import_module(sys.argv[1])\nexcept Exception:\n sys.exit(3)\n"
+                "v=getattr(m,'__version__',None)\n"
+                "if v is None and sys.argv[1]=='yt_dlp':\n"
+                " v=getattr(getattr(m,'version',None),'__version__',None)\n"
+                "print(v or '')")
+        try:
+            r = subprocess.run([python, "-c", code, mod], capture_output=True, timeout=60)
+        except Exception:  # noqa: BLE001
+            return None
+        return (r.stdout or b"").decode("utf-8", "replace").strip() if r.returncode == 0 else None
+    return imp
+
+
 def env_status(repo: Path = REPO, which=shutil.which, importer=video.default_importer, ffmpeg=video.ffmpeg_path,
                claude_status=claude_code_status, run=subprocess.run, python: str | None = None) -> dict[str, EnvItem]:
     out: dict[str, EnvItem] = {}

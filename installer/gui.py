@@ -493,7 +493,7 @@ class App:
     # ---------- 動作 ----------
     def refresh(self):
         try:
-            self.state = gm.read_state(self.lay, repo=self.repo, python=PY if FROZEN else None)
+            self.state = gm.read_state(self.lay, repo=self.repo, python=PY if FROZEN else None, importer=gm.system_importer(PY) if FROZEN else gm.video.default_importer)
         except Exception as e:  # noqa: BLE001
             messagebox.showerror("讀取狀態失敗", str(e))
             return
@@ -715,7 +715,7 @@ def main(argv=None) -> int:
     if a.selfcheck:
         lay = Layout(claude_home(a.claude_home))
         repo = appdir.effective_repo(lay)
-        s = gm.read_state(lay, repo=repo, python=PY if FROZEN else None)
+        s = gm.read_state(lay, repo=repo, python=PY if FROZEN else None, importer=gm.system_importer(PY) if FROZEN else gm.video.default_importer)
         out = {"frozen": FROZEN, "repo": str(repo), "repo_version": s["repo_version"], "installed": s["installed"], "version": s["version"],
                "python": PY, "env": {k: [v.ok, v.detail] for k, v in s["env"].items()}, "keys_present": sum(1 for k in s["keys"].values() if k["present"]),
                "servers": list(s["web"]["servers"])}
