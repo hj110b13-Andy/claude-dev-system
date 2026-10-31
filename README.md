@@ -1,7 +1,7 @@
 # claude-dev-system
 
 把 Stock-web 專案系統優化中「成熟且驗證過」的通用流程，封裝成可跨專案、跨裝置安裝的 Claude Code 全域工具。
-版本見 `config/VERSION`（目前 0.9.4），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
+版本見 `config/VERSION`（目前 0.9.5），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
 
 ## 內容與分層
 
@@ -91,7 +91,7 @@ python ~/.claude/claude-dev-system/tools/video.py setup  # 檢查 ffmpeg、faste
 8. **問：要不要啟用 Claude in Chrome？**（開網頁看狀況、操作需登入的網站、FB 社團、測自己的網站都靠它）→ 要就請使用者裝 Chrome 擴充「Claude in Chrome」、同帳號登入、在對話打 `/chrome` 開「Enabled by default」。這不是安裝器能做的。
 9. **問：要不要裝 PowerShell 7？**（Windows 建議要；5.1 的 JSON 中文亂碼、`Get-Content` 編碼、不支援 `&&`／三元運算子等坑在 7 全部消失，Claude Code 會自動改用它）→ `winget install --id Microsoft.PowerShell --source winget --installer-type wix`（**要 MSI 版**，Store 版 Claude Code 偵測不到；會跳 UAC）。PowerShell 自身走 Microsoft Update 更新是安裝預設；若使用者想讓 Windows Update 一併接收其他 Microsoft 產品更新，請他自己到「設定 → Windows Update → 進階選項」打開，Claude 不代改。裝完重開 Claude Code。
 10. **告知（不代做）：Windows 系統碼頁**。安裝器已用 env 修好 Python 子程序的中文輸出；若使用者還常遇到 PowerShell 5.1 讀無 BOM 檔亂碼，可自行開啟 Windows「Beta: 使用 Unicode UTF-8 提供全球語言支援」並重開機；副作用與取捨見 `rules/web-sources.md`「Windows 亂碼的三個根源與修法」。Claude 不可代改系統設定。
-11. **問：用量門檻要設多少？** `config/dispatch-config.json` 的 `usageThresholdPct` 預設 5 小時 80%、7 天 97%；沒到門檻完全不提示也不動作，到了才注入收尾提醒。Max 方案的人常改 95／99。直接改兩個數字即可（0.7.0 起沒有方案概念），安裝器之後 update 會保留他的版本。
+11. **問：用量門檻要設多少？** `config/dispatch-config.json` 的 `usageThresholdPct` 預設 5 小時 85%、7 天 97%；沒到門檻完全不提示也不動作，到了才注入收尾提醒。Max 方案的人常改 95／99。直接改兩個數字即可（0.7.0 起沒有方案概念），安裝器之後 update 會保留他的版本。
 12. 已裝過舊版的機器：`git pull` → `update --with-web --with-video` → 補金鑰 → `verify`。
 
 ## 更新

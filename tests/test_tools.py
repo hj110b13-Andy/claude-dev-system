@@ -109,7 +109,7 @@ class UsageGuardConfig(unittest.TestCase):
                 self.assertIn("全域", src)
                 ug.CONFIG = str(td / "missing.json")
                 lim, src = ug.load_limits(str(td))
-                self.assertEqual((lim["fiveHourLimit"], lim["sevenDayLimit"]), (80.0, 97.0))
+                self.assertEqual((lim["fiveHourLimit"], lim["sevenDayLimit"]), (85.0, 97.0))
                 self.assertEqual(src, "內建預設")
             finally:
                 ug.CONFIG = old
@@ -122,7 +122,7 @@ class UsageGuardConfig(unittest.TestCase):
         cfg = self._cfg(95, 99, until="2026-11-13", after="p")
         cfg["plan"]["x"] = {"until": "2026-11-13"}
         self.assertEqual(self.ug.pick_thresholds(cfg, "2026-11-12"), (95.0, 99.0))
-        self.assertEqual(self.ug.pick_thresholds(cfg, "2026-11-13"), (80.0, 97.0))
+        self.assertEqual(self.ug.pick_thresholds(cfg, "2026-11-13"), (85.0, 97.0))
 
 
 if __name__ == "__main__":

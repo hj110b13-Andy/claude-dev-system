@@ -66,7 +66,7 @@ TOOL_DESC = {  # 其他功能說明
 }
 CHROME_EXT_ID = "fcoeoabgfenejglbffodgkkbkcdhcgfn"
 NATIVE_HOST_KEY = r"Software\Google\Chrome\NativeMessagingHosts\com.anthropic.claude_browser_extension"
-DEFAULT_THRESHOLDS = {"fiveHour": 80, "sevenDay": 97}
+DEFAULT_THRESHOLDS = {"fiveHour": 85, "sevenDay": 97}
 
 
 # ---------- 狀態 ----------

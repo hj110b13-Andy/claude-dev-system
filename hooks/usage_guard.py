@@ -21,7 +21,7 @@ import sys
 import time
 import urllib.request
 
-DEFAULTS = {"fiveHourLimit": 80.0, "sevenDayLimit": 97.0, "checkTtl": 300, "checkTtlNear": 60, "alertRepeat": 600,
+DEFAULTS = {"fiveHourLimit": 85.0, "sevenDayLimit": 97.0, "checkTtl": 300, "checkTtlNear": 60, "alertRepeat": 600,
             "nearFiveHour": 70.0, "nearSevenDay": 90.0}
 STALE_REPEAT = 600
 URL = "https://api.anthropic.com/api/oauth/usage"
