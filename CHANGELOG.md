@@ -2,6 +2,11 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.9.1（2026-11-01）
+
+- Gemini 免費層實際額度（AI Studio Rate Limit 頁 2026-11-01 實看）：3.8 Flash 每天 20 次、每分鐘 5 次（本機帳號已撞滿），3.5 Flash Lite 每天 500 次、每分鐘 15 次。`video.py` 的 429 改為走備用模型（原本直接結束），`video.json` 備用順序改為 3.5 Flash Lite → 2.5 Flash；規則第 9 節補上這些數字與「一題 ask 不超過 3 次」。來源：使用者「剛剛沒檢查到額度的金鑰都開頁面給我…你來查看」。
+- 以 Chrome 再核對 Parallel Billing 頁：可見文字為「Add a card to unlock monthly credits. You're only charged when you buy credits.」與兩個 Add Card 按鈕，無任何 auto-recharge／自動加值開關；結論：綁卡本身不扣款、只解鎖每月 $5，主動買額度才收費。
+
 ## 0.9.0（2026-11-01）
 
 - **背景任務巡檢**（可開關、可設分鐘數）：規則 `core.md` 新增——派出 Agent／背景 Bash／Monitor／Workflow 後，若 `dispatch-config.json` 的 `taskCheck.enabled`（預設 true、`minutes` 預設 15（使用者指定）），立刻用 Claude Code 的 `CronCreate` 建一個每 N 分鐘的巡檢排程（固定 prompt：列出所有進行中任務、讀最新輸出、結束或出錯立刻處理、全部結束就 `CronDelete`），每場對話只建一個、沒有背景任務不建、巡檢不派新 agent。限制（Claude Code 的 CronCreate）：排程只在閒置時觸發、可能晚最多半個週期、僅存在於該場對話。設定視窗核心區新增勾選框與分鐘數；匯出匯入包含。來源：使用者「可以選擇要不要啟用、自己設定每過多少分鐘 Claude Code 會自動查看當前所有執行任務的狀況…沒有執行的任務時就關閉」。

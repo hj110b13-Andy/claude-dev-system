@@ -687,7 +687,7 @@ def gemini_req(method: str, url: str, data: bytes | None = None, headers: dict |
                 time.sleep(5 * (attempt + 1))
                 continue
             if e.code == 429:
-                die("Gemini 免費額度或速率用完（每天 YouTube 8 小時；RPM／RPD 依模型）。等一下再試或換 --model。原文：" + msg, 3)
+                raise GeminiError(429, "額度或速率用完（免費層依模型：3.8 Flash 每天 20 次、每分鐘 5 次；3.5 Flash Lite 每天 500 次）：" + msg[:120])
             raise GeminiError(e.code, msg)
     raise GeminiError(0, "重試用盡")
 
@@ -749,7 +749,7 @@ def gemini_ask(src: str, question: str, model: str, clip: tuple[str, str] | None
             if e.code in (503, 500, 404, 429) and i < len(models) - 1:
                 warn(f"{m} 失敗（{e}），換下一個模型")
                 continue
-            die(str(e), 3)
+            die(str(e) + ("；等明天（太平洋時間午夜重置）或換 --model" if e.code == 429 else ""), 3)
     try:
         return "".join(p.get("text", "") for p in out["candidates"][0]["content"]["parts"])
     except (KeyError, IndexError, TypeError):

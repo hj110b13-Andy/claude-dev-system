@@ -257,7 +257,7 @@ Claude 不能直接「看」影片（Claude API 只收 JPEG／PNG／GIF／WebP �
 | 看畫面 | `frames 網址 --max 12` | 下載 ≤720p → ffmpeg 場景切換截圖（太少自動改等距）→ `frames/index.txt` 有時間點 → Read 看圖。畫面字幕型影片（只有配樂、字都燒在畫面上）靠這個 |
 | 觀看／按讚／留言數 | `stats 網址` | YouTube Data API `videos.list`，1 單位 |
 | 留言 | `comments 網址 -n 20` | YouTube Data API，1 單位；留言是網友說法 |
-| 逐幀理解、畫面動作、招牌文字、無聲影片 | `ask 網址 "問題" [--clip 1:20 3:00]` | Gemini（需 `gemini` 金鑰）：公開 YouTube 免下載；本機檔案走 Files API 上傳。免費層 YouTube 每天 8 小時；官方標示預覽版「Pricing and rate limits are likely to change」（https://ai.google.dev/gemini-api/docs/video-understanding ） |
+| 逐幀理解、畫面動作、招牌文字、無聲影片 | `ask 網址 "問題" [--clip 1:20 3:00]` | Gemini（需 `gemini` 金鑰）：公開 YouTube 免下載；本機檔案走 Files API 上傳。免費層 YouTube 每天 8 小時；官方標示預覽版「Pricing and rate limits are likely to change」（https://ai.google.dev/gemini-api/docs/video-understanding ）。**更緊的限制是每日請求數**（2026-11-01 AI Studio Rate Limit 頁實看，Free tier）：3.8 Flash／3 Flash／3.6 Flash 每天 20 次、每分鐘 5 次；3.5 Flash Lite 與 3.1 Flash Lite 每天 500 次、每分鐘 15 次。工具撞 429 會自動換 `geminiFallbackModels`（預設先 3.5 Flash Lite），一題 `ask` 不要超過 3 次 |
 | 指定時間點的畫面 | `frames 網址 --at 12:30,14:05` | 逐字稿說「這個／這裡／看一下」時，截那一秒的畫面；每個時間點一張 |
 | 進行中的直播 | `transcript／frames／ask 網址 --live 300` | 用 ffmpeg 錄 N 秒（10–900）成本機檔再處理；**不是持續監看**，是「錄一段」。實測 24 小時新聞台 45 秒錄 33 秒、語音辨識正確。回答標「直播擷取時間 YYYY-MM-DD HH:MM、N 秒」 |
 | 本機 mp4 | 以上 `transcript`／`frames`／`ask` 都收檔案路徑 | 雲端分享連結要先請使用者下載到本機 |

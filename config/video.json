@@ -11,8 +11,18 @@
   "cacheDir": "claude-dev-system/cache/video",
   "whisperModel": "medium",
   "geminiModel": "gemini-flash-latest",
-  "geminiFallbackModels": ["gemini-2.5-flash", "gemini-3.5-flash"],
-  "preferLangs": ["zh-TW", "zh-Hant", "zh", "zh-Hans", "en", "ja"],
+  "geminiFallbackModels": [
+    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash"
+  ],
+  "preferLangs": [
+    "zh-TW",
+    "zh-Hant",
+    "zh",
+    "zh-Hans",
+    "en",
+    "ja"
+  ],
   "previewLines": 40,
   "maxFrames": 40,
   "sceneThreshold": 0.35,
