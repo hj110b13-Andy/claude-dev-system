@@ -165,7 +165,7 @@ class ReadAndDiff(Base):
         f = gm.form_from_state(s)
         self.apply(f, s)
         s = self.state()
-        self.assertEqual(s["task_check"], {"enabled": True, "minutes": 10})
+        self.assertEqual(s["task_check"], {"enabled": True, "minutes": 15})
         f = gm.form_from_state(s)
         f.task_check = {"enabled": True, "minutes": 5}
         self.assertTrue(any("每 5 分鐘" in c.text for c in gm.diff(s, f)))

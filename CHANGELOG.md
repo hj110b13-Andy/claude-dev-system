@@ -4,7 +4,7 @@
 
 ## 0.9.0（2026-11-01）
 
-- **背景任務巡檢**（可開關、可設分鐘數）：規則 `core.md` 新增——派出 Agent／背景 Bash／Monitor／Workflow 後，若 `dispatch-config.json` 的 `taskCheck.enabled`（預設 true、`minutes` 預設 10），立刻用 Claude Code 的 `CronCreate` 建一個每 N 分鐘的巡檢排程（固定 prompt：列出所有進行中任務、讀最新輸出、結束或出錯立刻處理、全部結束就 `CronDelete`），每場對話只建一個、沒有背景任務不建、巡檢不派新 agent。限制（Claude Code 的 CronCreate）：排程只在閒置時觸發、可能晚最多半個週期、僅存在於該場對話。設定視窗核心區新增勾選框與分鐘數；匯出匯入包含。來源：使用者「可以選擇要不要啟用、自己設定每過多少分鐘 Claude Code 會自動查看當前所有執行任務的狀況…沒有執行的任務時就關閉」。
+- **背景任務巡檢**（可開關、可設分鐘數）：規則 `core.md` 新增——派出 Agent／背景 Bash／Monitor／Workflow 後，若 `dispatch-config.json` 的 `taskCheck.enabled`（預設 true、`minutes` 預設 15（使用者指定）），立刻用 Claude Code 的 `CronCreate` 建一個每 N 分鐘的巡檢排程（固定 prompt：列出所有進行中任務、讀最新輸出、結束或出錯立刻處理、全部結束就 `CronDelete`），每場對話只建一個、沒有背景任務不建、巡檢不派新 agent。限制（Claude Code 的 CronCreate）：排程只在閒置時觸發、可能晚最多半個週期、僅存在於該場對話。設定視窗核心區新增勾選框與分鐘數；匯出匯入包含。來源：使用者「可以選擇要不要啟用、自己設定每過多少分鐘 Claude Code 會自動查看當前所有執行任務的狀況…沒有執行的任務時就關閉」。
 - 查證：`CronCreate` 工具說明（session-only、「Jobs only fire while the REPL is idle」、遞延最多 50% 週期、7 天到期）。
 
 ## 0.8.7（2026-11-01）

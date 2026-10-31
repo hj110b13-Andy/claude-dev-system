@@ -74,6 +74,6 @@
   "taskCheck": {
     "$說明": "背景任務巡檢：派出 Agent／背景指令／Monitor／Workflow 後，Claude 用 CronCreate 每 minutes 分鐘醒來檢查所有進行中的任務（結束或出錯就處理），全部結束後刪除排程；沒有背景任務時不建。enabled=false 則完全不做。",
     "enabled": true,
-    "minutes": 10
+    "minutes": 15
   }
 }

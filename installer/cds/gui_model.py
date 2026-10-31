@@ -154,7 +154,7 @@ def read_thresholds(lay: Layout) -> dict:
     return dict(DEFAULT_THRESHOLDS)
 
 
-DEFAULT_TASK_CHECK = {"enabled": True, "minutes": 10}
+DEFAULT_TASK_CHECK = {"enabled": True, "minutes": 15}
 
 
 def read_task_check(lay: Layout) -> dict:
