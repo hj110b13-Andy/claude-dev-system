@@ -146,7 +146,7 @@ class Preservation(Base):
         md = self.lay.claude_md.read_text(encoding="utf-8").replace("先界定範圍再動手", "先界定範圍再動手（我改過）")
         self.lay.claude_md.write_text(md, encoding="utf-8")
         cfg = self.lay.payload / "config" / "dispatch-config.json"
-        cfg.write_text(cfg.read_text(encoding="utf-8").replace('"fiveHour": 80', '"fiveHour": 81'), encoding="utf-8")
+        cfg.write_text(cfg.read_text(encoding="utf-8").replace('"fiveHour": 85', '"fiveHour": 81'), encoding="utf-8")
         log = self.install(mode="update")
         self.assertIn("（我改過）", self.lay.claude_md.read_text(encoding="utf-8"))
         self.assertIn('"fiveHour": 81', cfg.read_text(encoding="utf-8"))

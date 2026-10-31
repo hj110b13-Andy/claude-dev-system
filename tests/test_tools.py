@@ -122,7 +122,7 @@ class UsageGuardConfig(unittest.TestCase):
         cfg = self._cfg(95, 99, until="2026-11-13", after="p")
         cfg["plan"]["x"] = {"until": "2026-11-13"}
         self.assertEqual(self.ug.pick_thresholds(cfg, "2026-11-12"), (95.0, 99.0))
-        self.assertEqual(self.ug.pick_thresholds(cfg, "2026-11-13"), (85.0, 97.0))
+        self.assertEqual(self.ug.pick_thresholds(cfg, "2026-11-13"), (80.0, 97.0))
 
 
 if __name__ == "__main__":
