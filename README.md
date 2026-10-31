@@ -1,7 +1,7 @@
 # claude-dev-system
 
 把 Stock-web 專案系統優化中「成熟且驗證過」的通用流程，封裝成可跨專案、跨裝置安裝的 Claude Code 全域工具。
-版本見 `config/VERSION`（目前 0.8.5），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
+版本見 `config/VERSION`（目前 0.8.6），相容範圍見 `config/compat.json`，變更見 `CHANGELOG.md`。
 
 ## 內容與分層
 
@@ -81,7 +81,7 @@ python ~/.claude/claude-dev-system/tools/video.py setup  # 檢查 ffmpeg、faste
    | `openaq` | OpenAQ：國外官方測站空品 | 同上 |
    | `tdx_id`＋`tdx_secret` | 交通部 TDX：停車場平面／立體、車位、費率 | 停車場只能靠網頁 |
    | `tavily` | 搜尋＋擷取＋整站爬（填了要加 `--enable tavily`） | 少一個搜尋索引；可改免金鑰模式 `--enable tavily` 不填金鑰 |
-   | `exa`、`context7`、`parallel`、`firecrawl` | 搜尋／文件／抓頁的「加大額度」金鑰，全部免費（exa 每月 $10、context7 1,000 次、parallel $5、firecrawl 1,000 credits）；預設免費優先，撞限流才用 | 完全不影響功能，只是免金鑰的限流較緊 |
+   | `exa`、`context7`、`parallel`、`firecrawl` | 搜尋／文件／抓頁的「加大額度」金鑰，全部免費（exa 每月 $10、context7 1,000 次、parallel 註冊送 $20 一次性、firecrawl 1,000 credits／月）；預設免費優先，撞限流才用 | 完全不影響功能，只是免金鑰的限流較緊 |
    | `youtube` | YouTube Data API：觀看／按讚／留言數、熱門留言、日期篩選搜尋（影片來源用） | 影片仍能搜、拿逐字稿、截圖；只少數據與留言 |
    | `gemini` | Gemini：真的逐幀看影片、招牌文字、無聲影片（影片來源用） | 只能靠逐字稿＋截圖理解影片 |
    金鑰由使用者**自己在終端機**輸入 `web --key 名稱=值`，不要請使用者貼在對話裡。Google 兩把的註冊步驟（含第一次進 Google Cloud 會遇到的兩步驟驗證與條款畫面）在 `docs/video.md`；**要教使用者點哪裡之前，先用 Claude in Chrome 開到那個畫面核對**（規則第 10 節），不可憑記憶寫步驟。

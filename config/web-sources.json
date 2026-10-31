@@ -6,7 +6,7 @@
     "tavily": "Tavily（MCP；免費 1,000 credits／月）",
     "exa": "Exa（MCP；免費每月 $10，用完 402）",
     "context7": "Context7（MCP；免費 1,000 次／月）",
-    "parallel": "Parallel（MCP；免費每月 $5；有金鑰多 web_research）",
+    "parallel": "Parallel（MCP；註冊送 $20 一次性，每月 $5 須綁卡；有金鑰多 web_research）",
     "firecrawl": "Firecrawl（MCP；免費 1,000 credits／月；有金鑰開全部工具）",
     "_keyMode": "搜尋類金鑰預設「免費優先」：local.json 的 keyMode[名稱] 為 fallback（預設）時同時註冊免金鑰版 <名稱> 與金鑰版 <名稱>-key，規則先用免金鑰、回 429／5xx／402 才用 -key 版；設 always 則只註冊金鑰版。",
     "cwa": "中央氣象署 opendata.cwa.gov.tw 授權碼",
@@ -27,7 +27,7 @@
       ],
       "keyHeader": "Authorization",
       "keyHeaderPrefix": "Bearer ",
-      "note": "免金鑰；自建索引，回傳壓縮過的相關段落；匿名層速率較低（數字未公開）。官方新網址 https://mcp.parallel.ai/mcp（舊網址仍可用，2026-10-26 實測）。有金鑰以 Authorization: Bearer 傳（docs.parallel.ai/integrations/mcp/quickstart，2026-10-31 查）：多 web_research 工具、速率較高，呼叫計入帳號額度（免費每月 $5）。"
+      "note": "免金鑰；自建索引，回傳壓縮過的相關段落；匿名層速率較低（數字未公開）。官方新網址 https://mcp.parallel.ai/mcp（舊網址仍可用，2026-10-26 實測）。有金鑰以 Authorization: Bearer 傳（docs.parallel.ai/integrations/mcp/quickstart，2026-10-31 查）：多 web_research 工具、速率較高，呼叫計入帳號額度：註冊送一次性 $20（本機帳號 2026-12-30 到期）；官方「Get $5 in free credits every month」須「Add a card to unlock monthly credits」，不綁卡沒有每月額度（2026-10-31 Billing 頁實看）。"
     },
     "exa": {
       "url": "https://mcp.exa.ai/mcp",

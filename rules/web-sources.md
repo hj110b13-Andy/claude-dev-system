@@ -63,7 +63,7 @@ Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔�
 
 | 名稱 | 預設 | 類型 | 金鑰 | 限制（官方說法） |
 |---|---|---|---|---|
-| parallel | 開 | 搜尋 | 不需要；有則 `Authorization: Bearer <key>`（多 `web_research`） | 匿名層速率較低，數字未公開；有金鑰免費每月 $5，呼叫計入額度（docs.parallel.ai/integrations/mcp/quickstart，2026-10-31 查） |
+| parallel | 開 | 搜尋 | 不需要；有則 `Authorization: Bearer <key>`（多 `web_research`） | 匿名層速率較低，數字未公開；有金鑰呼叫計入額度：註冊送一次性 $20、搜尋 Turbo／Fast $1／1k、Basic／Advanced $5／1k；「每月 $5 免費」須綁卡才解鎖（platform.parallel.ai Billing 頁 2026-10-31 實看：「Add a card to unlock monthly credits」） |
 | exa | 開 | 搜尋 | 不需要；有則 `x-api-key` header | 免金鑰官方只寫「Free rate-limited usage」（數字未公開）；註冊後每月 1 日重置 $10 額度（約 2,500 次 Lite 搜尋），**用完回 402、不會自動退回免金鑰**，撞 402 就 `web --key exa=` 清掉金鑰（exa.ai/docs/admin/billing，2026-10-27 查） |
 | tavily | 關（有金鑰者開） | 搜尋／擷取 | 免金鑰需 header `X-Tavily-Access-Mode: keyless`（只開 search／extract）；有金鑰 `?tavilyApiKey=` | 免費方案 1,000 credits／月（基本搜尋 1、進階 2） |
 | context7 | 開 | 程式庫文件 | 不需要；有則 `Authorization: Bearer <key>` header | 免金鑰官方只寫「Low rate limits」（數字未公開）；免費帳號每月 1,000 次、用完每天補 20 次（context7.com/plans，2026-10-27 查） |

@@ -2,6 +2,10 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.8.6（2026-10-31）
+
+- 以 Claude in Chrome 實看四個服務的額度頁核對：Exa 餘額 $19.98、Free tier「$10 credits per month」、Lite 搜尋 $4／1k ✅；Context7「1/1,000 REQUESTS、COST Free」✅；Firecrawl「1,022 credits left、Resets Nov 2」✅；**Parallel 修正**：註冊送一次性 $20（本機帳號 12/30 到期），「每月 $5」須「Add a card to unlock monthly credits」，不綁卡沒有每月額度；搜尋 Turbo／Fast $1／1k、Basic／Advanced $5／1k。規則、設定檔、docs、視窗說明同步更正。來源：使用者「今天註冊的那四組金鑰，你開 Chrome 都幫我確認是不是都與你說的 API 額度一樣」。
+
 ## 0.8.5（2026-10-31）
 
 - 設定視窗截字再修（結構層）：MCP 列勾選框只放名稱、工具名移到說明欄；env 的說明改放在欄位下一列跨欄顯示；內容區大小改變時也重算說明文字的換行寬，並先 `update_idletasks` 讓座標準確。無頭檢查 24 段說明皆在內容區內。來源：使用者回饋「字又被截掉了」。

@@ -38,7 +38,7 @@ KEY_INFO = {  # 名稱 → (顯示名, 類別, 說明, 註冊網址)。類別 se
     "tavily": ("Tavily", "search", "搜尋＋擷取＋整站爬；免費 1,000 credits／月", "https://app.tavily.com/"),
     "exa": ("Exa", "search", "語意搜尋；免費每月 $10", "https://dashboard.exa.ai/api-keys"),
     "context7": ("Context7", "search", "程式庫文件；免費 1,000 次／月", "https://context7.com/dashboard"),
-    "parallel": ("Parallel", "search", "搜尋；免費每月 $5，有金鑰多 web_research", "https://platform.parallel.ai/"),
+    "parallel": ("Parallel", "search", "搜尋；註冊送 $20（到期日見 Billing）；每月 $5 要綁卡才解鎖；有金鑰多 web_research", "https://platform.parallel.ai/"),
     "firecrawl": ("Firecrawl", "search", "JS 頁面抓取；免費 1,000 credits／月", "https://www.firecrawl.dev/app/api-keys"),
 }
 ENV_DESC = {

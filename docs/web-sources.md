@@ -34,7 +34,7 @@ python installer/install.py web --usage-guard off                   # 關閉用�
 - **中央氣象署**：https://opendata.cwa.gov.tw/ 加入會員 → 登入 → 開發指南 →「API 授權碼」→ 取得（`CWA-` 開頭）。免費；試用額度 1,000 次／天。
 - **Tavily**：https://app.tavily.com/ 用 Google／GitHub 登入，dashboard 自動產生金鑰。免費 1,000 credits／月、不用信用卡。不註冊也能用（免金鑰模式只開 search／extract）。
 - **Exa**：不註冊即可用；https://dashboard.exa.ai/api-keys 註冊後每月 1 日重置 $10 額度（≈2,500 次）。金鑰版額度用完回 402，但 0.7.0 起預設「免費優先」，免金鑰版 `exa` 照常可用、`exa-key` 只在限流時用，所以不會整個停擺。
-- **Parallel**：不註冊即可用；https://platform.parallel.ai/ 建金鑰（免費每月 $5）：`--key parallel=…`，多 `web_research` 工具、速率較高。
+- **Parallel**：不註冊即可用；https://platform.parallel.ai/ 建金鑰：註冊送一次性 $20（有到期日，Billing 頁可看），「每月 $5」要綁信用卡才解鎖，不綁卡額度用完就只剩免金鑰版：`--key parallel=…`，多 `web_research` 工具、速率較高。
 - **Firecrawl**：不註冊即可用；https://www.firecrawl.dev/app/api-keys （免費 1,000 credits／月）：`--key firecrawl=…`，開全部工具。
 - **Context7**：不註冊即可用；https://context7.com/dashboard 免費金鑰（`ctx7sk-` 開頭）每月 1,000 次、提高速率（`--key context7=…`，以 `Authorization: Bearer` header 送）。
 - **環境部空品**：https://data.moenv.gov.tw/ 註冊取 api_key（台灣各測站官方 AQI）。
