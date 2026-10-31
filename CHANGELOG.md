@@ -2,6 +2,11 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.9.4（2026-11-01）
+
+- 補測三題（全新無頭 session）：⑦東京空品——OpenAQ v3（資料提供者標環境省そらまめくん）✅；⑨用瀏覽器開 example.com——Claude in Chrome 自己載入、開頁、讀文字、截圖 ✅；⑧影片 25 秒連續動作——**沒用 Gemini**，改每秒截 26 張逐張看、動作只能標推測。規則修正（可判定）：問「連續動作／鏡頭移動／進出哪裡／過程」且有 gemini 金鑰 → 直接 `ask --clip`，截圖只做佐證。
+- 另修匯率題的偏差：第 ④ 題跳過 open.er-api 直接 `firecrawl_scrape` 台銀頁。規則加「即時數值不得直接跳 firecrawl 抓頁；匯率先 open.er-api，指定台銀牌告才抓頁且照三步順序」。來源：使用者「這三個都在測」「firecrawl 不是也是免費版沒結果才切嗎」。
+
 ## 0.9.3（2026-11-01）
 
 - YouTube 配額頁由使用者在 Google Cloud 控制台（IAM 配額、篩選 per day）實看：Queries per day 10,000、Search Queries per day 100、Video Batch Get Stats 10,000、Video Uploads 100，與官方文件一致。至此 12 把金鑰的額度全部以實際頁面核對。
