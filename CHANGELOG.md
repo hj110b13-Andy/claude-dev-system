@@ -2,6 +2,11 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.9.3（2026-11-01）
+
+- YouTube 配額頁由使用者在 Google Cloud 控制台（IAM 配額、篩選 per day）實看：Queries per day 10,000、Search Queries per day 100、Video Batch Get Stats 10,000、Video Uploads 100，與官方文件一致。至此 12 把金鑰的額度全部以實際頁面核對。
+- 無頭 `claude -p` 全新 session 實測規則是否生效（三題）：①車埕停車場——先寫 Python 帶 TDX 金鑰查，再 parallel → exa → tavily → firecrawl → WebSearch → Agent，符合「TDX 第一步＋跨索引升級鏈」；②PowerShell 編碼——mslearn 兩次＋parallel web_fetch，附 learn.microsoft.com 來源，符合「版本事實必查」；③YouTube 影片——先用 PowerShell 工具跑 `video.py` 被安全檢查擋（`$HOME` expandable strings），改 Bash 又卡在無頭模式沒有權限提示。修：`core.md` 影片條明寫 Windows 用 Bash 工具跑 `py -3 ~/.claude/...`，不用 PowerShell 工具。來源：使用者「確定一下安裝完後 Claude Code 是不是都會如你預期地去使用每個工具、MCP、API」。
+
 ## 0.9.2（2026-11-01）
 
 - 額度全面以 Chrome 實看或官方頁核對並更正：中央氣象署一般會員 24 小時 2 萬次、每日 2 GB（原誤寫 1,000 次，那是非會員）；環境部會員金鑰每 API 每天 5,000 次；OpenAQ 官方 60 次／分、2,000 次／時；TDX 基礎會員 5 次／分／金鑰、每月 3 點（≈4,500 次；本機帳號「訂閱總覽」實看：基礎會員、本月已用 0.01 點，10 月使用統計 15 次＝0.01 點）；Gemini 正確帳號下仍為 Free tier、3.8 Flash 每天 20 次；Tavily Researcher 方案 19／1,000 credits、Pay as you go 關；Parallel 綁卡後「自動儲值已關閉，餘額降至 0 美元時請求將停止」、餘額 $24.99（$20＋每月 $5）。
