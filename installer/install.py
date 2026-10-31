@@ -14,6 +14,7 @@ web 子命令（改本機偏好並立即套用；偏好存 <CLAUDE_HOME>/claude-
   --env 鍵=值       覆寫 env 值                   --off  關閉聯網來源並移除   --show  只顯示不套用
   --key-mode 名稱=fallback|always   fallback（預設）：免金鑰版與 <名稱>-key 金鑰版並存、規則先用免金鑰；always：只用金鑰版
 video 子命令：不帶參數＝啟用（pip 安裝並登記）；--off 取消登記；--show 只檢查依賴與金鑰
+gui 子命令：開設定視窗（同 `python installer/gui.py`）：所有開關、金鑰、門檻在視窗裡改，按套用才生效
 結束碼：0 成功／全部通過；1 check 或 verify 有 ❌；2 用法或狀態錯誤。
 """
 from __future__ import annotations
@@ -39,7 +40,7 @@ def main(argv=None) -> int:
         return 2
     ap = argparse.ArgumentParser(description="claude-dev-system 安裝器")
     ap.add_argument("--claude-home")
-    ap.add_argument("cmd", choices=["check", "install", "verify", "update", "uninstall", "status", "web", "video"])
+    ap.add_argument("cmd", choices=["check", "install", "verify", "update", "uninstall", "status", "web", "video", "gui"])
     ap.add_argument("--python", default=Path(sys.executable).as_posix())
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--restore-backup", action="store_true")
@@ -55,6 +56,9 @@ def main(argv=None) -> int:
     ap.add_argument("--show", action="store_true")
     a = ap.parse_args(argv)
     lay = Layout(claude_home(a.claude_home))
+    if a.cmd == "gui":
+        import gui  # noqa: PLC0415
+        return gui.main(["--claude-home", str(lay.home)])
     if a.cmd == "check":
         rows = env_report(lay.home)
         for name, ok, msg in rows:

@@ -2,6 +2,12 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.8.0（2026-10-31）
+
+- **設定視窗**（GUI／執行檔計畫的階段 1、2）：`python installer/install.py gui`（或 `installer/gui.py`，tkinter 內建、不裝套件）。開啟時與每次套用後都重讀真實檔案（manifest、settings.json、`~/.claude.json`、local.json、pip import、執行檔偵測），不信表單。內容：環境列（Python、Claude Code、ffmpeg、PowerShell 7、winget、git、node、faster-whisper，缺的有「安裝」或「開下載頁」按鈕）、核心與用量門檻兩個數字、聯網來源總開關＋每個 MCP 開關＋WebSearch 上限等 env、影片來源開關＋下載資料夾、12 把金鑰（遮罩輸入、顯示、**測試**、清除、搜尋類的「免費優先／一律用金鑰」模式）、Claude in Chrome 三層（①擴充已安裝 ②native host 已登記 ③手動按鈕跑 `claude -p --chrome` 實測）＋「Enabled by default」開關（寫 `~/.claude.json` 單一鍵、先備份）、「將變更 N 項」即時摘要、套用（先列清單確認）／取消／全部啟用／全部關閉／檢查／匯出匯入設定（不含金鑰）／備份還原／解除安裝、執行紀錄（金鑰一律遮罩）。
+- 邏輯層 `installer/cds/gui_model.py`（純函式，8 個測試）：`read_state`、`diff`、`apply_form`（順序：先寫 local.json → install/update 帶 web／video → 門檻 → 下載資料夾 → Chrome）、`test_key`（12 種金鑰各打一次最便宜的呼叫；環境部錯誤金鑰也回 200 要看內容；台灣政府站只清 `VERIFY_X509_STRICT` 不關驗證）、`install_action`、`chrome_live_test`、匯出匯入、備份還原。本機 8 把金鑰實測全 ✅。
+- `install.py gui` 子命令；README 加「設定視窗」。來源：使用者「做成一個執行檔…有開關…API 輸入框…套用或取消…開啟時依當下設定讀取狀態」；階段 3（打包 exe、視窗內更新）待使用者試用視窗後進行。
+
 ## 0.7.0（2026-10-31）
 
 - **免費優先雙註冊**：有搜尋類金鑰（exa、tavily、context7、parallel、firecrawl）時預設同時註冊免金鑰版 `<名稱>` 與金鑰版 `<名稱>-key`；`web --key-mode 名稱=always` 改為只註冊金鑰版。規則第 2c 節（可判定）：先免金鑰，回 429／5xx／402 才用 `-key`，之後連續 3 次用 `-key`、第 4 次再試免金鑰；`core.md` 加一句。來源：使用者「免費優先雙註冊，要注意有時候可能是免費被限流而不是用完，每次都先看免費能不能用」。
