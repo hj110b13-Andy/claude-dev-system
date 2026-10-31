@@ -93,8 +93,9 @@ class App:
         self.inner = ttk.Frame(canvas, padding=8)
         self.inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         self.win = canvas.create_window((0, 0), window=self.inner, anchor="nw")
-        # 內容區寬度跟著視窗，長文字才會在視窗內換行而不是被截掉
-        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(self.win, width=e.width))
+        # 內容區寬度跟著視窗，長文字才會在視窗內換行而不是被截掉；版面變動後重算每個說明文字的換行寬
+        self.notes: list = []
+        canvas.bind("<Configure>", lambda e: (canvas.itemconfigure(self.win, width=e.width), self._fit_notes()))
         canvas.configure(yscrollcommand=vsb.set)
         canvas.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
@@ -139,13 +140,33 @@ class App:
         return w
 
     def _note(self, parent, text, wrap=420, **grid):
+        """說明文字：先給一個估計寬度，版面算好後由 _fit_notes() 依實際剩餘寬度重設換行寬，確保不被截掉。"""
         lb = ttk.Label(parent, text=text, foreground="#555", wraplength=wrap, justify="left")
         lb.grid(**grid)
+        self.notes.append(lb)
         return lb
+
+    def _fit_notes(self, _e=None):
+        if getattr(self, "_fit_job", None):
+            self.root.after_cancel(self._fit_job)
+        self._fit_job = self.root.after(60, self._fit_notes_now)
+
+    def _fit_notes_now(self):
+        self._fit_job = None
+        try:
+            right = self.canvas.winfo_rootx() + self.canvas.winfo_width() - 28
+            for lb in self.notes:
+                if not lb.winfo_exists():
+                    continue
+                avail = right - lb.winfo_rootx()
+                lb.configure(wraplength=max(140, avail))
+        except tk.TclError:
+            pass
 
     def _rebuild(self):
         for w in self.inner.winfo_children():
             w.destroy()
+        self.notes = []
         s, f = self.state, self.form
         self.key_vars.clear(); self.key_dirty.clear(); self.key_status.clear(); self.mode_vars.clear(); self.server_vars.clear(); self.env_vars.clear()
         self.title_var.set(f"repo v{s['repo_version']}　已安裝：{('v' + s['version']) if s['installed'] else '尚未安裝'}　設定目錄：{self.lay.home}")
@@ -197,9 +218,15 @@ class App:
             self.env_vars[k] = var
             var.trace_add("write", lambda *a: self.update_diff())
             ttk.Label(webf, text=k).grid(row=row, column=0, sticky="w")
-            ttk.Entry(webf, textvariable=var, width=12).grid(row=row, column=1, sticky="w", padx=8)
-            self._note(webf, f"{gm.ENV_DESC.get(k, '')}；預設 {dv}；目前 settings.json：{s['web']['env'].get(k) or '未寫入'}",
-                       wrap=760, row=row, column=2, sticky="w")
+            ent = ttk.Entry(webf, textvariable=var, width=12)
+            ent.grid(row=row, column=1, sticky="w", padx=8)
+            if k in gm.ENV_READONLY:  # 編碼設定固定值，只顯示不可改（使用者回饋：不知道該填什麼）
+                ent.state(["readonly"])
+                self._note(webf, f"{gm.ENV_DESC.get(k, '')}；固定值，不可改；目前 settings.json：{s['web']['env'].get(k) or '未寫入'}",
+                           wrap=760, row=row, column=2, sticky="w")
+            else:
+                self._note(webf, f"{gm.ENV_DESC.get(k, '')}；預設 {dv}；目前 settings.json：{s['web']['env'].get(k) or '未寫入'}",
+                           wrap=760, row=row, column=2, sticky="w")
             row += 1
         webf.columnconfigure(2, weight=1)
 
@@ -231,7 +258,7 @@ class App:
             self.key_vars[n] = var
             self.key_orig[n] = k["value"]
             self.key_dirty[n] = False
-            ent = ttk.Entry(kf, textvariable=var, width=40, show="•")
+            ent = ttk.Entry(kf, textvariable=var, width=34, show="•")
             ent.grid(row=i, column=2, sticky="w", padx=4)
             var.trace_add("write", lambda *a, n=n: self._key_typed(n))
             ttk.Button(kf, text="顯示", width=5, command=lambda e=ent: e.configure(show="" if e.cget("show") else "•")).grid(row=i, column=3)
@@ -245,9 +272,10 @@ class App:
                 cb.grid(row=i, column=5, sticky="w")
                 cb.bind("<<ComboboxSelected>>", lambda e: self.update_diff())
             else:
-                self._note(kf, "只能用金鑰（無免金鑰版）", wrap=200, row=i, column=5, sticky="w")
-            self._note(kf, k["note"], wrap=360, row=i, column=6, sticky="w", padx=6)
+                ttk.Label(kf, text="只能用金鑰", foreground="#555").grid(row=i, column=5, sticky="w")
+            self._note(kf, k["note"], wrap=300, row=i, column=6, sticky="w", padx=6)
         kf.columnconfigure(6, weight=1)
+        ttk.Label(kf, text="「只能用金鑰」＝此服務沒有免金鑰版；「免費優先」＝免金鑰版與金鑰版並存、撞限流才用金鑰", foreground="#555").grid(row=len(s["keys"]) + 1, column=0, columnspan=7, sticky="w", pady=(6, 0))
 
         # Chrome
         cf = self._section("Claude in Chrome（開網頁看、操作需登入網站、教操作前核對畫面）")
@@ -265,6 +293,7 @@ class App:
         ttk.Label(cf, text="沒裝擴充：Chrome 線上商店搜「Claude in Chrome」，同一帳號登入。", foreground="#555").grid(row=2, column=0, sticky="w")
 
         self.update_diff()
+        self._fit_notes()
 
     # ---------- 表單 ↔ 畫面 ----------
     def _collect(self) -> gm.Form:

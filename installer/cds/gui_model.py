@@ -47,6 +47,7 @@ ENV_DESC = {
     "PYTHONUTF8": "叫 Python 一律用 UTF-8（Windows 碼頁 950 下中文才不亂碼；1＝開）",
     "PYTHONIOENCODING": "Python 輸入輸出編碼（配合上面，固定 utf-8）",
 }
+ENV_READONLY = {"PYTHONUTF8", "PYTHONIOENCODING"}  # 固定值：視窗只顯示不給改
 CHROME_EXT_ID = "fcoeoabgfenejglbffodgkkbkcdhcgfn"
 NATIVE_HOST_KEY = r"Software\Google\Chrome\NativeMessagingHosts\com.anthropic.claude_browser_extension"
 DEFAULT_THRESHOLDS = {"fiveHour": 80, "sevenDay": 97}
