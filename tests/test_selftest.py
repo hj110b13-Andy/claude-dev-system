@@ -81,6 +81,12 @@ class SelfTest(unittest.TestCase):
             self.assertNotIn("SECRET-KEY-1", chr(10).join(logs), "紀錄不可含金鑰")
             self.assertIn("***", rep)
 
+    def test_long_write_content_is_matched(self):
+        raw = stream(("Write", {"file_path": "q.py", "content": ("x = 1" + chr(10)) * 200 + "u = 'https://opendata.cwa.gov.tw/api'"}))
+        calls, _ = st.parse_stream(raw)
+        ok, notes = st.judge({"expect": [r"(?i)^Write ::.*cwa\.gov\.tw"]}, calls)
+        self.assertTrue(ok, "第 300 字之後的內容也要比對得到（2026-11-01 實跑誤判 ❌ 的原因）")
+
     def test_run_with_fake_runner_and_report(self):
         import tempfile
         seen = []

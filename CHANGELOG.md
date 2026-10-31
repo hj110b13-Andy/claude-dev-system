@@ -2,6 +2,11 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.10.4（2026-11-01）
+
+- 0.10.x 規則瘦身後的九題自我測試實跑（全新無頭對話）：7/9 先過，parking 與 live-data 判 ❌——但看報告 Claude 其實都做對了（parking：先 Read web-sources.md 速查 → 寫腳本查 TDX → parallel → exa → 抓林班道官網與 Wayback，結論「官網寫 290 位、型式未能確認」；live-data：寫一支腳本打環境部 aqx_p_432（汐止 AQI 60）、氣象署 F-D0047-069（板橋明天各時段降雨機率）、open.er-api（1 TWD≈4.83 JPY），未用 firecrawl）。誤判原因是 selftest 把工具參數截成 300 字再比對，Write 的腳本內容在 300 字之後。修：比對用全文（上限 2 萬字）、報告與顯示才截短；有測試。修後重跑這兩題 2/2 ✅，九題合計 9/9。
+- 這次實跑也證明瘦身後的 core.md 有效：九題裡每題開頭都先 Read 了 `web-sources.md`（速查規則），工具選擇與 0.9.x 一致。
+
 ## 0.10.3（2026-11-01）
 
 - CI 第三修：smoke test 用 `& exe` 呼叫視窗程式不會等它結束、`$LASTEXITCODE` 是空值（空值 -ne 0 為真）→ 改 `Start-Process -Wait -PassThru` 看 `ExitCode`；`--selfcheck` 出錯時把 traceback 寫進輸出檔（視窗程式沒有主控台）。本機 exe 的 selfcheck 一直是通過的。

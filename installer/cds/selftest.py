@@ -51,7 +51,7 @@ def summarize_input(inp) -> str:
             parts.append(" ".join(map(str, v)) if isinstance(v, list) else str(v))
     if not parts:
         parts.append(json.dumps(inp, ensure_ascii=False))
-    return " ".join(" ".join(parts).split())[:300]
+    return " ".join(" ".join(parts).split())[:20000]  # 比對用全文（Write 的腳本內容常超過 300 字，截短會漏判）；顯示時再截
 
 
 def parse_stream(raw: str) -> tuple[list[str], dict]:
@@ -84,7 +84,7 @@ def judge(case: dict, calls: list[str]) -> tuple[bool, list[str]]:
     for pat in case.get("expect", []):
         hit = [c for c in calls if re.search(pat, c)]
         if hit:
-            notes.append(f"{OK} 預期 {pat} ← {hit[0][:90]}")
+            notes.append(f"{OK} 預期 {pat} ← {hit[0][:90]}")  # 顯示只取前 90 字
         else:
             ok = False
             notes.append(f"{BAD} 預期 {pat} 沒有出現")
@@ -163,7 +163,7 @@ def run(only: list[str] | None = None, list_only: bool = False, cases_path: Path
                 log("   " + n)
             cost = res.get("total_cost_usd")
             log(f"   工具呼叫 {len(calls)} 次、{time.time() - t0:.0f} 秒" + (f"、用量約 ${cost:.2f} 等值（訂閱制為估算）" if isinstance(cost, (int, float)) else ""))
-            results.append({"id": c["id"], "name": c["name"], "ok": ok, "calls": calls, "notes": notes, "cost_usd": cost,
+            results.append({"id": c["id"], "name": c["name"], "ok": ok, "calls": [x[:400] for x in calls], "notes": notes, "cost_usd": cost,
                             "answer": mask((res.get("result") or "")[:4000]), "exit": code})
         passed = sum(1 for r in results if r["ok"])
         log(f"{OK if passed == len(results) else BAD} 自我測試 {passed}/{len(results)} 題通過")
