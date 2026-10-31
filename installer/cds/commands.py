@@ -14,6 +14,7 @@ from .fsio import atomic_write_bytes, read_json, sha256_bytes, sha256_file, writ
 from .paths import REPO, Layout, repo_version
 
 OK, BAD, WARN = "✅", "❌", "⚠️"
+LF, CRLF = chr(10), chr(13) + chr(10)
 
 
 def _ts() -> str:
@@ -40,6 +41,30 @@ def backup(lay: Layout, log: list) -> dict:
         rec["claudeMd"] = str(dst)
         log.append(f"備份 CLAUDE.md → {dst}")
     return rec
+
+
+KEEP_BACKUPS = 10
+
+
+def _prune_backups(items: list, log: list) -> list:
+    """每次 apply 都備份，只留最近 KEEP_BACKUPS 份，舊的連檔案一起刪（原本無限增長）。"""
+    keep, drop = items[-KEEP_BACKUPS:], items[:-KEEP_BACKUPS]
+    for b in drop:
+        for k in ("settings", "claudeMd"):
+            if b.get(k):
+                Path(b[k]).unlink(missing_ok=True)
+    if drop:
+        log.append(f"清掉 {len(drop)} 份較舊的備份（只留最近 {KEEP_BACKUPS} 份）")
+    return keep
+
+
+def _md_text(p: Path) -> tuple[str, str]:
+    """讀 CLAUDE.md 不轉換換行；回 (內容, 這個檔用的換行)。使用者的檔是 CRLF 就維持 CRLF，區塊外才真的一字不動。"""
+    if not p.exists():
+        return "", LF
+    t = p.read_bytes().decode("utf-8")
+    nl = CRLF if CRLF in t else LF
+    return t.replace(CRLF, LF), nl  # 內部一律 LF 處理（雜湊、分隔、區塊比對才一致），寫回時換成 nl
 
 
 def _read_settings(lay: Layout) -> tuple:
@@ -149,7 +174,7 @@ def _sync_settings(lay: Layout, python: str, old: dict, new: dict, log: list) ->
 
 
 def _sync_claude_md(lay: Layout, repo: Path, version: str, old: dict, new: dict, force: bool, log: list) -> None:
-    text = lay.claude_md.read_text(encoding="utf-8") if lay.claude_md.exists() else ""
+    text, nl = _md_text(lay.claude_md)
     cur_hash = claudemd.block_hash(text)
     old_md = old.get("claudeMd") or {}
     block = claudemd.make_block(payload.core_rules(repo), version)
@@ -167,7 +192,7 @@ def _sync_claude_md(lay: Layout, repo: Path, version: str, old: dict, new: dict,
         new["claudeMd"]["sep"] = sep
     new["claudeMd"]["blockSha256"] = claudemd.block_hash(t2)
     if t2 != text:
-        atomic_write_bytes(lay.claude_md, t2.encode("utf-8"))
+        atomic_write_bytes(lay.claude_md, t2.replace(LF, nl).encode("utf-8"))
         log.append(f"CLAUDE.md 寫入標記區塊（{len(block.splitlines())} 行，區塊外未變動）")
     else:
         log.append("CLAUDE.md 區塊已是最新")
@@ -220,7 +245,7 @@ def apply(lay: Layout, python: str, repo: Path = REPO, force: bool = False, mode
     new.update({"version": version, "repo": str(repo), "python": python,
                 "installedAt": old.get("installedAt") or now, "updatedAt": now,
                 "userEditable": list(payload.USER_EDITABLE)})
-    new["backups"] = list(old.get("backups", [])) + [backup(lay, log)]
+    new["backups"] = _prune_backups(list(old.get("backups", [])) + [backup(lay, log)], log)
     _sync_files(lay, repo, version, old, new, force, log)
     _sync_settings(lay, python, old, new, log)
     _sync_claude_md(lay, repo, version, old, new, force, log)
@@ -350,14 +375,14 @@ def uninstall(lay: Layout, force: bool = False, restore_backup: bool = False, ru
         log.append(f"{WARN} 保留本機偏好 {web.local_path(lay)}（含你的金鑰；不需要請自行刪除）")
     if lay.claude_md.exists():
         md = m.get("claudeMd") or {}
-        t = lay.claude_md.read_text(encoding="utf-8")
+        t, nl = _md_text(lay.claude_md)
         t2 = claudemd.remove(t, md.get("sep", ""))
         if t2 != t:
             if md.get("createdFile") and t2 == "":
                 lay.claude_md.unlink()
                 log.append("刪除本工具建立的 CLAUDE.md（已無其他內容）")
             else:
-                atomic_write_bytes(lay.claude_md, t2.encode("utf-8"))
+                atomic_write_bytes(lay.claude_md, t2.replace(LF, nl).encode("utf-8"))
                 log.append("移除 CLAUDE.md 標記區塊（區塊外未變動）")
     deleted = 0
     for rel, h in m.get("files", {}).items():
@@ -379,6 +404,10 @@ def uninstall(lay: Layout, force: bool = False, restore_backup: bool = False, ru
     if lay.payload.exists():
         for cache in list(lay.payload.rglob("__pycache__")):
             shutil.rmtree(cache, ignore_errors=True)
+    rep = home / "state" / "selftest-reports"
+    if rep.exists():
+        shutil.rmtree(rep, ignore_errors=True)
+        log.append("刪除 state/selftest-reports")
     lay.manifest.unlink(missing_ok=True)
     dirs = [lay.skills / s for s in m.get("skills", [])] + [lay.payload]
     for d in dirs:

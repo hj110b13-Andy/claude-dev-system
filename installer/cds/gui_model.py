@@ -150,7 +150,10 @@ def set_chrome_default_enabled(lay: Layout, enabled: bool) -> str:
         bk = lay.backups / f"claude-json-{_dt.datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
         shutil.copy2(p, bk)
     data["claudeInChromeDefaultEnabled"] = bool(enabled)
-    write_json(p, data)
+    try:
+        write_json(p, data)
+    except OSError as e:
+        raise OSError(f"寫 {p} 失敗（Claude Code 可能正在用這個檔，關掉對話再試）：{e}") from None
     return str(p)
 
 
@@ -166,7 +169,7 @@ def read_thresholds(lay: Layout) -> dict:
     plan = d.get("plan") or {}
     cur = (plan.get("current") if isinstance(plan, dict) else None)
     if cur and isinstance(t.get(cur), dict):
-        return {"fiveHour": t[cur].get("fiveHour", 80), "sevenDay": t[cur].get("sevenDay", 97)}
+        return {"fiveHour": t[cur].get("fiveHour", DEFAULT_THRESHOLDS["fiveHour"]), "sevenDay": t[cur].get("sevenDay", DEFAULT_THRESHOLDS["sevenDay"])}
     return dict(DEFAULT_THRESHOLDS)
 
 
@@ -380,7 +383,8 @@ def diff(state: dict, form: Form) -> list[Change]:
                 ch.append(Change("web", f"{'開啟' if form.servers[n] else '關閉'} MCP {n}"))
         for k, v in form.env.items():
             cur = state["web"]["env_override"].get(k) or state["web"]["env"].get(k) or state["web"]["env_defaults"].get(k) or ""
-            if str(v) != str(cur):
+            v = str(v).strip() or str(state["web"]["env_defaults"].get(k, ""))  # 清空＝還原預設（原本會變成永遠套不掉的假變更）
+            if v != str(cur):
                 ch.append(Change("env", f"{k}：{cur} → {v}"))
     if form.video_enabled != state["video"]["enabled"]:
         ch.append(Change("video", "啟用影片來源（pip 裝 yt-dlp 等）" if form.video_enabled else "關閉影片來源（取消登記，不解除安裝套件）"))
@@ -432,8 +436,8 @@ def apply_form(lay: Layout, python: str, state: dict, form: Form, log, repo: Pat
     keys = [f"{n}={v}" for n, v in form.keys.items() if v is not None]
     enable = [n for n, on in form.servers.items() if on and not state["web"]["servers"][n]["wanted"]]
     disable = [n for n, on in form.servers.items() if not on and state["web"]["servers"][n]["wanted"]]
-    env_args = [f"{k}={v}" for k, v in form.env.items() if str(v) != str(state["web"]["env_defaults"].get(k, "")) and v != ""]
-    env_reset = [k for k, v in form.env.items() if str(v) == str(state["web"]["env_defaults"].get(k, ""))]
+    env_args = [f"{k}={v}" for k, v in form.env.items() if str(v).strip() not in ("", str(state["web"]["env_defaults"].get(k, "")))]
+    env_reset = [k for k, v in form.env.items() if str(v).strip() in ("", str(state["web"]["env_defaults"].get(k, "")))]
     modes = [f"{n}={m}" for n, m in form.key_modes.items() if state["keys"].get(n, {}).get("mode") and m != state["keys"][n]["mode"]]
     # 0) 用量守門開關只是 local.json 的一個布林，apply 時 _sync_settings 會照它加／移除 hook
     if form.usage_guard != state["hooks"]["usage_guard_pref"]:
@@ -472,7 +476,7 @@ def apply_form(lay: Layout, python: str, state: dict, form: Form, log, repo: Pat
         write_thresholds(lay, float(form.thresholds["fiveHour"]), float(form.thresholds["sevenDay"]))
         log(f"用量門檻寫入 {form.thresholds['fiveHour']}／{form.thresholds['sevenDay']}")
     if any(c.kind == "task_check" for c in changes):
-        write_task_check(lay, bool(form.task_check.get("enabled")), int(form.task_check.get("minutes", 10)))
+        write_task_check(lay, bool(form.task_check.get("enabled")), int(form.task_check.get("minutes", DEFAULT_TASK_CHECK["minutes"])))
         log(f"背景任務巡檢寫入：{'每 ' + str(int(form.task_check['minutes'])) + ' 分鐘' if form.task_check.get('enabled') else '關閉'}")
     if any(c.kind == "download_dir" for c in changes):
         local = _local(lay)
@@ -679,12 +683,30 @@ def import_profile(form: Form, data: dict) -> Form:
     if data.get("claude-dev-system-profile") != 1:
         raise ValueError("不是本工具的設定檔（缺 claude-dev-system-profile: 1）")
     f = copy.deepcopy(form)
+    th = data.get("thresholds")
+    if isinstance(th, dict):
+        for k in ("fiveHour", "sevenDay"):
+            if k in th and not (isinstance(th[k], (int, float)) and 1 <= float(th[k]) <= 100):
+                raise ValueError(f"設定檔的門檻 {k} 不是 1～100 的數字：{th[k]!r}")
+    tc = data.get("task_check")
+    if isinstance(tc, dict) and "minutes" in tc and not (isinstance(tc["minutes"], (int, float)) and tc["minutes"] >= 1):
+        raise ValueError(f"設定檔的巡檢分鐘數不合法：{tc['minutes']!r}")
+    for k in ("web_enabled", "video_enabled", "usage_guard"):
+        if k in data and not isinstance(data[k], bool):
+            raise ValueError(f"設定檔的 {k} 必須是 true／false")
+    if "download_dir" in data and not isinstance(data["download_dir"], str):
+        raise ValueError("設定檔的 download_dir 必須是字串")
     for k in ("web_enabled", "video_enabled", "download_dir", "chrome_default_enabled", "usage_guard"):
         if k in data:
             setattr(f, k, data[k])
     for k in ("servers", "env", "key_modes", "thresholds", "task_check"):
         if isinstance(data.get(k), dict):
-            getattr(f, k).update(data[k])
+            vals = data[k]
+            if k == "servers":
+                vals = {n: bool(v) for n, v in vals.items() if n in f.servers}  # 別台機器才有的 MCP 名稱略過
+            if k == "key_modes":
+                vals = {n: v for n, v in vals.items() if n in KEY_INFO and v in web.KEY_MODES}
+            getattr(f, k).update(vals)
     if isinstance(data.get("keys"), dict):
         for n, v in data["keys"].items():
             if n in KEY_INFO and isinstance(v, str) and v:
@@ -709,5 +731,8 @@ def restore_backup(lay: Layout, path: str) -> str:
     src = Path(path)
     if not src.exists():
         raise FileNotFoundError(path)
+    if lay.settings.exists():  # 還原也要有回頭路
+        lay.backups.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(lay.settings, lay.backups / f"claude-dev-system-{_dt.datetime.now().strftime('%Y%m%d-%H%M%S')}-before-restore.json")
     shutil.copy2(src, lay.settings)
     return str(lay.settings)

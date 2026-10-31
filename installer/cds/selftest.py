@@ -79,6 +79,8 @@ def judge(case: dict, calls: list[str]) -> tuple[bool, list[str]]:
     """expect 每條至少命中一個呼叫；forbid 每條都不得命中。回 (通過?, 說明列)。"""
     notes = []
     ok = True
+    if not case.get("expect"):
+        return False, [f"{BAD} 題目沒有 expect，無法判定"]
     for pat in case.get("expect", []):
         hit = [c for c in calls if re.search(pat, c)]
         if hit:
@@ -104,7 +106,8 @@ def default_runner(cmd: list[str], cwd: str, timeout: int) -> tuple[int, str, st
         r = subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=timeout,
                            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
     except subprocess.TimeoutExpired as e:
-        return 124, (e.stdout or b"").decode("utf-8", "replace") if isinstance(e.stdout, bytes) else "", f"{timeout} 秒內沒跑完"
+        out = e.stdout or b""
+        return 124, (out.decode("utf-8", "replace") if isinstance(out, bytes) else str(out)), f"{timeout} 秒內沒跑完"
     return r.returncode, (r.stdout or b"").decode("utf-8", "replace"), (r.stderr or b"").decode("utf-8", "replace")
 
 
@@ -145,7 +148,7 @@ def run(only: list[str] | None = None, list_only: bool = False, cases_path: Path
         return 0
     results = []
     mask = _masker()
-    with tempfile.TemporaryDirectory(prefix="cds-selftest-") as cwd:  # 空資料夾：只吃全域規則，不吃任何專案 CLAUDE.md
+    with tempfile.TemporaryDirectory(prefix="cds-selftest-", ignore_cleanup_errors=True) as cwd:  # 空資料夾：只吃全域規則；Windows 上孫程序佔住也不讓結果消失
         for c in cases:
             t0 = time.time()
             log(f"── {c['id']}：{c['name']}")
@@ -162,11 +165,11 @@ def run(only: list[str] | None = None, list_only: bool = False, cases_path: Path
             log(f"   工具呼叫 {len(calls)} 次、{time.time() - t0:.0f} 秒" + (f"、用量約 ${cost:.2f} 等值（訂閱制為估算）" if isinstance(cost, (int, float)) else ""))
             results.append({"id": c["id"], "name": c["name"], "ok": ok, "calls": calls, "notes": notes, "cost_usd": cost,
                             "answer": mask((res.get("result") or "")[:4000]), "exit": code})
-    passed = sum(1 for r in results if r["ok"])
-    log(f"{OK if passed == len(results) else BAD} 自我測試 {passed}/{len(results)} 題通過")
-    if report_dir:
-        report_dir.mkdir(parents=True, exist_ok=True)
-        rp = report_dir / f"selftest-{time.strftime('%Y%m%d-%H%M%S')}.json"
-        rp.write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
-        log(f"報告：{rp}")
+        passed = sum(1 for r in results if r["ok"])
+        log(f"{OK if passed == len(results) else BAD} 自我測試 {passed}/{len(results)} 題通過")
+        if report_dir:  # 在 with 裡面寫：就算暫存資料夾清不掉，20～40 分鐘的結果也已存好
+            report_dir.mkdir(parents=True, exist_ok=True)
+            rp = report_dir / f"selftest-{time.strftime('%Y%m%d-%H%M%S')}.json"
+            rp.write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
+            log(f"報告：{rp}")
     return 0 if passed == len(results) else 1

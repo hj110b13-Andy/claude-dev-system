@@ -32,6 +32,10 @@ class SelfTest(unittest.TestCase):
             for pat in c["expect"] + c.get("forbid", []):
                 __import__("re").compile(pat)
         self.assertIn("mcp__parallel__web_search", cfg["allowed"])
+        for k in ("parallel-key", "exa-key", "context7-key", "firecrawl-key", "tavily-key"):
+            self.assertIn(f"mcp__{k}__", cfg["allowed"], "免費優先的 -key 版也要在無頭權限清單")
+        ok, notes = st.judge({"expect": []}, ["Bash :: x"])
+        self.assertFalse(ok)
 
     def test_parse_and_judge(self):
         raw = stream(("Bash", {"command": "py -3 C:/Users/x/.claude/claude-dev-system/tools/video.py transcript https://youtu.be/a"}),

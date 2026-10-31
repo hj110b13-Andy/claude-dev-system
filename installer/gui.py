@@ -64,14 +64,16 @@ class App:
         root.after(100, self._pump)
 
     def on_close(self):
+        if self.busy:  # 套用是多步驟（local.json → install → 門檻），中途砍掉會留半套狀態：做完才能關
+            messagebox.showinfo("關閉", "有工作正在執行（套用／安裝／測試），請等它跑完再關閉。")
+            return
         try:
             ch = gm.diff(self.state, self._collect())
-        except Exception:  # noqa: BLE001
-            ch = []
-        if self.busy:
-            if not messagebox.askyesno("關閉", "有工作正在執行，確定要關閉？"):
+        except Exception as e:  # noqa: BLE001
+            if not messagebox.askyesno("關閉", f"表單有誤（{e}），無法判斷是否有未套用的變更。要放棄並關閉嗎？"):
                 return
-        elif ch:
+            ch = []
+        if ch:
             ans = messagebox.askyesnocancel("有未套用的變更", f"有 {len(ch)} 項變更還沒套用：\n\n" + "\n".join("• " + c.text for c in ch[:12])
                                             + ("\n…" if len(ch) > 12 else "") + "\n\n要先套用嗎？\n是＝套用後關閉　否＝放棄變更關閉　取消＝回到視窗")
             if ans is None:
@@ -216,14 +218,14 @@ class App:
         self._no_wheel_change(ttk.Spinbox(th, from_=1, to=100, width=5, textvariable=self.five_var, command=self.update_diff)).pack(side="left")
         ttk.Label(th, text="%　7 天 ≥").pack(side="left")
         self._no_wheel_change(ttk.Spinbox(th, from_=1, to=100, width=5, textvariable=self.seven_var, command=self.update_diff)).pack(side="left")
-        ttk.Label(th, text="%").pack(side="left")
+        ttk.Label(th, text="%　（這是全域值；專案若有自己的 .claude/dispatch-config.json，該專案以它為準）", foreground="#555").pack(side="left")
         for v in (self.five_var, self.seven_var):
             v.trace_add("write", lambda *a: self.update_diff())
         tc = f.task_check
         tcf = ttk.Frame(core); tcf.pack(anchor="w", pady=4)
         self.tc_var = tk.BooleanVar(value=bool(tc.get("enabled")))
         ttk.Checkbutton(tcf, text="背景任務巡檢：有背景任務或 agent 在跑時，每", variable=self.tc_var, command=self.update_diff).pack(side="left")
-        self.tc_min_var = tk.StringVar(value=str(int(tc.get("minutes", 10))))
+        self.tc_min_var = tk.StringVar(value=str(int(tc.get("minutes", gm.DEFAULT_TASK_CHECK["minutes"]))))
         self._no_wheel_change(ttk.Spinbox(tcf, from_=1, to=120, width=5, textvariable=self.tc_min_var, command=self.update_diff)).pack(side="left")
         ttk.Label(tcf, text="分鐘自動檢查一次所有任務（結束或出錯就處理；全部結束就停；沒有任務時不會跑）").pack(side="left")
         self.tc_min_var.trace_add("write", lambda *a: self.update_diff())
@@ -332,7 +334,7 @@ class App:
             ttk.Entry(kf, textvariable=nv, width=22).grid(row=i, column=7, sticky="w", padx=6)
             self._note(kf, k["note"], wrap=900, row=i + 1, column=0, columnspan=8, sticky="w", padx=(24, 0), pady=(0, 6))
         kf.columnconfigure(7, weight=1)
-        ttk.Label(kf, text="「只能用金鑰」＝此服務沒有免金鑰版；「免費優先」＝免金鑰版與金鑰版並存、撞限流才用金鑰（沒填金鑰時不可選）；「註冊網頁」開官方申請頁，金鑰免費", foreground="#555").grid(row=2 * len(s["keys"]) + 1, column=0, columnspan=8, sticky="w", pady=(6, 0))
+        ttk.Label(kf, text="「只能用金鑰」＝此服務沒有免金鑰版；「免費優先」＝免金鑰版與金鑰版並存、撞限流才用金鑰（沒填金鑰時不可選）；「註冊網頁」開官方申請頁，金鑰免費；「測試」對 parallel／exa／tavily 會真的用掉 1 次搜尋額度", foreground="#555").grid(row=2 * len(s["keys"]) + 1, column=0, columnspan=8, sticky="w", pady=(6, 0))
 
         # Chrome
         c0 = s["chrome"]
@@ -537,6 +539,9 @@ class App:
         if not val:
             messagebox.showinfo("測試", "請先輸入金鑰")
             return
+        if self.busy:
+            messagebox.showinfo("稍等", "有工作正在執行")
+            return
         self.q.put(("keystatus", (n, "測試中…")))
 
         def job():
@@ -556,7 +561,8 @@ class App:
     def do_selftest(self):
         msg = ("會用全新的無頭 Claude Code 對話重跑 9 道題（停車場 TDX、PowerShell 編碼、影片逐字稿、即時數值 API、"
                "程式庫文件、影片數據與截圖、國外空品、影片動作 Gemini、Chrome 開頁），比對它實際用了哪些工具。"
-               + chr(10) * 2 + "約 20～40 分鐘、用掉約九場短對話的用量；Chrome 題需要瀏覽器開著。結果會逐題印在下方紀錄。繼續？")
+               + chr(10) * 2 + "通常 20～40 分鐘（每題上限 9 分鐘，最壞約 80 分鐘）、用掉約九場短對話的用量；Chrome 題需要瀏覽器開著。"
+               + chr(10) + "注意：測試中 Claude 會自己執行指令、寫檔、讀網頁，沒有人逐步確認；它只在一個空的暫存資料夾工作，但讀到的網頁內容是不受信任的。結果會逐題印在下方紀錄。繼續？")
         if not messagebox.askyesno("自我測試", msg):
             return
 
@@ -605,7 +611,7 @@ class App:
         self.video_var.set(f.video_enabled)
         self.guard_var.set(f.usage_guard)
         self.tc_var.set(bool(f.task_check.get("enabled")))
-        self.tc_min_var.set(str(int(f.task_check.get("minutes", 10))))
+        self.tc_min_var.set(str(int(f.task_check.get("minutes", gm.DEFAULT_TASK_CHECK["minutes"]))))
         self.dl_var.set(f.download_dir or "")
         self.five_var.set(str(f.thresholds.get("fiveHour", self.five_var.get())))
         self.seven_var.set(str(f.thresholds.get("sevenDay", self.seven_var.get())))
@@ -641,7 +647,10 @@ class App:
             if not i:
                 return
             at, p = items[i[0]]
-            if messagebox.askyesno("還原", f"用 {at} 的備份覆蓋現在的 settings.json？"):
+            if self.busy:
+                messagebox.showinfo("稍等", "有工作正在執行")
+                return
+            if messagebox.askyesno("還原", f"用 {at} 的備份覆蓋現在的 settings.json？（現在的會先另存一份 -before-restore 備份）"):
                 gm.restore_backup(self.lay, p)
                 self._log(f"已還原 settings.json ← {p}")
                 w.destroy()
@@ -650,7 +659,7 @@ class App:
 
     def do_uninstall(self):
         if not messagebox.askyesno("解除安裝", "只移除這套工具加進去的東西：\n• settings.json 的兩條 hook 與 env\n• CLAUDE.md 的標記區塊\n• 它註冊的 MCP\n• 規則／工具檔與 4 個 skill\n\n"
-                                            "不會移除：pip 裝的 yt-dlp／faster-whisper、ffmpeg、PowerShell 7、Chrome 擴充、Python、Claude Code、金鑰檔 local.json、這個設定程式本身。\n\n確定？"):
+                                            "不會移除：pip 裝的 yt-dlp／faster-whisper、ffmpeg、PowerShell 7、Chrome 擴充、Python、Claude Code、金鑰檔 local.json、state/usage.json、這個設定程式本身。會順便刪 state/selftest-reports。\n\n確定？"):
             return
 
         def job():

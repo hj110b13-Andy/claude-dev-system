@@ -246,6 +246,51 @@ class ReadAndDiff(Base):
         self.assertEqual(calls[0][1]["env"]["CLAUDE_CONFIG_DIR"], str(self.lay.home))
         self.assertIn("5 小時 12%", u["text"])
 
+    def test_env_blank_means_default_and_import_validation(self):
+        s = self.state()
+        f = gm.form_from_state(s)
+        f.web_enabled = True
+        self.apply(f, s)
+        s = self.state()
+        f = gm.form_from_state(s)
+        f.env["CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"] = ""
+        self.assertEqual([c for c in gm.diff(s, f) if c.kind == "env"], [], "清空＝預設，不是假變更")
+        f.env["CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"] = "900"
+        self.apply(f, s)
+        s = self.state()
+        f = gm.form_from_state(s)
+        f.env["CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"] = "   "
+        self.assertTrue(any("900 → 600" in c.text for c in gm.diff(s, f)))
+        self.apply(f, s)
+        self.assertEqual(json.loads(self.lay.settings.read_text(encoding="utf-8"))["env"]["CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"], "600")
+        base = gm.form_from_state(self.state())
+        for bad in ({"thresholds": {"fiveHour": "x"}}, {"thresholds": {"fiveHour": 500}}, {"task_check": {"minutes": 0}}, {"web_enabled": "yes"}):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                gm.import_profile(base, {"claude-dev-system-profile": 1, **bad})
+        g = gm.import_profile(base, {"claude-dev-system-profile": 1, "servers": {"exa": False, "別台機器才有": True}, "key_modes": {"exa": "bogus", "tavily": "always"}})
+        self.assertNotIn("別台機器才有", g.servers)
+        self.assertFalse(g.servers["exa"])
+        self.assertEqual(g.key_modes.get("tavily"), "always")
+        self.assertNotEqual(g.key_modes.get("exa"), "bogus")
+
+    def test_restore_backup_keeps_a_copy_of_current(self):
+        self.apply(gm.form_from_state(self.state()))  # 第一次安裝：原本沒有 settings.json，沒東西可備份
+        s = self.state()
+        f = gm.form_from_state(s)
+        f.thresholds = {"fiveHour": 90, "sevenDay": 98}
+        self.apply(f, s)  # 第二次才有 settings.json 可備份
+        items = gm.list_backups(self.lay)
+        self.assertTrue(items)
+        before = self.lay.settings.read_text(encoding="utf-8")
+        gm.restore_backup(self.lay, items[0][1])
+        saved = list(self.lay.backups.glob("*-before-restore.json"))
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0].read_text(encoding="utf-8"), before)
+
+    def test_mask_hides_url_encoded_key(self):
+        local = {"keys": {"k": "ab/c+d"}}
+        self.assertEqual(web.mask("x=ab%2Fc%2Bd y=ab/c+d", local), "x=*** y=***")
+
     def test_chrome_default_toggle_writes_claude_json_with_backup(self):
         p = web.user_config_path(self.lay)
         p.parent.mkdir(parents=True, exist_ok=True)

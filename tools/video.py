@@ -17,7 +17,7 @@
   ask     網址|檔案 "問題" [--model gemini-flash-latest] [--clip 開始 結束]   Gemini 真的看影片（需 `gemini` 金鑰；公開 YouTube 免下載）
   download 網址 [--out 資料夾] [--max-height 1080] [--audio-only] [--cookies-from-browser firefox | --cookies cookies.txt]   使用者要存檔時：最高畫質下載（預設 local.json video.downloadDir，未設為 ~/Downloads）
   setup                                              檢查依賴與金鑰
-  clean   [--older-than 30] [--all] [--media-only]    清快取（影音檔大，逐字稿小）；每次執行也會自動清超過 7 天沒用的影音檔、30 天的整個資料夾
+  clean   [--older-than 30] [--all] [--media-only]    清快取（影音檔大，逐字稿小）；每次執行也會自動清超過 7 天沒更新的影音檔、30 天沒更新的整個資料夾（以檔案修改時間算）
 
 金鑰讀 <CLAUDE_HOME>/claude-dev-system/config/local.json 的 keys.youtube／keys.gemini（`install.py web --key youtube=…`）。
 快取：<CLAUDE_HOME>/claude-dev-system/cache/video/<影片ID>/（info.json、transcript.*.txt、audio.m4a、video.mp4、frames/）。
@@ -193,7 +193,12 @@ def source_key(src: str) -> str:
         return "url_" + hashlib.sha1(src.encode("utf-8")).hexdigest()[:12]
     p = Path(src).resolve()
     import hashlib
-    return "file_" + hashlib.sha1(str(p).encode("utf-8")).hexdigest()[:12]
+    try:
+        st = p.stat()
+        tag = f"{st.st_mtime_ns}:{st.st_size}"  # 同路徑檔案被換掉（重錄、覆蓋）就是新快取，不會拿到舊逐字稿
+    except OSError:
+        tag = ""
+    return "file_" + hashlib.sha1(f"{p}|{tag}".encode("utf-8")).hexdigest()[:12]
 
 
 def cache_dir(src: str) -> Path:
@@ -344,14 +349,17 @@ def capture_live(src: str, seconds: int) -> Path:
     d = cache_dir(src)
     out = d / f"live_{time.strftime('%Y%m%d-%H%M%S')}.mp4"
     if vid and aud:
-        v, a = sorted(vid, key=lambda f: f.get("height") or 0)[-1], aud[-1]
+        v, a = sorted(vid, key=lambda f: f.get("height") or 0)[-1], sorted(aud, key=lambda f: f.get("abr") or f.get("tbr") or 0)[-1]
         cmd = [ff, "-y", "-loglevel", "error", "-i", v["url"], "-i", a["url"], "-t", str(seconds), "-map", "0:v", "-map", "1:a", "-c", "copy", str(out)]
     elif both:
         cmd = [ff, "-y", "-loglevel", "error", "-i", both[-1]["url"], "-t", str(seconds), "-c", "copy", str(out)]
     else:
         die("直播串流找不到可用的影音格式", 3)
     print(f"錄直播 {seconds} 秒（{info.get('title', '')[:40]}）…", file=sys.stderr)
-    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=seconds + 300)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=seconds + 300)
+    except subprocess.TimeoutExpired:
+        die(f"直播擷取逾時（{seconds + 300} 秒內沒錄完；串流可能已中斷），請縮短秒數再試", 3)
     if r.returncode != 0 or not out.exists():
         die("直播擷取失敗：" + r.stderr.strip()[-300:], 3)
     (d / "live_captures.txt").open("a", encoding="utf-8").write(f"{out.name}\t{time.strftime('%Y-%m-%d %H:%M:%S')}\t{seconds}s\n")
@@ -628,11 +636,7 @@ def yt_api(path: str, params: dict) -> dict:
     try:
         with urllib.request.urlopen(url, timeout=30) as r:
             return json.loads(r.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
-        if isinstance(e, urllib.error.HTTPError):
-            raise
-        die(f"連不上 YouTube Data API（網路或逾時）：{getattr(e, 'reason', e)}", 3)
-    except urllib.error.HTTPError as e:
+    except urllib.error.HTTPError as e:  # 要放在 URLError 前面：HTTPError 是 URLError 的子類
         body = e.read().decode("utf-8", "replace")
         try:
             msg = json.loads(body)["error"]["message"]
@@ -641,6 +645,8 @@ def yt_api(path: str, params: dict) -> dict:
         if e.code == 403 and "quota" in msg.lower():
             die("YouTube Data API 今日配額用完（太平洋時間午夜重置）；改用免金鑰的 search／info。原文：" + msg, 3)
         die(f"YouTube Data API {e.code}：{msg}", 3)
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        die(f"連不上 YouTube Data API（網路或逾時）：{getattr(e, 'reason', e)}", 3)
 
 
 def iso_duration(s: str) -> str:
@@ -656,12 +662,14 @@ def iso_duration(s: str) -> str:
 GEMINI = "https://generativelanguage.googleapis.com"
 
 
-def gemini_req(method: str, url: str, data: bytes | None = None, headers: dict | None = None) -> tuple[dict, dict]:
+def gemini_req(method: str, url: str, data=None, headers: dict | None = None) -> tuple[dict, dict]:
     key = KEYS.get("gemini")
     if not key:
         die("沒有 `gemini` 金鑰：https://aistudio.google.com/api-keys 建立後 `py -3 installer/install.py web --key gemini=…`", 2)
     h = {"x-goog-api-key": key, **(headers or {})}
     for attempt in range(3):
+        if hasattr(data, "seek"):
+            data.seek(0)  # 串流上傳重試時從頭送
         req = urllib.request.Request(url, data=data, method=method, headers=h)
         try:
             with urllib.request.urlopen(req, timeout=600) as r:
@@ -710,7 +718,8 @@ def gemini_upload(path: Path) -> dict:
     up = next((v for k, v in hdrs.items() if k.lower() == "x-goog-upload-url"), None)
     if not up:
         die("Gemini 上傳：拿不到 upload URL", 3)
-    body, _ = gemini_req("POST", up, path.read_bytes(), {"X-Goog-Upload-Offset": "0", "X-Goog-Upload-Command": "upload, finalize", "Content-Length": str(size)})
+    with path.open("rb") as fh:  # 檔案物件直接當 body 串流上傳（已給 Content-Length），不把整支影片讀進記憶體
+        body, _ = gemini_req("POST", up, fh, {"X-Goog-Upload-Offset": "0", "X-Goog-Upload-Command": "upload, finalize", "Content-Length": str(size)})
     f = body.get("file") or {}
     name = f.get("name")
     for _ in range(120):
@@ -932,7 +941,7 @@ def _dir_age_days(d: Path, now: float) -> float:
 
 
 def clean_cache(media_days: float | None, all_days: float | None, force_all: bool = False, media_only: bool = False) -> tuple[int, int]:
-    """刪快取：影音檔（video.*／audio*）超過 media_days 沒用就刪；整個資料夾超過 all_days 沒用就刪。回 (資料夾數, 位元組)。"""
+    """刪快取：影音檔（video.*／audio*）超過 media_days 沒更新（修改時間）就刪；整個資料夾超過 all_days 沒更新就刪。回 (資料夾數, 位元組)。"""
     root = cache_root()
     now = time.time()
     freed, n = 0, 0
@@ -956,7 +965,7 @@ def clean_cache(media_days: float | None, all_days: float | None, force_all: boo
 
 
 def auto_clean() -> None:
-    """每次執行時順手清：超過 autoCleanMediaDays 沒用的影音檔、超過 autoCleanAllDays 沒用的整個資料夾（逐字稿很小，留久一點）。"""
+    """每次執行時順手清：超過 autoCleanMediaDays 沒更新的影音檔、超過 autoCleanAllDays 沒更新的整個資料夾（逐字稿很小，留久一點）。"""
     try:
         n, freed = clean_cache(CFG.get("autoCleanMediaDays"), CFG.get("autoCleanAllDays"))
         if freed > 50e6:

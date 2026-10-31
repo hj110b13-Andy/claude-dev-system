@@ -5,7 +5,7 @@
    （非公開文件、社群工具同做法）取得 5 小時／7 天用量 %。端點改版時本腳本安靜失效、不擋操作。
 2. 寫進 <CLAUDE_HOME>/state/usage.json（只有百分比與重置時間，不含權杖）。
 3. 達門檻時注入「立刻收尾」提醒。門檻讀取順序（先找到者為準）：①專案 `.claude/dispatch-config.json`（從 hook 的 cwd 往上層找）
-   →②全域 <CLAUDE_HOME>/claude-dev-system/config/dispatch-config.json →③內建預設 80／97。
+   →②全域 <CLAUDE_HOME>/claude-dev-system/config/dispatch-config.json →③內建預設 85／97。
    設定檔結構（0.7.0 起）：usageThresholdPct 直接給 fiveHour／sevenDay 兩個數字，沒到門檻完全不動、不提示。
    舊結構仍支援：plan.current 指定目前方案，usageThresholdPct[方案] 給 fiveHour／sevenDay；方案若有 until 日期，
    到期日（含）起自動改用 plan.after。--print 會印出實際採用的是哪一份。
@@ -173,8 +173,16 @@ def main():
     near = (s.get("five_hour_pct") or 0) >= lim["nearFiveHour"] or (s.get("seven_day_pct") or 0) >= lim["nearSevenDay"]
     ttl = lim["checkTtlNear"] if near else lim["checkTtl"]
     if printing or now - s.get("fetched_at", 0) >= ttl:
-        got = fetch()
+        try:
+            got = fetch()
+        except Exception:  # noqa: BLE001  離線、權杖過期、429、逾時：都不能每次 hook 重打（每次最多拖 8 秒）
+            got = None
         if got is None:
+            s["fetched_at"] = now  # 失敗也記時間：下次要等 checkTtl 才再試（退避）
+            s["fetch_failed_at"] = now
+            save_state(s)
+            if printing:
+                print("讀不到用量（沒有登入憑證、離線或端點改版）；下次 hook 會在 TTL 後再試")
             return
         s.update(got)
         s["fetched_at"] = now

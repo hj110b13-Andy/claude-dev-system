@@ -114,6 +114,29 @@ class UsageGuardConfig(unittest.TestCase):
             finally:
                 ug.CONFIG = old
 
+    def test_fetch_failure_is_throttled(self):
+        import io, json, sys, time
+        ug = self.ug
+        with tempfile.TemporaryDirectory() as td:
+            old = (ug.STATE_DIR, ug.USAGE, ug.CONFIG, ug.fetch, sys.stdin)
+            try:
+                ug.STATE_DIR, ug.USAGE, ug.CONFIG = td, str(Path(td) / "usage.json"), str(Path(td) / "none.json")
+                calls = []
+
+                def boom():
+                    calls.append(1)
+                    raise RuntimeError("offline")
+                ug.fetch = boom
+                for _ in range(3):
+                    sys.stdin = io.StringIO(json.dumps({"hook_event_name": "PostToolUse", "cwd": td}))
+                    ug.main()
+                self.assertEqual(len(calls), 1, "抓失敗後 TTL 內不可再打")
+                st = json.loads(Path(ug.USAGE).read_text(encoding="utf-8"))
+                self.assertLess(time.time() - st["fetched_at"], 60)
+                self.assertIn("fetch_failed_at", st)
+            finally:
+                ug.STATE_DIR, ug.USAGE, ug.CONFIG, ug.fetch, sys.stdin = old
+
     def test_flat_thresholds_format(self):
         self.assertEqual(self.ug.pick_thresholds({"usageThresholdPct": {"fiveHour": 95, "sevenDay": 99}}), (95.0, 99.0))
         self.assertIsNone(self.ug.pick_thresholds({"usageThresholdPct": {"fiveHour": "x"}}))

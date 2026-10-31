@@ -15,6 +15,11 @@
 - 修視窗「③ 實際連線測試」失敗：原本叫 Claude 開 about:blank 截圖，擴充功能拒絕「Can't interact with browser-internal or unparseable URLs」；改開 https://example.com 讀標題後關分頁，並明給 --allowedTools。來源：使用者「我剛剛按實際連線測試發現測試失敗，但你用是可以的」。
 - selftest 加 `--dry-run`（只印每題會執行的完整指令，零用量），並核對過本機 claude 的旗標（--chrome／--no-chrome／--allowedTools／--max-turns／--output-format stream-json／--verbose／--no-session-persistence 都存在）；另用一題最小真實無頭對話驗證 stream-json 解析與判定。來源：使用者「有辦法不測試但確認沒有像剛剛的實際連線測試一樣有問題嗎」。
 - 整體自審（使用者「你再整體全部確認有沒有甚麼漏洞、bug、疏忽、邏輯」）修了五處：①selftest 報告與視窗紀錄會把 local.json 的金鑰值遮成 ***（Bash 指令或 Write 腳本內容常直接帶金鑰）；②selftest 摘要納入 Write／Edit 的內容，題目的 expect 允許 Write（Claude 先寫腳本再執行時原本會誤判 ❌）；③firecrawl 從 forbid 改成 warn（規則允許它當退路，清單看不出順序，只標 ⚠️）；④update 對使用者改過的 dispatch-config.json 會補上新版新增的頂層鍵（值不動），verify 對它改顯示 ✅「使用者自己的設定值」；⑤selftest.json 進安裝 payload、報告改存 state/selftest-reports，沒有 repo 的機器也能跑。
+- 獨立審查（sonnet agent，唯讀）回報高 1、中 13、低 12，逐條查證後修了 22 條、3 條記為已知限制：
+  - 高：用量 hook 抓不到用量（離線、權杖過期、端點改版）時沒有退避，每次工具呼叫都重打、最多拖 8 秒 → 失敗也記 `fetched_at`，TTL 內不再試（有測試）。
+  - 中：`video.py` YouTube Data API 的 HTTPError 分支永遠進不去（HTTPError 是 URLError 子類、被前一個 except 吃掉），配額用完看到的是 traceback 不是中文提示 → 調換順序；本機 mp4 快取鍵加 mtime＋大小，同路徑換檔不會拿到舊逐字稿；直播錄影逾時接住；Gemini 上傳改串流不整檔進記憶體；視窗 env 欄清空會變成永遠套不掉的假變更 → 清空＝還原預設（有測試）；selftest 權限清單補上五個 `-key` 版 MCP、報告改在暫存資料夾清掉前寫、沒有 expect 的題目判失敗、OpenAQ 題改比對 `api.openaq.org`；金鑰測試與還原備份在忙碌時會卡在「測試中…」或與套用同時寫檔 → 先擋；還原前先把現在的 settings.json 另存 `-before-restore`；匯入設定先全部驗證型別與範圍再套用、別台機器才有的 MCP 名稱略過；關閉視窗時若有工作在跑改為不准關（原本直接砍執行緒會留半套狀態）；規則 2c 的 402 與逾時寫成可判定（`-key` 版也 402／429 → 換索引並提醒；逾時＝單次超過 60 秒），exa 列不再叫人清金鑰。
+  - 低：巡檢分鐘預設統一 15（原本兩處寫 10）、舊 plan 格式 fallback 與 hook docstring 統一 85；備份只留最近 10 份；CLAUDE.md 是 CRLF 的檔案整檔不再被轉成 LF、解除安裝後位元組完全還原（有測試）；uninstall 順便刪 state/selftest-reports 並在說明列出殘留；Chrome 預設開關寫檔失敗給明確訊息；tavily 金鑰參數做 URL 編碼、`mask` 也遮編碼後的形式；視窗門檻旁註明「專案有自己的設定檔以專案為準」、金鑰說明註明測試會用掉 1 次搜尋額度；自我測試對話框寫最壞 80 分鐘與無人值守風險；`video.py` 清理說明改「沒更新」。
+  - 已知限制不改：金鑰會出現在 `claude mcp add` 命令列與 `~/.claude.json`（Claude Code 的設計）；門檻解析在 hook 與視窗各一份（hook 不能 import 安裝器）；`auto_clean` 每次執行掃整個快取樹。
 - 來源：使用者「好，這些優化都可以做」。
 
 ## 0.9.5（2026-11-01）

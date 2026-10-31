@@ -64,7 +64,7 @@ Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔�
 | 名稱 | 預設 | 類型 | 金鑰 | 限制（官方說法） |
 |---|---|---|---|---|
 | parallel | 開 | 搜尋 | 不需要；有則 `Authorization: Bearer <key>`（多 `web_research`） | 匿名層速率較低，數字未公開；有金鑰呼叫計入額度：註冊送一次性 $20、搜尋 Turbo／Fast $1／1k、Basic／Advanced $5／1k；「每月 $5 免費」須綁卡才解鎖（platform.parallel.ai Billing 頁 2026-10-31 實看：「Add a card to unlock monthly credits」） |
-| exa | 開 | 搜尋 | 不需要；有則 `x-api-key` header | 免金鑰官方只寫「Free rate-limited usage」（數字未公開）；註冊後每月 1 日重置 $10 額度（約 2,500 次 Lite 搜尋），**用完回 402、不會自動退回免金鑰**，撞 402 就 `web --key exa=` 清掉金鑰（exa.ai/docs/admin/billing，2026-10-27 查） |
+| exa | 開 | 搜尋 | 不需要；有則 `x-api-key` header | 免金鑰官方只寫「Free rate-limited usage」（數字未公開）；註冊後每月 1 日重置 $10 額度（約 2,500 次 Lite 搜尋），金鑰版用完回 402；免費優先模式下免金鑰版 `exa` 仍在，照 2c 第 5 條換索引即可，不必清金鑰（exa.ai/docs/admin/billing，2026-10-27 查） |
 | tavily | 關（有金鑰者開） | 搜尋／擷取 | 免金鑰需 header `X-Tavily-Access-Mode: keyless`（只開 search／extract）；有金鑰 `?tavilyApiKey=` | 免費方案 1,000 credits／月（基本搜尋 1、進階 2） |
 | context7 | 開 | 程式庫文件 | 不需要；有則 `Authorization: Bearer <key>` header | 免金鑰官方只寫「Low rate limits」（數字未公開）；免費帳號每月 1,000 次、用完每天補 20 次（context7.com/plans，2026-10-27 查） |
 | deepwiki | 開 | GitHub repo 文件 | 不需要 | 未公開；只能查已被 deepwiki.com 索引的公開 repo（沒索引的到該站輸入 repo 即可） |
@@ -112,13 +112,13 @@ urllib.request.urlopen(url, context=ctx)
 安裝器對有金鑰的搜尋類服務（parallel、exa、tavily、context7、firecrawl）預設註冊**兩個** MCP：免金鑰版 `<名稱>` 與金鑰版 `<名稱>-key`（`local.json` 的 `keyMode[名稱]` 設 `always` 則只有金鑰版）。規則：
 
 1. 先用免金鑰版。
-2. 免金鑰版回 **429、5xx、逾時、402** 任一 → 這一次改用 `-key` 版重做。
+2. 免金鑰版回 **429、5xx、402，或單次呼叫超過 60 秒沒回應** 任一 → 這一次改用 `-key` 版重做。
 3. 之後同一服務**連續 3 次**直接用 `-key` 版（限流通常持續幾分鐘，不用每次都撞）。
 4. 第 4 次回到第 1 步再試免金鑰；成功就繼續免金鑰，失敗再進入 3 次。
-5. 沒有 `-key` 版（使用者沒填金鑰）就照第 1a 節換另一個索引。
+5. 沒有 `-key` 版（使用者沒填金鑰），或 `-key` 版也回 429／5xx／402（金鑰額度用完）→ 這一次照第 1a 節換另一個索引，並在回覆的查證過程寫一句「X 的金鑰額度已用完」提醒使用者。
 6. 回覆的「查證過程」寫明哪幾次用了 `-key` 版，讓使用者知道額度被用到。
 
-為什麼是 3 次不是「幾分鐘後」：Claude 沒有可靠的時鐘，次數才判得準；要改只動這個數字。exa 的金鑰版額度用完回 402，也走同一條（下月 1 日自動恢復）。
+為什麼是 3 次不是「幾分鐘後」：Claude 沒有可靠的時鐘，次數才判得準；要改只動這個數字。exa 的金鑰版額度用完回 402：走第 5 條換索引，免金鑰版 `exa` 仍可用，不必清掉金鑰（下月 1 日自動恢復）。
 
 ## 3. 即時數值開放 API（免金鑰、免費）
 

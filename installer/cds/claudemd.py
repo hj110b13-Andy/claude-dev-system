@@ -23,7 +23,9 @@ def find_block(text: str) -> tuple[int, int] | None:
     if e < 0:
         raise ValueError("CLAUDE.md 有 claude-dev-system 開始標記但找不到結束標記，請手動修復後再執行")
     end = e + len(END)
-    if text[end:end + 1] == "\n":
+    if text[end:end + 2] == chr(13) + chr(10):  # CRLF 檔
+        end += 2
+    elif text[end:end + 1] == chr(10):
         end += 1
     return m.start(), end
 

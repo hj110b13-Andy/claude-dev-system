@@ -1,6 +1,6 @@
 {
   "_comment": "`install.py selftest` 用：每題在全新無頭 `claude -p` session 跑一次（只給問題，不提工具名），比對它實際呼叫的工具是否符合 expect（每條是對「工具名 :: 參數摘要」的正規表達式，全部命中才算 ✅）；forbid 命中即 ❌；warn 命中只標 ⚠️（規則允許當退路的工具，順序要看報告）。chrome=true 的題目加 --chrome，其餘 --no-chrome。allowed 是 --allowedTools 清單（無頭模式沒有權限提示）。費用為訂閱用量，印出的 USD 是估算值。",
-  "allowed": "Bash,PowerShell,Read,Write,Grep,Glob,WebFetch,WebSearch,ToolSearch,Agent,mcp__parallel__web_search,mcp__parallel__web_fetch,mcp__exa__web_search_exa,mcp__exa__web_fetch_exa,mcp__tavily__tavily_search,mcp__tavily-key__tavily_search,mcp__firecrawl__firecrawl_search,mcp__firecrawl__firecrawl_scrape,mcp__mslearn__microsoft_docs_search,mcp__mslearn__microsoft_docs_fetch,mcp__context7__resolve-library-id,mcp__context7__query-docs,mcp__deepwiki__read_wiki_structure,mcp__deepwiki__ask_wiki_question,mcp__deepwiki__read_wiki_contents,mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__tabs_create_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__computer,mcp__claude-in-chrome__read_page,mcp__claude-in-chrome__find,mcp__claude-in-chrome__get_page_text,mcp__claude-in-chrome__tabs_close_mcp,mcp__claude-in-chrome__browser_batch",
+  "allowed": "Bash,PowerShell,Read,Write,Grep,Glob,WebFetch,WebSearch,ToolSearch,Agent,mcp__parallel__web_search,mcp__parallel__web_fetch,mcp__exa__web_search_exa,mcp__exa__web_fetch_exa,mcp__tavily__tavily_search,mcp__tavily-key__tavily_search,mcp__parallel-key__web_search,mcp__parallel-key__web_fetch,mcp__exa-key__web_search_exa,mcp__exa-key__web_fetch_exa,mcp__context7-key__resolve-library-id,mcp__context7-key__query-docs,mcp__firecrawl-key__firecrawl_search,mcp__firecrawl-key__firecrawl_scrape,mcp__firecrawl__firecrawl_search,mcp__firecrawl__firecrawl_scrape,mcp__mslearn__microsoft_docs_search,mcp__mslearn__microsoft_docs_fetch,mcp__context7__resolve-library-id,mcp__context7__query-docs,mcp__deepwiki__read_wiki_structure,mcp__deepwiki__ask_wiki_question,mcp__deepwiki__read_wiki_contents,mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__tabs_create_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__computer,mcp__claude-in-chrome__read_page,mcp__claude-in-chrome__find,mcp__claude-in-chrome__get_page_text,mcp__claude-in-chrome__tabs_close_mcp,mcp__claude-in-chrome__browser_batch",
   "maxTurns": 24,
   "timeoutSec": 540,
   "cases": [
@@ -18,7 +18,7 @@
     {"id": "yt-stats", "name": "影片數據與招牌（YouTube Data API＋frames --at）", "prompt": "這支影片 https://www.youtube.com/watch?v=7bztj9j7JZw 有多少人看過、最熱門留言說什麼？另外影片 11:32 到 12:30 那段畫面上的店招牌寫什麼？",
      "expect": ["(?i)^(Bash|PowerShell) ::.*video\\.py.*(stats|comments)", "(?i)^(Bash|PowerShell) ::.*video\\.py.*frames"]},
     {"id": "openaq", "name": "國外空品（OpenAQ）", "prompt": "東京現在的空氣品質（AQI 或 PM2.5）如何？要官方測站的實測值，附來源與資料時間。",
-     "expect": ["(?i)openaq"]},
+     "expect": ["(?i)api\\.openaq\\.org|X-API-Key.*openaq|openaq.*X-API-Key"]},
     {"id": "motion", "name": "影片連續動作（Gemini ask）", "prompt": "這支影片 https://www.youtube.com/watch?v=_4QjeaRGXRs 從 0:40 到 1:05 這 25 秒內，鏡頭和畫面中的人物做了哪些連續動作（移動、轉向、進出什麼地方）？請依時間順序描述。",
      "expect": ["(?i)^(Bash|PowerShell) ::.*video\\.py.* ask "]},
     {"id": "chrome", "name": "實際開網頁（Claude in Chrome）", "prompt": "用瀏覽器實際打開 https://example.com ，告訴我頁面標題和第一段文字是什麼，並截一張圖。", "chrome": true,

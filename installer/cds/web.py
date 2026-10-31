@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import re
 import shutil
+import urllib.parse
 import subprocess
 from pathlib import Path
 
@@ -76,7 +77,7 @@ def _entry(spec: dict, key: str | None = None) -> dict:
     url = spec["url"]
     headers = dict(spec.get("headers") or {})
     if key and spec.get("keyParam"):
-        url += ("&" if "?" in url else "?") + f"{spec['keyParam']}={key}"
+        url += ("&" if "?" in url else "?") + f"{spec['keyParam']}={urllib.parse.quote(key, safe='')}"
         headers = dict(spec.get("keyedHeaders") if spec.get("keyedHeaders") is not None else headers)
     elif key and spec.get("keyHeader"):
         headers[spec["keyHeader"]] = spec.get("keyHeaderPrefix", "") + key
@@ -120,9 +121,13 @@ def desired_env(src: dict, local: dict) -> dict[str, str]:
 
 
 def mask(text: str, local: dict) -> str:
+    """把金鑰值遮成 ***；URL 編碼後的形式也遮（金鑰會出現在 `claude mcp add` 的命令列與 ~/.claude.json，這是 Claude Code 的設計，本工具只能保證不印出來）。"""
     for v in (local.get("keys") or {}).values():
         if v:
             text = text.replace(str(v), "***")
+            q = urllib.parse.quote(str(v), safe="")
+            if q != str(v):
+                text = text.replace(q, "***")
     return text
 
 

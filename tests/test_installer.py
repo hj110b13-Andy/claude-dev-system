@@ -176,6 +176,29 @@ class Preservation(Base):
         self.assertTrue(cfg.exists(), "使用者改過的設定檔不應被刪")
         self.assertEqual(self.lay.claude_md.read_text(encoding="utf-8"), USER_MD)
 
+    def test_crlf_claude_md_keeps_crlf_and_uninstall_restores_bytes(self):
+        raw = USER_MD.replace(chr(10), chr(13) + chr(10)).encode("utf-8")
+        self.lay.claude_md.write_bytes(raw)
+        self.install()
+        b = self.lay.claude_md.read_bytes()
+        self.assertTrue(b.startswith(raw), "區塊外的位元組一字不動（含 CRLF）")
+        self.assertNotIn(b"\n", b.replace(b"\r\n", b""), "整個檔案都是 CRLF，不能混 LF")
+        self.assertEqual(self.verify()[0], 0)
+        self.install(mode="update")
+        self.assertEqual(self.lay.claude_md.read_bytes()[:len(raw)], raw)
+        commands.uninstall(self.lay)
+        self.assertEqual(self.lay.claude_md.read_bytes(), raw, "解除安裝後位元組完全還原")
+
+    def test_backups_pruned_to_ten(self):
+        self.write_settings(copy.deepcopy(USER_SETTINGS))
+        self.install()
+        for _ in range(12):
+            self.install(mode="update")
+        m = json.loads(self.lay.manifest.read_text(encoding="utf-8"))
+        self.assertEqual(len(m["backups"]), commands.KEEP_BACKUPS)
+        files = list(self.lay.backups.glob("claude-dev-system-*.json"))
+        self.assertLessEqual(len(files), commands.KEEP_BACKUPS)
+
     def test_force_update_overwrites_user_changes(self):
         self.install()
         cfg = self.lay.payload / "config" / "dispatch-config.json"
