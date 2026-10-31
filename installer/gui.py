@@ -38,6 +38,7 @@ class App:
         self.key_dirty: dict[str, bool] = {}
         self.key_status: dict[str, tk.StringVar] = {}
         self.mode_vars: dict[str, tk.StringVar] = {}
+        self.mode_boxes: dict = {}
         self.server_vars: dict[str, tk.BooleanVar] = {}
         self.env_vars: dict[str, tk.StringVar] = {}
         root.title("claude-dev-system 設定")
@@ -168,7 +169,7 @@ class App:
             w.destroy()
         self.notes = []
         s, f = self.state, self.form
-        self.key_vars.clear(); self.key_dirty.clear(); self.key_status.clear(); self.mode_vars.clear(); self.server_vars.clear(); self.env_vars.clear()
+        self.key_vars.clear(); self.key_dirty.clear(); self.key_status.clear(); self.mode_vars.clear(); self.mode_boxes.clear(); self.server_vars.clear(); self.env_vars.clear()
         self.title_var.set(f"repo v{s['repo_version']}　已安裝：{('v' + s['version']) if s['installed'] else '尚未安裝'}　設定目錄：{self.lay.home}")
 
         # 環境
@@ -210,6 +211,10 @@ class App:
             st = "已註冊" if sv["registered"] else "未註冊"
             if sv["key_registered"]:
                 st += "＋金鑰版"
+            elif not sv["keyable"]:
+                st += "（純免費服務，沒有金鑰機制）"
+            elif sv["registered"]:
+                st += "（免金鑰版；填金鑰後會多註冊金鑰版）"
             ttk.Checkbutton(webf, text=f"{n}（{', '.join(sv['tools'][:3])}）", variable=var, command=self.update_diff).grid(row=row, column=0, sticky="w")
             self._note(webf, st, wrap=300, row=row, column=1, sticky="w", padx=8)
             row += 1
@@ -266,16 +271,20 @@ class App:
             ttk.Button(bf, text="測試", width=5, command=lambda n=n: self.do_test_key(n)).pack(side="left")
             ttk.Button(bf, text="清除", width=5, command=lambda n=n: self._key_clear(n)).pack(side="left", padx=2)
             if k["mode"]:
-                mv = tk.StringVar(value="免費優先" if f.key_modes.get(n, k["mode"]) == "fallback" else "一律用金鑰")
+                mv = tk.StringVar(value="免費優先" if (f.key_modes.get(n, k["mode"]) == "fallback" or not k["present"]) else "一律用金鑰")
                 self.mode_vars[n] = mv
                 cb = self._no_wheel_change(ttk.Combobox(kf, textvariable=mv, values=["免費優先", "一律用金鑰"], width=10, state="readonly"))
                 cb.grid(row=i, column=5, sticky="w")
                 cb.bind("<<ComboboxSelected>>", lambda e: self.update_diff())
+                self.mode_boxes[n] = cb
+                if not k["present"]:  # 沒金鑰就沒有「一律用金鑰」可選
+                    cb.state(["disabled"])
             else:
                 ttk.Label(kf, text="只能用金鑰", foreground="#555").grid(row=i, column=5, sticky="w")
-            self._note(kf, k["note"], wrap=300, row=i, column=6, sticky="w", padx=6)
-        kf.columnconfigure(6, weight=1)
-        ttk.Label(kf, text="「只能用金鑰」＝此服務沒有免金鑰版；「免費優先」＝免金鑰版與金鑰版並存、撞限流才用金鑰", foreground="#555").grid(row=len(s["keys"]) + 1, column=0, columnspan=7, sticky="w", pady=(6, 0))
+            ttk.Button(kf, text="註冊網頁", width=8, command=lambda u=k["url"]: webbrowser.open(u)).grid(row=i, column=6, padx=4)
+            self._note(kf, k["note"], wrap=300, row=i, column=7, sticky="w", padx=6)
+        kf.columnconfigure(7, weight=1)
+        ttk.Label(kf, text="「只能用金鑰」＝此服務沒有免金鑰版；「免費優先」＝免金鑰版與金鑰版並存、撞限流才用金鑰（沒填金鑰時不可選）；「註冊網頁」開官方申請頁，金鑰免費", foreground="#555").grid(row=len(s["keys"]) + 1, column=0, columnspan=8, sticky="w", pady=(6, 0))
 
         # Chrome
         cf = self._section("Claude in Chrome（開網頁看、操作需登入網站、教操作前核對畫面）")
@@ -308,7 +317,8 @@ class App:
             if v.get().strip() != self.key_orig.get(n, ""):
                 f.keys[n] = v.get().strip()
         for n, mv in self.mode_vars.items():
-            f.key_modes[n] = "always" if mv.get() == "一律用金鑰" else "fallback"
+            has_key = bool(self.key_vars[n].get().strip())
+            f.key_modes[n] = "always" if (mv.get() == "一律用金鑰" and has_key) else "fallback"
         try:
             f.thresholds = {"fiveHour": float(self.five_var.get()), "sevenDay": float(self.seven_var.get())}
         except ValueError:
@@ -321,6 +331,13 @@ class App:
         cur = self.key_vars[n].get().strip()
         orig = self.key_orig.get(n, "")
         self.key_dirty[n] = cur != orig
+        cb = self.mode_boxes.get(n)
+        if cb is not None:  # 有值才能選模式；清空就鎖回免費優先
+            if cur:
+                cb.state(["!disabled"])
+            else:
+                self.mode_vars[n].set("免費優先")
+                cb.state(["disabled"])
         if cur == orig:
             self.key_status[n].set("已設定" if orig else "未設定")
         else:

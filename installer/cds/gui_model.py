@@ -27,19 +27,19 @@ from .paths import REPO, Layout, repo_version
 
 # ---------- 常數 ----------
 
-KEY_INFO = {  # 名稱 → (顯示名, 類別, 說明)。類別 search 的金鑰有免費優先模式。
-    "cwa": ("中央氣象署", "data", "台灣鄉鎮預報、潮汐、地震、警特報"),
-    "moenv": ("環境部空品", "data", "台灣官方測站 AQI"),
-    "openaq": ("OpenAQ", "data", "國外官方測站空品"),
-    "tdx_id": ("TDX Client Id", "data", "交通部停車場等靜態資料"),
-    "tdx_secret": ("TDX Client Secret", "data", "與 tdx_id 成對"),
-    "youtube": ("YouTube Data API", "data", "影片觀看數、留言、日期篩選搜尋"),
-    "gemini": ("Gemini", "data", "真的看影片畫面"),
-    "tavily": ("Tavily", "search", "搜尋＋擷取＋整站爬；免費 1,000 credits／月"),
-    "exa": ("Exa", "search", "語意搜尋；免費每月 $10"),
-    "context7": ("Context7", "search", "程式庫文件；免費 1,000 次／月"),
-    "parallel": ("Parallel", "search", "搜尋；免費每月 $5，有金鑰多 web_research"),
-    "firecrawl": ("Firecrawl", "search", "JS 頁面抓取；免費 1,000 credits／月"),
+KEY_INFO = {  # 名稱 → (顯示名, 類別, 說明, 註冊網址)。類別 search 的金鑰有免費優先模式；data 類沒有免金鑰版。
+    "cwa": ("中央氣象署", "data", "台灣鄉鎮預報、潮汐、地震、警特報", "https://opendata.cwa.gov.tw/"),
+    "moenv": ("環境部空品", "data", "台灣官方測站 AQI", "https://data.moenv.gov.tw/"),
+    "openaq": ("OpenAQ", "data", "國外官方測站空品", "https://explore.openaq.org/register"),
+    "tdx_id": ("TDX Client Id", "data", "交通部停車場等靜態資料", "https://tdx.transportdata.tw/"),
+    "tdx_secret": ("TDX Client Secret", "data", "與 tdx_id 成對", "https://tdx.transportdata.tw/"),
+    "youtube": ("YouTube Data API", "data", "影片觀看數、留言、日期篩選搜尋", "https://console.cloud.google.com/apis/credentials"),
+    "gemini": ("Gemini", "data", "真的看影片畫面", "https://aistudio.google.com/api-keys"),
+    "tavily": ("Tavily", "search", "搜尋＋擷取＋整站爬；免費 1,000 credits／月", "https://app.tavily.com/"),
+    "exa": ("Exa", "search", "語意搜尋；免費每月 $10", "https://dashboard.exa.ai/api-keys"),
+    "context7": ("Context7", "search", "程式庫文件；免費 1,000 次／月", "https://context7.com/dashboard"),
+    "parallel": ("Parallel", "search", "搜尋；免費每月 $5，有金鑰多 web_research", "https://platform.parallel.ai/"),
+    "firecrawl": ("Firecrawl", "search", "JS 頁面抓取；免費 1,000 credits／月", "https://www.firecrawl.dev/app/api-keys"),
 }
 ENV_DESC = {
     "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION": "內建 WebSearch 每場對話上限（官方預設 200）",
@@ -189,9 +189,9 @@ def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.de
                          "key_registered": (name + "-key") in have, "keyable": bool(spec.get("keyParam") or spec.get("keyHeader")),
                          "tools": spec.get("tools") or [], "note": spec.get("note", "")}
     keys = {}
-    for name, (label, kind, note) in KEY_INFO.items():
+    for name, (label, kind, note, url) in KEY_INFO.items():
         val = (local.get("keys") or {}).get(name) or ""
-        keys[name] = {"label": label, "kind": kind, "note": note, "present": bool(val), "value": val,  # value 只給畫面輸入框用，不可寫進紀錄
+        keys[name] = {"label": label, "kind": kind, "note": note, "url": url, "present": bool(val), "value": val,  # value 只給畫面輸入框用，不可寫進紀錄
                       "mode": web.key_mode(local, name) if kind == "search" else None}
     vcfg = {}
     vp = lay.payload / "config" / "video.json"
