@@ -42,6 +42,16 @@ class App:
         self.env_vars: dict[str, tk.StringVar] = {}
         root.title("claude-dev-system 設定")
         root.minsize(980, 720)
+        # 預設全視窗：排版寬鬆、字清楚（使用者要求）；Windows 用 zoomed，其他平台用螢幕尺寸
+        try:
+            root.state("zoomed")
+        except tk.TclError:
+            root.geometry(f"{root.winfo_screenwidth() - 40}x{root.winfo_screenheight() - 80}+20+20")
+        base_font = ("Microsoft JhengHei UI", 11) if sys.platform == "win32" else ("", 11)
+        root.option_add("*Font", base_font)
+        st = ttk.Style(root)
+        for cls in (".", "TLabel", "TButton", "TCheckbutton", "TEntry", "TCombobox", "TSpinbox", "TLabelframe.Label"):
+            st.configure(cls, font=base_font)
         self._build()
         self.refresh()
         root.after(100, self._pump)
@@ -66,7 +76,16 @@ class App:
         canvas.configure(yscrollcommand=vsb.set)
         canvas.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
-        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(-int(e.delta / 120), "units"))
+        self.canvas = canvas
+
+        def wheel(e):  # 只在滑鼠位於上方設定區時捲動；在底下的紀錄區滾輪不影響上面
+            w = e.widget
+            while w is not None:
+                if w is self.canvas or w is self.inner:
+                    self.canvas.yview_scroll(-int(e.delta / 120), "units")
+                    return
+                w = getattr(w, "master", None)
+        r.bind_all("<MouseWheel>", wheel)
 
         bottom = ttk.Frame(r, padding=8)
         bottom.pack(fill="x")
@@ -83,8 +102,9 @@ class App:
         ttk.Button(btns, text="匯入設定", command=self.do_import).pack(side="left", padx=4)
         ttk.Button(btns, text="備份／還原", command=self.do_backups).pack(side="left", padx=4)
         ttk.Button(btns, text="解除安裝", command=self.do_uninstall).pack(side="right")
-        self.log = tk.Text(bottom, height=9, wrap="word", state="disabled", font=("Consolas", 9))
+        self.log = tk.Text(bottom, height=9, wrap="word", state="disabled", font=("Consolas", 10))
         self.log.pack(fill="x")
+        self.log.bind("<MouseWheel>", lambda e: (self.log.yview_scroll(-int(e.delta / 120), "units"), "break")[1])
 
     def _section(self, title: str) -> ttk.LabelFrame:
         f = ttk.LabelFrame(self.inner, text=title, padding=8)
@@ -110,10 +130,13 @@ class App:
         env.columnconfigure(0, weight=1)
 
         # 核心
-        core = self._section("核心（規則、skill、用量守門 hook）——安裝後永遠啟用")
-        ttk.Label(core, text=f"{MARK[s['installed']]} {'已安裝' if s['installed'] else '尚未安裝（按套用會安裝）'}　用量守門 hook：{MARK[s['hooks']['usage_guard']]}").pack(anchor="w")
+        core = self._section("核心（規則、skill）——安裝後永遠啟用")
+        ttk.Label(core, text=f"{MARK[s['installed']]} {'已安裝' if s['installed'] else '尚未安裝（按套用會安裝）'}").pack(anchor="w")
+        self.guard_var = tk.BooleanVar(value=f.usage_guard)
+        ttk.Checkbutton(core, text=f"用量守門 hook（到門檻才提示收尾，沒到完全不動；目前 settings.json：{'已註冊' if s['hooks']['usage_guard'] else '未註冊'}）",
+                        variable=self.guard_var, command=self.update_diff).pack(anchor="w")
         th = ttk.Frame(core); th.pack(anchor="w", pady=4)
-        ttk.Label(th, text="用量門檻（到了才提示收尾，沒到完全不動）：5 小時 ≥").pack(side="left")
+        ttk.Label(th, text="門檻：5 小時 ≥").pack(side="left")
         self.five_var = tk.StringVar(value=str(f.thresholds["fiveHour"]))
         self.seven_var = tk.StringVar(value=str(f.thresholds["sevenDay"]))
         ttk.Spinbox(th, from_=1, to=100, width=5, textvariable=self.five_var, command=self.update_diff).pack(side="left")
@@ -143,7 +166,8 @@ class App:
             var.trace_add("write", lambda *a: self.update_diff())
             ttk.Label(webf, text=k).grid(row=row, column=0, sticky="w")
             ttk.Entry(webf, textvariable=var, width=12).grid(row=row, column=1, sticky="w", padx=8)
-            ttk.Label(webf, text=f"預設 {dv}；目前 settings.json：{s['web']['env'].get(k) or '未寫入'}", foreground="#555").grid(row=row, column=2, sticky="w")
+            ttk.Label(webf, text=f"{gm.ENV_DESC.get(k, '')}；預設 {dv}；目前 settings.json：{s['web']['env'].get(k) or '未寫入'}",
+                      foreground="#555", wraplength=900, justify="left").grid(row=row, column=2, sticky="w")
             row += 1
 
         # 影片
@@ -159,19 +183,22 @@ class App:
         ttk.Button(vf, text="瀏覽…", command=self.pick_dir).grid(row=1, column=2, sticky="w")
 
         # 金鑰
-        kf = self._section("金鑰（存本機 local.json，不進 repo；留空＝不變；搜尋類預設「免費優先」）")
-        ttk.Label(kf, text="名稱", font=("", 9, "bold")).grid(row=0, column=0, sticky="w")
-        ttk.Label(kf, text="狀態", font=("", 9, "bold")).grid(row=0, column=1, sticky="w")
-        ttk.Label(kf, text="輸入新值", font=("", 9, "bold")).grid(row=0, column=2, sticky="w")
-        ttk.Label(kf, text="模式", font=("", 9, "bold")).grid(row=0, column=5, sticky="w")
+        kf = self._section("金鑰（存本機 local.json，不進 repo；框內是目前的值，改了才會更新；搜尋類預設「免費優先」）")
+        hdr = ("", 9, "bold")
+        ttk.Label(kf, text="名稱", font=hdr).grid(row=0, column=0, sticky="w")
+        ttk.Label(kf, text="狀態", font=hdr).grid(row=0, column=1, sticky="w")
+        ttk.Label(kf, text="金鑰值（按「顯示」看明文）", font=hdr).grid(row=0, column=2, sticky="w")
+        ttk.Label(kf, text="模式", font=hdr).grid(row=0, column=5, sticky="w")
+        self.key_orig: dict[str, str] = {}
         for i, (n, k) in enumerate(s["keys"].items(), start=1):
             ttk.Label(kf, text=f"{k['label']}（{n}）").grid(row=i, column=0, sticky="w")
-            self.key_status[n] = tk.StringVar(value="已設定 ••••" if k["present"] else "未設定")
-            ttk.Label(kf, textvariable=self.key_status[n], width=16).grid(row=i, column=1, sticky="w")
-            var = tk.StringVar()
+            self.key_status[n] = tk.StringVar(value="已設定" if k["present"] else "未設定")
+            ttk.Label(kf, textvariable=self.key_status[n], width=18).grid(row=i, column=1, sticky="w")
+            var = tk.StringVar(value=k["value"])
             self.key_vars[n] = var
+            self.key_orig[n] = k["value"]
             self.key_dirty[n] = False
-            ent = ttk.Entry(kf, textvariable=var, width=34, show="•")
+            ent = ttk.Entry(kf, textvariable=var, width=40, show="•")
             ent.grid(row=i, column=2, sticky="w", padx=4)
             var.trace_add("write", lambda *a, n=n: self._key_typed(n))
             ttk.Button(kf, text="顯示", width=5, command=lambda e=ent: e.configure(show="" if e.cget("show") else "•")).grid(row=i, column=3)
@@ -184,13 +211,15 @@ class App:
                 cb = ttk.Combobox(kf, textvariable=mv, values=["免費優先", "一律用金鑰"], width=10, state="readonly")
                 cb.grid(row=i, column=5, sticky="w")
                 cb.bind("<<ComboboxSelected>>", lambda e: self.update_diff())
+            else:
+                ttk.Label(kf, text="只能用金鑰（此服務沒有免金鑰版）", foreground="#555").grid(row=i, column=5, sticky="w")
             ttk.Label(kf, text=k["note"], foreground="#555").grid(row=i, column=6, sticky="w", padx=6)
 
         # Chrome
         cf = self._section("Claude in Chrome（開網頁看、操作需登入網站、教操作前核對畫面）")
         c = s["chrome"]
         ttk.Label(cf, text=f"① 擴充功能已安裝：{MARK[c['extension']]}　② 已和 Claude Code 登記（native host）：{MARK[c['native_host']]}　"
-                           f"③ 實際連線：按右邊按鈕測（約一場對話開場的用量，不自動跑）").grid(row=0, column=0, sticky="w")
+                           f"③ 實際連線：按右邊按鈕測（約一場對話開場的用量，不自動跑）", wraplength=1100, justify="left").grid(row=0, column=0, sticky="w")
         ttk.Button(cf, text="③ 實際連線測試", command=self.do_chrome_test).grid(row=0, column=1, padx=6)
         self.chrome_var = tk.BooleanVar(value=bool(c["default_enabled"]))
         cb = ttk.Checkbutton(cf, text="Enabled by default（每場對話自動連 Chrome；寫 ~/.claude.json，會先備份）", variable=self.chrome_var, command=self.update_diff)
@@ -209,9 +238,10 @@ class App:
         f.servers = {n: v.get() for n, v in self.server_vars.items()}
         f.env = {k: v.get().strip() for k, v in self.env_vars.items()}
         f.video_enabled = self.video_var.get()
+        f.usage_guard = self.guard_var.get()
         f.download_dir = self.dl_var.get().strip()
         for n, v in self.key_vars.items():
-            if self.key_dirty.get(n):
+            if v.get().strip() != self.key_orig.get(n, ""):
                 f.keys[n] = v.get().strip()
         for n, mv in self.mode_vars.items():
             f.key_modes[n] = "always" if mv.get() == "一律用金鑰" else "fallback"
@@ -224,15 +254,18 @@ class App:
         return f
 
     def _key_typed(self, n):
-        self.key_dirty[n] = True
-        self.key_status[n].set("將更新" if self.key_vars[n].get().strip() else ("將清除" if self.state["keys"][n]["present"] else "未設定"))
+        cur = self.key_vars[n].get().strip()
+        orig = self.key_orig.get(n, "")
+        self.key_dirty[n] = cur != orig
+        if cur == orig:
+            self.key_status[n].set("已設定" if orig else "未設定")
+        else:
+            self.key_status[n].set("將更新" if cur else ("將清除" if orig else "未設定"))
         self.update_diff()
 
     def _key_clear(self, n):
         self.key_vars[n].set("")
-        self.key_dirty[n] = True
-        self.key_status[n].set("將清除" if self.state["keys"][n]["present"] else "未設定")
-        self.update_diff()
+        self._key_typed(n)
 
     def update_diff(self):
         try:
@@ -248,6 +281,7 @@ class App:
         for n, v in self.server_vars.items():
             v.set(f.servers.get(n, False))
         self.video_var.set(f.video_enabled)
+        self.guard_var.set(f.usage_guard)
         if self.state["chrome"]["default_enabled"] is not None and f.chrome_default_enabled is not None:
             self.chrome_var.set(f.chrome_default_enabled)
         self.update_diff()
@@ -347,18 +381,11 @@ class App:
         self._run_bg(job)
 
     def do_test_key(self, n: str):
-        val = self.key_vars[n].get().strip() if self.key_dirty.get(n) and self.key_vars[n].get().strip() else None
-        local = gm._local(self.lay)
-        keys = dict(local.get("keys") or {})
-        if val is None:
-            val = keys.get(n, "")
+        keys = {m: v.get().strip() for m, v in self.key_vars.items() if v.get().strip()}  # 框內的值（含尚未套用的）
+        val = keys.get(n, "")
         if not val:
-            messagebox.showinfo("測試", "請先輸入金鑰（或此金鑰尚未設定）")
+            messagebox.showinfo("測試", "請先輸入金鑰")
             return
-        keys[n] = val
-        for m in self.key_vars:  # 同時填的其他新值也納入（例如 tdx_id／tdx_secret 一起）
-            if self.key_dirty.get(m) and self.key_vars[m].get().strip():
-                keys[m] = self.key_vars[m].get().strip()
         self.q.put(("keystatus", (n, "測試中…")))
 
         def job():
@@ -399,6 +426,7 @@ class App:
         for k, v in self.env_vars.items():
             v.set(f.env.get(k, v.get()))
         self.video_var.set(f.video_enabled)
+        self.guard_var.set(f.usage_guard)
         self.dl_var.set(f.download_dir or "")
         self.five_var.set(str(f.thresholds.get("fiveHour", self.five_var.get())))
         self.seven_var.set(str(f.thresholds.get("sevenDay", self.seven_var.get())))
@@ -434,7 +462,8 @@ class App:
         ttk.Button(w, text="還原選取的備份", command=restore).pack(pady=4)
 
     def do_uninstall(self):
-        if not messagebox.askyesno("解除安裝", "移除本工具加的 hook、CLAUDE.md 區塊、MCP、env 與檔案（金鑰檔 local.json 保留）。確定？"):
+        if not messagebox.askyesno("解除安裝", "只移除這套工具加進去的東西：\n• settings.json 的兩條 hook 與 env\n• CLAUDE.md 的標記區塊\n• 它註冊的 MCP\n• 規則／工具檔與 4 個 skill\n\n"
+                                            "不會移除：pip 裝的 yt-dlp／faster-whisper、ffmpeg、PowerShell 7、Chrome 擴充、Python、Claude Code、金鑰檔 local.json、這個設定程式本身。\n\n確定？"):
             return
 
         def job():

@@ -2,6 +2,11 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.8.1（2026-10-31）
+
+- 設定視窗依使用者試用回饋修正：預設全視窗開啟、字體放大（Microsoft JhengHei UI 11）；金鑰輸入框直接顯示目前的值（遮罩，按「顯示」看明文），改了才算變更、改回原值自動取消；沒有免金鑰版的金鑰在模式欄標「只能用金鑰」；滾輪只捲動滑鼠所在區域（紀錄區不再帶動上方）；長文字自動換行、Chrome 列不再被截掉；env 欄位旁加白話說明（含 PYTHONUTF8 是什麼）；解除安裝確認視窗寫明「會移除／不會移除」清單。
+- **用量守門可開關**：視窗核心區勾選框、`web --usage-guard on|off`（local.json `usageGuard`）；關閉時 `install`／`update` 不註冊 hook 並移除既有條目，verify 顯示「已由使用者關閉」不算錯，status 同步；「全部啟用／全部關閉」也包含它。來源：使用者「用量守門也要可開關」。測試 56 個通過。
+
 ## 0.8.0（2026-10-31）
 
 - **設定視窗**（GUI／執行檔計畫的階段 1、2）：`python installer/install.py gui`（或 `installer/gui.py`，tkinter 內建、不裝套件）。開啟時與每次套用後都重讀真實檔案（manifest、settings.json、`~/.claude.json`、local.json、pip import、執行檔偵測），不信表單。內容：環境列（Python、Claude Code、ffmpeg、PowerShell 7、winget、git、node、faster-whisper，缺的有「安裝」或「開下載頁」按鈕）、核心與用量門檻兩個數字、聯網來源總開關＋每個 MCP 開關＋WebSearch 上限等 env、影片來源開關＋下載資料夾、12 把金鑰（遮罩輸入、顯示、**測試**、清除、搜尋類的「免費優先／一律用金鑰」模式）、Claude in Chrome 三層（①擴充已安裝 ②native host 已登記 ③手動按鈕跑 `claude -p --chrome` 實測）＋「Enabled by default」開關（寫 `~/.claude.json` 單一鍵、先備份）、「將變更 N 項」即時摘要、套用（先列清單確認）／取消／全部啟用／全部關閉／檢查／匯出匯入設定（不含金鑰）／備份還原／解除安裝、執行紀錄（金鑰一律遮罩）。

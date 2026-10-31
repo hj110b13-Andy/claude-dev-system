@@ -26,6 +26,7 @@ python installer/install.py web --enable firecrawl                  # 免金鑰
 python installer/install.py web --disable exa                       # 關掉某個預設
 python installer/install.py web --env CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=1000   # 覆寫 env 值
 python installer/install.py web --off                               # 關閉：移除本工具加的 MCP 與 env，保留 local.json
+python installer/install.py web --usage-guard off                   # 關閉用量守門 hook（update 時移除；on 開回）
 ```
 每次 `web` 都會先備份 settings.json，改完立即套用並更新安裝紀錄。金鑰在安裝器所有輸出中都遮成 `***`，也不會寫進 manifest；但**必然以明文**存在 `local.json`、`~/.claude.json` 的 MCP URL（Tavily）或 header（Exa），以及當下執行的 `claude mcp add` 命令列——這兩個檔請勿分享或 commit。`claude` 不在 PATH 或註冊失敗時，`install`／`update --with-web` 會印 ❌ 並以結束碼 1 結束（其他部分仍已套用，修好後重跑即可補齊）。
 

@@ -41,6 +41,12 @@ KEY_INFO = {  # 名稱 → (顯示名, 類別, 說明)。類別 search 的金鑰
     "parallel": ("Parallel", "search", "搜尋；免費每月 $5，有金鑰多 web_research"),
     "firecrawl": ("Firecrawl", "search", "JS 頁面抓取；免費 1,000 credits／月"),
 }
+ENV_DESC = {
+    "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION": "內建 WebSearch 每場對話上限（官方預設 200）",
+    "CLAUDE_CODE_WEB_SEARCH_REFILLS_PER_HOUR": "內建 WebSearch 每小時補回次數（官方預設 100）",
+    "PYTHONUTF8": "叫 Python 一律用 UTF-8（Windows 碼頁 950 下中文才不亂碼；1＝開）",
+    "PYTHONIOENCODING": "Python 輸入輸出編碼（配合上面，固定 utf-8）",
+}
 CHROME_EXT_ID = "fcoeoabgfenejglbffodgkkbkcdhcgfn"
 NATIVE_HOST_KEY = r"Software\Google\Chrome\NativeMessagingHosts\com.anthropic.claude_browser_extension"
 DEFAULT_THRESHOLDS = {"fiveHour": 80, "sevenDay": 97}
@@ -183,7 +189,8 @@ def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.de
                          "tools": spec.get("tools") or [], "note": spec.get("note", "")}
     keys = {}
     for name, (label, kind, note) in KEY_INFO.items():
-        keys[name] = {"label": label, "kind": kind, "note": note, "present": bool((local.get("keys") or {}).get(name)),
+        val = (local.get("keys") or {}).get(name) or ""
+        keys[name] = {"label": label, "kind": kind, "note": note, "present": bool(val), "value": val,  # value 只給畫面輸入框用，不可寫進紀錄
                       "mode": web.key_mode(local, name) if kind == "search" else None}
     vcfg = {}
     vp = lay.payload / "config" / "video.json"
@@ -208,7 +215,8 @@ def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.de
         "thresholds": read_thresholds(lay) if m else dict(DEFAULT_THRESHOLDS),
         "chrome": {"extension": chrome_extension_installed(), "native_host": chrome_native_host_registered(),
                    "default_enabled": chrome_default_enabled(lay)},
-        "hooks": {"usage_guard": bool(m and (m.get("settings") or {}).get("hooksAdded"))},
+        "hooks": {"usage_guard": bool(m and (m.get("settings") or {}).get("hooksAdded")),
+                  "usage_guard_pref": bool(local.get("usageGuard", True))},
     }
 
 
@@ -225,10 +233,12 @@ class Form:
     thresholds: dict = field(default_factory=lambda: dict(DEFAULT_THRESHOLDS))
     download_dir: str = ""
     chrome_default_enabled: bool | None = None
+    usage_guard: bool = True
 
 
 def form_from_state(state: dict) -> Form:
     f = Form()
+    f.usage_guard = state["hooks"]["usage_guard_pref"]
     f.web_enabled = state["web"]["enabled"]
     f.servers = {n: s["wanted"] for n, s in state["web"]["servers"].items()}
     f.env = {k: (state["web"]["env_override"].get(k) or state["web"]["env"].get(k) or state["web"]["env_defaults"].get(k) or "")
@@ -248,6 +258,7 @@ def preset(form: Form, state: dict, on: bool) -> Form:
     f.web_enabled = on
     f.servers = {n: on for n in state["web"]["servers"]}
     f.video_enabled = on
+    f.usage_guard = on
     if on and state["chrome"]["default_enabled"] is not None:
         f.chrome_default_enabled = True
     if not on:
@@ -267,6 +278,8 @@ def diff(state: dict, form: Form) -> list[Change]:
         ch.append(Change("install", "安裝核心（規則、skill、用量守門）"))
     elif parse_ver(state["repo_version"]) != parse_ver(state["version"] or "0"):
         ch.append(Change("update", f"更新 {state['version']} → {state['repo_version']}"))
+    if form.usage_guard != state["hooks"]["usage_guard_pref"]:
+        ch.append(Change("guard", "啟用用量守門 hook" if form.usage_guard else "關閉用量守門 hook（移除 settings.json 的兩條 hook；規則仍在）"))
     if form.web_enabled != state["web"]["enabled"]:
         ch.append(Change("web", "啟用聯網來源" if form.web_enabled else "關閉聯網來源（移除本工具註冊的 MCP 與 env）"))
     if form.web_enabled:
@@ -324,6 +337,12 @@ def apply_form(lay: Layout, python: str, state: dict, form: Form, log, repo: Pat
     env_args = [f"{k}={v}" for k, v in form.env.items() if str(v) != str(state["web"]["env_defaults"].get(k, "")) and v != ""]
     env_reset = [k for k, v in form.env.items() if str(v) == str(state["web"]["env_defaults"].get(k, ""))]
     modes = [f"{n}={m}" for n, m in form.key_modes.items() if state["keys"].get(n, {}).get("mode") and m != state["keys"][n]["mode"]]
+    # 0) 用量守門開關只是 local.json 的一個布林，apply 時 _sync_settings 會照它加／移除 hook
+    if form.usage_guard != state["hooks"]["usage_guard_pref"]:
+        local = _local(lay)
+        local["usageGuard"] = bool(form.usage_guard)
+        web.save_local(lay, local)
+        log(f"用量守門 → {'開' if form.usage_guard else '關'}（local.json usageGuard）")
     # 1) 先只寫 local.json（keys／enable／disable／env／keyMode），用 show=True 避免中途套用
     if keys or enable or disable or env_args or modes or env_reset:
         if not state["installed"]:
@@ -525,14 +544,14 @@ def export_profile(state: dict, form: Form) -> dict:
     """不含金鑰值；只有開關、env、模式、門檻、下載資料夾。"""
     return {"claude-dev-system-profile": 1, "web_enabled": form.web_enabled, "servers": dict(form.servers), "env": dict(form.env),
             "video_enabled": form.video_enabled, "key_modes": dict(form.key_modes), "thresholds": dict(form.thresholds),
-            "download_dir": form.download_dir, "chrome_default_enabled": form.chrome_default_enabled}
+            "download_dir": form.download_dir, "chrome_default_enabled": form.chrome_default_enabled, "usage_guard": form.usage_guard}
 
 
 def import_profile(form: Form, data: dict) -> Form:
     if data.get("claude-dev-system-profile") != 1:
         raise ValueError("不是本工具的設定檔（缺 claude-dev-system-profile: 1）")
     f = copy.deepcopy(form)
-    for k in ("web_enabled", "video_enabled", "download_dir", "chrome_default_enabled"):
+    for k in ("web_enabled", "video_enabled", "download_dir", "chrome_default_enabled", "usage_guard"):
         if k in data:
             setattr(f, k, data[k])
     for k in ("servers", "env", "key_modes", "thresholds"):

@@ -94,12 +94,24 @@ def _sync_files(lay: Layout, repo: Path, version: str, old: dict, new: dict, for
     new["skills"] = [s for s in payload.skill_names(repo) if s not in conflicts]
 
 
+def usage_guard_enabled(lay: Layout) -> bool:
+    """本機偏好 local.json 的 usageGuard（預設 true）。關掉＝不註冊 hook、verify 不視為錯。"""
+    try:
+        return bool(web.load_local(lay).get("usageGuard", True))
+    except ValueError:
+        return True
+
+
 def _sync_settings(lay: Layout, python: str, old: dict, new: dict, log: list) -> None:
     """先清掉本工具舊條目，再加新條目；其他鍵不碰；沒有變化就不寫檔。"""
     s, existed = _read_settings(lay)
     script = (lay.payload / "hooks" / "usage_guard.py").as_posix()
     cleaned, _ = settings_ops.remove_marked(s, old["settings"].get("createdKeys"))
-    s2, rec = settings_ops.add_hooks(cleaned, settings_ops.hook_command(python, script))
+    if not usage_guard_enabled(lay):  # 使用者在 local.json 關掉用量守門：只清不加
+        s2, rec = cleaned, {"hooksAdded": [], "hooksSkippedExisting": [], "createdKeys": []}
+        log.append("用量守門 hook：已依本機偏好關閉（local.json usageGuard=false），不註冊")
+    else:
+        s2, rec = settings_ops.add_hooks(cleaned, settings_ops.hook_command(python, script))
     new["settings"] = {**rec, "createdFile": bool(old["settings"].get("createdFile")) or (not existed and bool(s2))}
     for x in rec["hooksSkippedExisting"]:
         log.append(f"{WARN} {x['event']} 已有使用者自己的 usage_guard hook，不重複註冊：{x['command']}")
@@ -197,7 +209,7 @@ def apply(lay: Layout, python: str, repo: Path = REPO, force: bool = False, mode
 
 
 def web_config(lay: Layout, keys=(), enable=(), disable=(), env=(), off: bool = False, show: bool = False,
-               runner=web.default_runner, key_mode=()) -> tuple:
+               runner=web.default_runner, key_mode=(), usage_guard: str | None = None) -> tuple:
     """`install.py web`：改本機偏好（local.json）後立即套用；--off 關閉並移除；--show 只顯示。"""
     m = mf.load(lay.manifest)
     if not m:
@@ -218,6 +230,10 @@ def web_config(lay: Layout, keys=(), enable=(), disable=(), env=(), off: bool = 
             web.set_env_arg(local, kv)
         for kv in key_mode:
             web.set_key_mode_arg(local, kv)
+        if usage_guard is not None:
+            if usage_guard not in ("on", "off"):
+                raise ValueError("--usage-guard 只能是 on 或 off")
+            local["usageGuard"] = usage_guard == "on"
     except ValueError as e:
         return 2, [str(e)]
     for n in enable:
@@ -226,7 +242,7 @@ def web_config(lay: Layout, keys=(), enable=(), disable=(), env=(), off: bool = 
     for n in disable:
         local["disable"] = sorted(set(local.get("disable", [])) | {n})
         local["enable"] = [x for x in local.get("enable", []) if x != n]
-    if keys or env or enable or disable or key_mode:
+    if keys or env or enable or disable or key_mode or usage_guard is not None:
         web.save_local(lay, local)
         log.append(f"本機偏好已寫入 {web.local_path(lay)}（不進 repo、update／uninstall 不動）")
     if show:
@@ -392,7 +408,14 @@ def verify(lay: Layout, repo: Path | None = REPO, check_claude: bool = True, imp
     rows.extend((WARN, f"{e} 已被使用者修改（允許，update 會保留）") for e in edited)
     s = read_json(lay.settings) if lay.settings.exists() else {}
     script = (lay.payload / "hooks" / "usage_guard.py").as_posix()
+    guard_on = usage_guard_enabled(lay)
+    if not guard_on:
+        rows.append((OK, "用量守門 hook：已由使用者關閉（local.json usageGuard=false；視窗或 `web --usage-guard on` 可開）"))
     for event, _ in settings_ops.HOOK_SPECS:
+        if not guard_on:
+            if settings_ops.has_marked(s, event):
+                rows.append((BAD, f"{event} hook 仍在 settings.json（用量守門已關閉，重跑 update 會移除）"))
+            continue
         marked = settings_ops.has_marked(s, event)
         skipped = any(x["event"] == event for x in m["settings"].get("hooksSkippedExisting", []))
         if marked:
@@ -446,11 +469,14 @@ def status(lay: Layout, repo: Path = REPO) -> tuple:
     marked = sum(len(settings_ops.has_marked(s, e)) for e, _ in settings_ops.HOOK_SPECS)
     upd = "（repo 較新，可 update）" if parse_ver(rv) > parse_ver(m["version"]) else ""
     last = (m.get("backups") or [{}])[-1]
+    skipped_n = len(m["settings"].get("hooksSkippedExisting", []))
+    guard_line = ("用量守門：已關閉（本機偏好 usageGuard=false）" if not usage_guard_enabled(lay)
+                  else f"用量守門：本工具 hook 條目 {marked} 條；沿用使用者既有 hook {skipped_n} 條（標記 {HOOK_MARK}）")
     return 0, [
         f"已安裝 v{m['version']}；repo v{rv}{upd}",
         f"安裝於 {m.get('installedAt')}，最後更新 {m.get('updatedAt')}；來源 {m.get('repo')}",
         f"檔案 {len(m['files'])} 個；skills：{', '.join(m.get('skills', []))}",
-        f"本工具 hook 條目 {marked} 條；沿用使用者既有 hook {len(m['settings'].get('hooksSkippedExisting', []))} 條（標記 {HOOK_MARK}）",
+        guard_line,
         f"聯網來源：{'已啟用，MCP ' + (', '.join(m['web'].get('mcpAdded', [])) or '無') if m.get('web', {}).get('enabled') else '未啟用（`install.py web` 可開）'}",
         f"影片來源：{'已啟用（' + ', '.join(m['video'].get('packages', [])) + '）' if m.get('video', {}).get('enabled') else '未啟用（`install.py video` 可開）'}",
         f"備份 {len(m.get('backups', []))} 次，最近：{last.get('settings')}",

@@ -115,6 +115,30 @@ class ReadAndDiff(Base):
         self.assertEqual(self.servers(), {})
         self.assertTrue(s["keys"]["tavily"]["present"], "關閉不刪金鑰")
 
+    def test_usage_guard_toggle_removes_and_restores_hooks(self):
+        s = self.state()
+        f = gm.form_from_state(s)
+        self.apply(f, s)  # 安裝核心
+        st = json.loads(self.lay.settings.read_text(encoding="utf-8"))
+        self.assertTrue(st.get("hooks"), "預設有 hook")
+        s = self.state()
+        f = gm.form_from_state(s)
+        f.usage_guard = False
+        self.assertTrue(any("關閉用量守門" in c.text for c in gm.diff(s, f)))
+        self.assertEqual(self.apply(f, s), 0, "\n".join(self.logs))
+        st = json.loads(self.lay.settings.read_text(encoding="utf-8"))
+        self.assertFalse(any("claude-dev-system" in json.dumps(v) for v in (st.get("hooks") or {}).values()), "hook 應被移除")
+        from cds import commands
+        code, out = commands.verify(self.lay, repo=REPO, check_claude=False, importer=fake_importer(FULL), ffmpeg=lambda: "ff")
+        self.assertEqual(code, 0, "\n".join(out))
+        self.assertTrue(any("已由使用者關閉" in x for x in out))
+        s = self.state()
+        self.assertFalse(s["hooks"]["usage_guard_pref"] or s["hooks"]["usage_guard"])
+        f = gm.form_from_state(s)
+        f.usage_guard = True
+        self.apply(f, s)
+        self.assertTrue(self.state()["hooks"]["usage_guard"])
+
     def test_cancel_means_no_change(self):
         s = self.state()
         f = gm.form_from_state(s)
