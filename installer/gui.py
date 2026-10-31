@@ -54,7 +54,27 @@ class App:
             st.configure(cls, font=base_font)
         self._build()
         self.refresh()
+        root.protocol("WM_DELETE_WINDOW", self.on_close)  # 有未套用的變更時關閉要先問
         root.after(100, self._pump)
+
+    def on_close(self):
+        try:
+            ch = gm.diff(self.state, self._collect())
+        except Exception:  # noqa: BLE001
+            ch = []
+        if self.busy:
+            if not messagebox.askyesno("關閉", "有工作正在執行，確定要關閉？"):
+                return
+        elif ch:
+            ans = messagebox.askyesnocancel("有未套用的變更", f"有 {len(ch)} 項變更還沒套用：\n\n" + "\n".join("• " + c.text for c in ch[:12])
+                                            + ("\n…" if len(ch) > 12 else "") + "\n\n要先套用嗎？\n是＝套用後關閉　否＝放棄變更關閉　取消＝回到視窗")
+            if ans is None:
+                return
+            if ans:
+                self._close_after_apply = True
+                self.do_apply()
+                return
+        self.root.destroy()
 
     # ---------- 版面 ----------
     def _build(self):
@@ -72,7 +92,9 @@ class App:
         vsb = ttk.Scrollbar(body, orient="vertical", command=canvas.yview)
         self.inner = ttk.Frame(canvas, padding=8)
         self.inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self.win = canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        # 內容區寬度跟著視窗，長文字才會在視窗內換行而不是被截掉
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(self.win, width=e.width))
         canvas.configure(yscrollcommand=vsb.set)
         canvas.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
@@ -111,6 +133,16 @@ class App:
         f.pack(fill="x", pady=4)
         return f
 
+    def _no_wheel_change(self, w):
+        """下拉選單與數字框：滾輪只捲頁面，不改值（使用者回饋：滾輪會不小心改設定）。"""
+        w.bind("<MouseWheel>", lambda e: (self.canvas.yview_scroll(-int(e.delta / 120), "units"), "break")[1])
+        return w
+
+    def _note(self, parent, text, wrap=420, **grid):
+        lb = ttk.Label(parent, text=text, foreground="#555", wraplength=wrap, justify="left")
+        lb.grid(**grid)
+        return lb
+
     def _rebuild(self):
         for w in self.inner.winfo_children():
             w.destroy()
@@ -121,7 +153,7 @@ class App:
         # 環境
         env = self._section("環境（每次開啟實際偵測）")
         for i, (k, it) in enumerate(s["env"].items()):
-            ttk.Label(env, text=f"{MARK[it.ok]} {it.detail}", wraplength=760, justify="left").grid(row=i, column=0, sticky="w")
+            ttk.Label(env, text=f"{MARK[it.ok]} {it.detail}", wraplength=1000, justify="left").grid(row=i, column=0, sticky="w")
             if it.action in ("ffmpeg", "pwsh7", "faster_whisper"):
                 txt = {"ffmpeg": "安裝 ffmpeg（winget）", "pwsh7": "安裝 PowerShell 7（MSI，會跳 UAC）", "faster_whisper": "安裝 faster-whisper（pip）"}[it.action]
                 ttk.Button(env, text=txt, command=lambda a=it.action: self.do_install(a)).grid(row=i, column=1, sticky="e", padx=4)
@@ -139,9 +171,9 @@ class App:
         ttk.Label(th, text="門檻：5 小時 ≥").pack(side="left")
         self.five_var = tk.StringVar(value=str(f.thresholds["fiveHour"]))
         self.seven_var = tk.StringVar(value=str(f.thresholds["sevenDay"]))
-        ttk.Spinbox(th, from_=1, to=100, width=5, textvariable=self.five_var, command=self.update_diff).pack(side="left")
+        self._no_wheel_change(ttk.Spinbox(th, from_=1, to=100, width=5, textvariable=self.five_var, command=self.update_diff)).pack(side="left")
         ttk.Label(th, text="%　7 天 ≥").pack(side="left")
-        ttk.Spinbox(th, from_=1, to=100, width=5, textvariable=self.seven_var, command=self.update_diff).pack(side="left")
+        self._no_wheel_change(ttk.Spinbox(th, from_=1, to=100, width=5, textvariable=self.seven_var, command=self.update_diff)).pack(side="left")
         ttk.Label(th, text="%").pack(side="left")
         for v in (self.five_var, self.seven_var):
             v.trace_add("write", lambda *a: self.update_diff())
@@ -158,7 +190,7 @@ class App:
             if sv["key_registered"]:
                 st += "＋金鑰版"
             ttk.Checkbutton(webf, text=f"{n}（{', '.join(sv['tools'][:3])}）", variable=var, command=self.update_diff).grid(row=row, column=0, sticky="w")
-            ttk.Label(webf, text=st, foreground="#555").grid(row=row, column=1, sticky="w", padx=8)
+            self._note(webf, st, wrap=300, row=row, column=1, sticky="w", padx=8)
             row += 1
         for k, dv in s["web"]["env_defaults"].items():
             var = tk.StringVar(value=f.env.get(k, dv))
@@ -166,16 +198,17 @@ class App:
             var.trace_add("write", lambda *a: self.update_diff())
             ttk.Label(webf, text=k).grid(row=row, column=0, sticky="w")
             ttk.Entry(webf, textvariable=var, width=12).grid(row=row, column=1, sticky="w", padx=8)
-            ttk.Label(webf, text=f"{gm.ENV_DESC.get(k, '')}；預設 {dv}；目前 settings.json：{s['web']['env'].get(k) or '未寫入'}",
-                      foreground="#555", wraplength=900, justify="left").grid(row=row, column=2, sticky="w")
+            self._note(webf, f"{gm.ENV_DESC.get(k, '')}；預設 {dv}；目前 settings.json：{s['web']['env'].get(k) or '未寫入'}",
+                       wrap=760, row=row, column=2, sticky="w")
             row += 1
+        webf.columnconfigure(2, weight=1)
 
         # 影片
         vf = self._section("影片來源（YouTube／網路影片／本機 mp4：搜尋、逐字稿、截圖、直播、下載）")
         self.video_var = tk.BooleanVar(value=f.video_enabled)
         ttk.Checkbutton(vf, text="啟用影片來源（pip 裝 yt-dlp、youtube-transcript-api）", variable=self.video_var, command=self.update_diff).grid(row=0, column=0, sticky="w")
         pk = s["video"]["packages"]
-        ttk.Label(vf, text="套件：" + "、".join(f"{m} {MARK[v is not None]}" for m, v in pk.items()), foreground="#555").grid(row=0, column=1, sticky="w", padx=8)
+        self._note(vf, "套件：" + "、".join(f"{m} {MARK[v is not None]}" for m, v in pk.items()), wrap=500, row=0, column=1, sticky="w", padx=8)
         ttk.Label(vf, text="下載資料夾（使用者說要存檔時；空白＝~/Downloads）").grid(row=1, column=0, sticky="w")
         self.dl_var = tk.StringVar(value=f.download_dir)
         self.dl_var.trace_add("write", lambda *a: self.update_diff())
@@ -208,18 +241,20 @@ class App:
             if k["mode"]:
                 mv = tk.StringVar(value="免費優先" if f.key_modes.get(n, k["mode"]) == "fallback" else "一律用金鑰")
                 self.mode_vars[n] = mv
-                cb = ttk.Combobox(kf, textvariable=mv, values=["免費優先", "一律用金鑰"], width=10, state="readonly")
+                cb = self._no_wheel_change(ttk.Combobox(kf, textvariable=mv, values=["免費優先", "一律用金鑰"], width=10, state="readonly"))
                 cb.grid(row=i, column=5, sticky="w")
                 cb.bind("<<ComboboxSelected>>", lambda e: self.update_diff())
             else:
-                ttk.Label(kf, text="只能用金鑰（此服務沒有免金鑰版）", foreground="#555").grid(row=i, column=5, sticky="w")
-            ttk.Label(kf, text=k["note"], foreground="#555").grid(row=i, column=6, sticky="w", padx=6)
+                self._note(kf, "只能用金鑰（無免金鑰版）", wrap=200, row=i, column=5, sticky="w")
+            self._note(kf, k["note"], wrap=360, row=i, column=6, sticky="w", padx=6)
+        kf.columnconfigure(6, weight=1)
 
         # Chrome
         cf = self._section("Claude in Chrome（開網頁看、操作需登入網站、教操作前核對畫面）")
         c = s["chrome"]
         ttk.Label(cf, text=f"① 擴充功能已安裝：{MARK[c['extension']]}　② 已和 Claude Code 登記（native host）：{MARK[c['native_host']]}　"
-                           f"③ 實際連線：按右邊按鈕測（約一場對話開場的用量，不自動跑）", wraplength=1100, justify="left").grid(row=0, column=0, sticky="w")
+                           f"③ 實際連線：按右邊按鈕測（約一場對話開場的用量，不自動跑）", wraplength=900, justify="left").grid(row=0, column=0, sticky="w")
+        cf.columnconfigure(0, weight=1)
         ttk.Button(cf, text="③ 實際連線測試", command=self.do_chrome_test).grid(row=0, column=1, padx=6)
         self.chrome_var = tk.BooleanVar(value=bool(c["default_enabled"]))
         cb = ttk.Checkbutton(cf, text="Enabled by default（每場對話自動連 Chrome；寫 ~/.claude.json，會先備份）", variable=self.chrome_var, command=self.update_diff)
@@ -309,6 +344,10 @@ class App:
                     self.apply_btn.configure(state="normal")
                     if payload:
                         self.refresh()
+                    if getattr(self, "_close_after_apply", False):
+                        self._close_after_apply = False
+                        self.root.destroy()
+                        return
                 elif kind == "keystatus":
                     n, text = payload
                     self.key_status[n].set(text)
@@ -348,7 +387,7 @@ class App:
         if not ch:
             messagebox.showinfo("套用", "沒有變更。")
             return
-        if not messagebox.askyesno("套用", "將執行：\n\n" + "\n".join("• " + c.text for c in ch) + "\n\n確定？"):
+        if not getattr(self, "_close_after_apply", False) and not messagebox.askyesno("套用", "將執行：\n\n" + "\n".join("• " + c.text for c in ch) + "\n\n確定？"):
             return
         state = self.state
 
