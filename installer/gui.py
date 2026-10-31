@@ -20,20 +20,21 @@ from tkinter import filedialog, messagebox, ttk
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from cds import commands, gui_model as gm, selftest, web  # noqa: E402
-from cds.paths import REPO, Layout, claude_home  # noqa: E402
+from cds import appdir, commands, gui_model as gm, selftest, web  # noqa: E402
+from cds.paths import FROZEN, REPO, Layout, claude_home, repo_version  # noqa: E402
 
 MARK = {True: "✅", False: "❌", None: "⚠️"}
 
 
 def base_font_name() -> str:
     return "Microsoft JhengHei UI" if sys.platform == "win32" else ""
-PY = Path(sys.executable).as_posix()
+PY = gm.find_system_python()[0] if FROZEN else Path(sys.executable).as_posix()  # exe 模式：hook 與 pip 要用系統 Python，不是 exe
 
 
 class App:
     def __init__(self, root: tk.Tk, lay: Layout):
         self.root, self.lay = root, lay
+        self.repo = appdir.effective_repo(lay)  # exe 模式：app/ 比內建新就用 app/
         self.q: queue.Queue = queue.Queue()
         self.busy = False
         self.state: dict = {}
@@ -94,6 +95,7 @@ class App:
         ttk.Button(top, text="重新整理（重讀狀態）", command=self.refresh).pack(side="right")
         ttk.Button(top, text="檢查（verify）", command=self.do_verify).pack(side="right", padx=4)
         ttk.Button(top, text="自我測試（9 題無頭對話，約 30 分鐘）", command=self.do_selftest).pack(side="right", padx=4)
+        ttk.Button(top, text="檢查更新", command=self.do_check_update).pack(side="right", padx=4)
 
         body = ttk.Frame(r)
         body.pack(fill="both", expand=True)
@@ -188,7 +190,8 @@ class App:
         self.notes = []
         s, f = self.state, self.form
         self.key_vars.clear(); self.key_dirty.clear(); self.key_status.clear(); self.mode_vars.clear(); self.mode_boxes.clear(); self.server_vars.clear(); self.env_vars.clear()
-        self.title_var.set(f"repo v{s['repo_version']}　已安裝：{('v' + s['version']) if s['installed'] else '尚未安裝'}　設定目錄：{self.lay.home}")
+        src = "執行檔內建" if (FROZEN and self.repo == REPO) else ("已下載的 app/" if self.repo != REPO else "原始碼 repo")
+        self.title_var.set(f"來源 v{s['repo_version']}（{src}）　已安裝：{('v' + s['version']) if s['installed'] else '尚未安裝'}　設定目錄：{self.lay.home}")
 
         # 環境
         ev = list(s["env"].values())
@@ -465,6 +468,8 @@ class App:
                     self.key_status[n].set(text)
                 elif kind == "usage":
                     self.usage_var.set(payload)
+                elif kind == "ask_update":
+                    self._ask_update(payload)
         except queue.Empty:
             pass
         self.root.after(100, self._pump)
@@ -488,7 +493,7 @@ class App:
     # ---------- 動作 ----------
     def refresh(self):
         try:
-            self.state = gm.read_state(self.lay, repo=REPO)
+            self.state = gm.read_state(self.lay, repo=self.repo, python=PY if FROZEN else None)
         except Exception as e:  # noqa: BLE001
             messagebox.showerror("讀取狀態失敗", str(e))
             return
@@ -501,20 +506,23 @@ class App:
         if not ch:
             messagebox.showinfo("套用", "沒有變更。")
             return
+        if not PY:
+            messagebox.showerror("套用", "找不到系統的 Python ≥3.10（hook 與影片工具要用它）。請先在「環境」區按「開下載頁」安裝 Python，裝好後重開本程式。")
+            return
         if not getattr(self, "_close_after_apply", False) and not messagebox.askyesno("套用", "將執行：\n\n" + "\n".join("• " + c.text for c in ch) + "\n\n確定？"):
             return
         state = self.state
 
         def job():
             self._log("=== 套用開始 ===")
-            code = gm.apply_form(self.lay, PY, state, form, self._log, repo=REPO)
+            code = gm.apply_form(self.lay, PY, state, form, self._log, repo=self.repo)
             self._log(f"=== 套用{'完成' if code == 0 else '完成但有項目失敗（見 ❌）'}；重開 Claude Code 對話後生效 ===")
         self._run_bg(job)
 
     def do_verify(self):
         def job():
             self._log("=== verify ===")
-            code, lines = commands.verify(self.lay, repo=REPO)
+            code, lines = commands.verify(self.lay, repo=self.repo)
             for ln in lines:
                 self._log(web.mask(ln, gm._local(self.lay)))
         self._run_bg(job, refresh_after=False)
@@ -550,6 +558,35 @@ class App:
             acct = self.note_vars[n].get().strip() if n in self.note_vars else ""
             self._log(f"金鑰 {n}{'（帳號：' + acct + '）' if acct else '（帳號備註未填）'} 測試：{'✅' if ok else '❌'} {msg}")
         self._run_bg(job, refresh_after=False)
+
+    def do_check_update(self):
+        def job():
+            self._log("=== 檢查更新（GitHub master 的 config/VERSION）===")
+            info = appdir.check_update(self.lay, REPO)
+            if info["error"]:
+                self._log(f"❌ {info['error']}")
+                return
+            if not info["newer"]:
+                self._log(f"✅ 已是最新：v{info['local']}（GitHub v{info['remote']}）")
+                return
+            self._log(f"有新版：v{info['local']} → v{info['remote']}")
+            self.q.put(("ask_update", info))
+        self._run_bg(job, refresh_after=False)
+
+    def _ask_update(self, info):
+        if not messagebox.askyesno("更新", f"GitHub 有新版 v{info['remote']}（目前 v{info['local']}）。\n\n要下載到 app/ 資料夾嗎？下載後按「套用」才會寫進 Claude Code。"):
+            return
+
+        def job():
+            try:
+                appdir.download_update(self.lay, self._log)
+            except Exception as e:  # noqa: BLE001
+                self._log(f"❌ 下載失敗：{type(e).__name__}: {e}")
+                return
+            self.repo = appdir.effective_repo(self.lay)
+            if FROZEN and appdir.code_changed_since(REPO, self.repo):
+                self._log(f"⚠️ 新版改了安裝器程式碼：規則／工具可直接套用，但視窗功能要換新執行檔才會更新 → {appdir.RELEASES_URL}")
+        self._run_bg(job)
 
     def do_usage(self):
         def job():
@@ -673,7 +710,17 @@ class App:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="claude-dev-system 設定視窗")
     ap.add_argument("--claude-home")
+    ap.add_argument("--selfcheck", metavar="輸出檔", help="不開視窗：把狀態寫成 JSON 到指定檔後結束（執行檔冒煙測試用）")
     a = ap.parse_args(argv)
+    if a.selfcheck:
+        lay = Layout(claude_home(a.claude_home))
+        repo = appdir.effective_repo(lay)
+        s = gm.read_state(lay, repo=repo, python=PY if FROZEN else None)
+        out = {"frozen": FROZEN, "repo": str(repo), "repo_version": s["repo_version"], "installed": s["installed"], "version": s["version"],
+               "python": PY, "env": {k: [v.ok, v.detail] for k, v in s["env"].items()}, "keys_present": sum(1 for k in s["keys"].values() if k["present"]),
+               "servers": list(s["web"]["servers"])}
+        Path(a.selfcheck).write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+        return 0
     if sys.platform == "win32":
         try:
             import ctypes

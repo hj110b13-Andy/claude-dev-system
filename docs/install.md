@@ -3,7 +3,7 @@
 1. 確認必要條件：`python installer/install.py check`（Windows：`py -3 installer/install.py check`）。❌ 必須先處理，⚠️ 可繼續。
 2. `python installer/install.py install`。輸出會逐行列出：備份檔位置、新增的檔案、settings.json 新增或略過的 hook、CLAUDE.md 區塊。
 3. `python installer/install.py verify`：逐項 ✅／❌（安裝紀錄、版本、檔案雜湊、hook、腳本可編譯、CLAUDE.md 區塊、每個 skill、Claude Code 版本）。結束碼 0＝全通過。
-4. **重開** Claude Code 對話（或 VSCode 視窗）讓新的 CLAUDE.md、skills、hook 生效。在新對話請 Claude 列出可用的 skill，應看到 `cds-*` 四個。
+4. **重開** Claude Code 對話（或 VSCode 視窗）讓新的 CLAUDE.md、skills、hook 生效。在新對話請 Claude 列出可用的 skill，應看到 `cds-*` 七個。
 
 ## 安裝後自我測試（選用）
 

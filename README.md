@@ -47,6 +47,13 @@ python installer/install.py gui        # Windows：py -3 installer/install.py gu
 ```
 所有選用項目、金鑰（框內顯示目前值、可測試、可填「哪個帳號申請的」備註）、用量守門開關與門檻、目前用量（5 小時／7 天 %）、背景任務巡檢（每 N 分鐘）、WebSearch 上限、下載資料夾、Claude in Chrome 都在視窗裡改；底下會列「將變更 N 項」，按「套用」才動，按「取消」回到實際狀態。開啟與套用後都重讀真實檔案，畫面不會和實際不一樣。缺 ffmpeg／PowerShell 7／faster-whisper 有安裝按鈕。打包成 exe 與視窗內更新在下一版。
 
+## 執行檔（不用裝 Python 也能開設定視窗；Windows）
+
+從 [Releases](https://github.com/hj110b13-Andy/claude-dev-system/releases/latest) 下載 `claude-dev-system-settings.exe`，直接開。第一次 Windows SmartScreen 會擋（沒有程式碼簽章）：按「其他資訊」→「仍要執行」。
+- exe 內含一份規則／工具／skill 快照；頂端「檢查更新」會比對 GitHub 的版本，有新版就下載到 `~/.claude/claude-dev-system/app/`，之後按「套用」寫進 Claude Code，不用換 exe。只有安裝器程式碼本身有變（視窗功能）才需要到 Releases 抓新 exe，視窗會提示。
+- hook 與影片工具仍需要系統有 Python ≥3.10（exe 內建的 Python 不能代替）；環境區會顯示找到的是哪個 Python，沒有就有「開下載頁」按鈕。
+- 自己打包：`py -3 -m pip install pyinstaller && py -3 installer/build_exe.py`，產物在 `dist/`。推 `v*` 標籤時 GitHub Actions 會自動打包並附在 Release。
+
 ## 自我測試（確認 Claude Code 真的會自己用這些工具）
 
 ```bash

@@ -23,7 +23,7 @@ from pathlib import Path
 from . import commands, manifest as mf, video, web
 from .checks import claude_code_status, parse_ver
 from .fsio import read_json, write_json
-from .paths import REPO, Layout, repo_version
+from .paths import FROZEN, REPO, Layout, repo_version
 
 # ---------- 常數 ----------
 
@@ -58,7 +58,7 @@ MCP_DESC = {  # 視窗 MCP 列的功能說明（一句話）
     "firecrawl": "會執行 JavaScript 的網頁抓取，動態頁面抓不到時的第三步",
 }
 TOOL_DESC = {  # 其他功能說明
-    "core": "規則（查證格式、上網查資料分流、派工原則）合併進全域 CLAUDE.md；4 個 skill（派工、安全重構、文件治理、回饋稽核）",
+    "core": "規則（查證格式、上網查資料分流、派工原則）合併進全域 CLAUDE.md；7 個 skill（派工、安全重構、文件治理、回饋稽核、波及範圍、專案驗證生成、接手）",
     "usage_guard": "每次對話與工具後讀用量，到門檻才注入「收尾」提醒；沒到完全不動",
     "task_check": "有背景任務時每 N 分鐘用 CronCreate 醒來檢查，全部結束就刪排程",
     "video": "video.py：搜影片、字幕／語音辨識逐字稿、場景截圖、直播錄一段、觀看數留言、Gemini 看畫面、最高畫質下載",
@@ -94,11 +94,35 @@ def _pwsh_status(which=shutil.which, run=subprocess.run) -> EnvItem:
     return EnvItem(True if (sys.platform != "win32" or msi.exists()) else None, f"PowerShell {ver}{note}", None if msi.exists() else "pwsh7")
 
 
+def find_system_python(which=shutil.which, run=subprocess.run) -> tuple[str | None, tuple[int, ...] | None]:
+    """exe 模式用：找系統的 Python（py 啟動器優先，再 python3／python），回 (執行檔完整路徑, 版本)。沒有回 (None, None)。"""
+    for cand in ("py", "python3", "python"):
+        exe = which(cand)
+        if not exe:
+            continue
+        args = [exe, "-3"] if cand == "py" else [exe]
+        try:
+            r = run(args + ["-c", "import sys;print(sys.executable);print('.'.join(map(str,sys.version_info[:3])))"], capture_output=True, timeout=15)
+            lines = (r.stdout or b"").decode("utf-8", "replace").split()
+            if r.returncode == 0 and len(lines) >= 2 and "WindowsApps" not in lines[0]:  # 商店的假 python.exe 排除
+                return Path(lines[0]).as_posix(), parse_ver(lines[1])
+        except Exception:  # noqa: BLE001
+            continue
+    return None, None
+
+
 def env_status(repo: Path = REPO, which=shutil.which, importer=video.default_importer, ffmpeg=video.ffmpeg_path,
-               claude_status=claude_code_status, run=subprocess.run) -> dict[str, EnvItem]:
+               claude_status=claude_code_status, run=subprocess.run, python: str | None = None) -> dict[str, EnvItem]:
     out: dict[str, EnvItem] = {}
-    pv = sys.version_info
-    out["python"] = EnvItem(pv >= (3, 10), f"Python {pv.major}.{pv.minor}.{pv.micro}（{Path(sys.executable).as_posix()}）", None if pv >= (3, 10) else "python")
+    if python and Path(python).resolve() != Path(sys.executable).resolve():  # exe 模式：顯示系統 Python，不是 exe 內建的
+        _, pv3 = find_system_python(which, run)
+        pv = pv3 or (0, 0, 0)
+        out["python"] = EnvItem(pv >= (3, 10), f"Python {'.'.join(map(str, pv))}（{python}）" if pv3 else f"Python（{python}）版本讀不到", None if pv >= (3, 10) else "python")
+    elif python is None and FROZEN:
+        out["python"] = EnvItem(False, "找不到系統的 Python ≥3.10（hook 與影片工具需要；執行檔本身不能代替）", "python")
+    else:
+        pv = sys.version_info
+        out["python"] = EnvItem(pv >= (3, 10), f"Python {pv.major}.{pv.minor}.{pv.micro}（{Path(sys.executable).as_posix()}）", None if pv >= (3, 10) else "python")
     ok, msg = claude_status(repo)
     out["claude"] = EnvItem(ok, msg, None if ok else "claude")
     ff = ffmpeg()
@@ -253,8 +277,9 @@ def refresh_usage(lay: Layout, python: str, run=subprocess.run) -> dict:
     return u
 
 
-def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.default_importer, ffmpeg=video.ffmpeg_path) -> dict:
-    """畫面的唯一真相來源。"""
+def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.default_importer, ffmpeg=video.ffmpeg_path,
+               python: str | None = None) -> dict:
+    """畫面的唯一真相來源。python：exe 模式傳系統 Python 路徑（None＝找不到）。"""
     m = mf.load(lay.manifest)
     src = web.sources(lay) if (lay.payload / web.SOURCES_REL).exists() else read_json(repo / "config" / "web-sources.json")
     try:
@@ -292,7 +317,7 @@ def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.de
         "installed": bool(m),
         "version": m.get("version") if m else None,
         "repo_version": repo_version(repo),
-        "env": env(repo, importer=importer, ffmpeg=ffmpeg),
+        "env": env(repo, importer=importer, ffmpeg=ffmpeg, python=python) if python is not None or FROZEN else env(repo, importer=importer, ffmpeg=ffmpeg),
         "web": {"enabled": bool(m and (m.get("web") or {}).get("enabled")), "servers": servers, "desired_now": sorted(want),
                 "env": {k: str(env_vals.get(k)) if env_vals.get(k) is not None else None for k in (src.get("env") or {}) if not k.startswith("_")},
                 "env_defaults": {k: str(v) for k, v in (src.get("env") or {}).items() if not k.startswith("_")},

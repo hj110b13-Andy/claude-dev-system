@@ -2,6 +2,13 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.10.0（2026-11-01）
+
+- **core.md 瘦身**：「上網查資料」「影片」兩條超長規則改成觸發條件＋「第一次用前先 Read 細則速查」，原文逐句搬進 `web-sources.md` 的 1-0、9-0、10-0 速查與新的第 11 節（背景任務巡檢）；`progress-diff.py` 逐句比對 77 句全部找得到。core.md 由 4,606 字減到約 3,300 字。
+- **新增 3 個 skill（借鏡 pstack，不裝外掛）**：`cds-blast-radius`（改到 ≥3 處引用的符號時列波及範圍並實跑一處）、`cds-verify-app`（替有畫面的專案生成「啟動／健康檢查／功能走法／證據／清理」五段的專案驗證 skill，附功能↔檔案地圖，改動只驗命中的功能）、`cds-session-pickup`（開工讀交接紀錄或從 git 重建，收尾依可判定條件決定要不要建 PROGRESS.md）。core.md 對應條文加了觸發句；「新增優先於改核心」補「先減再加」。來源：使用者「照你說的這些全部都做完」「沒有 PROGRESS.md 的專案怎麼套用」。
+- **執行檔（階段 3）**：`installer/build_exe.py` 用 PyInstaller 把設定視窗打成單檔 `claude-dev-system-settings.exe`（內含規則／工具／skill 快照）；`installer/cds/appdir.py` 負責「檢查更新」：比對 GitHub master 的 `config/VERSION`，下載 zip 只取需要的資料夾、原子換掉 `~/.claude/claude-dev-system/app/`，之後視窗以 app/ 為來源套用；安裝器程式碼有變時提示換新 exe。exe 模式下 hook／pip／影片工具改用系統 Python（`py` 啟動器優先，排除商店的假 python.exe），找不到就擋住套用並給下載按鈕。`gui.py --selfcheck 檔` 不開視窗輸出狀態 JSON，供 exe 冒煙測試。`.github/workflows/release.yml`：推 `v*` 標籤自動打包並附在 Release。SmartScreen 會擋未簽章 exe，README 寫了「其他資訊 → 仍要執行」。
+- RAG 不做（決策：個人規模專案用 Grep／Glob＋交接紀錄即可，索引要維護、收益小）；看板不做（使用者：「看板這部分我覺得不用做了」）。
+
 ## 0.9.6（2026-11-01）
 
 - `install.py selftest`／視窗「自我測試」：用全新無頭 `claude -p` 重跑 `config/selftest.json` 的九題（TDX 停車場、mslearn、video.py 逐字稿、環境部／氣象署／匯率 API、context7／deepwiki、YouTube Data API＋frames、OpenAQ、Gemini ask、Claude in Chrome），讀 stream-json 的 tool_use 比對「該用的工具有沒有用、不該用的有沒有出現」，逐題 ✅／❌、可 `--only` 挑題、`--report-dir` 存呼叫清單。只手動觸發（約九場短對話用量）。

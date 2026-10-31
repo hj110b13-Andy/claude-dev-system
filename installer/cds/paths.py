@@ -3,10 +3,20 @@ from __future__ import annotations
 
 import os
 import platform
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+
+def _repo() -> Path:
+    """原始碼執行：repo 根目錄。PyInstaller 執行檔：打包進去的 _MEIPASS/repo 快照（build_exe.py 用 --add-data 放的）。"""
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent)) / "repo"
+    return Path(__file__).resolve().parents[2]
+
+
+REPO = _repo()
+FROZEN = bool(getattr(sys, "frozen", False))
 
 
 def claude_home(override: str | None = None) -> Path:
