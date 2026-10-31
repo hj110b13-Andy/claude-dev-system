@@ -31,9 +31,11 @@ jobs:
         run: |
           $tmp = Join-Path $env:RUNNER_TEMP "cds-home"
           New-Item -ItemType Directory -Force $tmp | Out-Null
-          & dist/claude-dev-system-settings.exe --claude-home $tmp --selfcheck "$tmp/state.json"
-          if ($LASTEXITCODE -ne 0) { throw "selfcheck failed" }
-          Get-Content "$tmp/state.json"
+          # 視窗程式（--windowed）用 & 呼叫不會等它結束、$LASTEXITCODE 也不會設；要 Start-Process -Wait
+          $exe = (Resolve-Path dist/claude-dev-system-settings.exe).Path
+          $p = Start-Process -FilePath $exe -ArgumentList @('--claude-home', $tmp, '--selfcheck', "$tmp/state.json") -Wait -PassThru
+          Get-Content "$tmp/state.json" -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { throw "selfcheck failed (exit $($p.ExitCode))" }
       - uses: actions/upload-artifact@v4
         with:
           name: claude-dev-system-settings

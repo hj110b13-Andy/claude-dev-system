@@ -713,14 +713,19 @@ def main(argv=None) -> int:
     ap.add_argument("--selfcheck", metavar="輸出檔", help="不開視窗：把狀態寫成 JSON 到指定檔後結束（執行檔冒煙測試用）")
     a = ap.parse_args(argv)
     if a.selfcheck:
-        lay = Layout(claude_home(a.claude_home))
-        repo = appdir.effective_repo(lay)
-        s = gm.read_state(lay, repo=repo, python=PY if FROZEN else None, importer=gm.system_importer(PY) if FROZEN else gm.video.default_importer)
-        out = {"frozen": FROZEN, "repo": str(repo), "repo_version": s["repo_version"], "installed": s["installed"], "version": s["version"],
-               "python": PY, "env": {k: [v.ok, v.detail] for k, v in s["env"].items()}, "keys_present": sum(1 for k in s["keys"].values() if k["present"]),
-               "servers": list(s["web"]["servers"])}
-        Path(a.selfcheck).write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
-        return 0
+        try:
+            lay = Layout(claude_home(a.claude_home))
+            repo = appdir.effective_repo(lay)
+            s = gm.read_state(lay, repo=repo, python=PY if FROZEN else None, importer=gm.system_importer(PY) if FROZEN else gm.video.default_importer)
+            out = {"frozen": FROZEN, "repo": str(repo), "repo_version": s["repo_version"], "installed": s["installed"], "version": s["version"],
+                   "python": PY, "env": {k: [v.ok, v.detail] for k, v in s["env"].items()}, "keys_present": sum(1 for k in s["keys"].values() if k["present"]),
+                   "servers": list(s["web"]["servers"])}
+            Path(a.selfcheck).write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+            return 0
+        except Exception:  # noqa: BLE001  視窗模式沒有主控台，錯誤要寫進檔案才看得到（CI 用）
+            import traceback
+            Path(a.selfcheck).write_text(json.dumps({"error": traceback.format_exc()}, ensure_ascii=False, indent=1), encoding="utf-8")
+            return 1
     if sys.platform == "win32":
         try:
             import ctypes

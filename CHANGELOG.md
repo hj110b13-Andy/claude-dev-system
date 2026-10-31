@@ -2,6 +2,10 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.10.3（2026-11-01）
+
+- CI 第三修：smoke test 用 `& exe` 呼叫視窗程式不會等它結束、`$LASTEXITCODE` 是空值（空值 -ne 0 為真）→ 改 `Start-Process -Wait -PassThru` 看 `ExitCode`；`--selfcheck` 出錯時把 traceback 寫進輸出檔（視窗程式沒有主控台）。本機 exe 的 selfcheck 一直是通過的。
+
 ## 0.10.2（2026-11-01）
 
 - CI 再修：GitHub Actions 的 Windows runner 主控台是 cp1252，`build_exe.py` 最後印「產物：…」的中文炸 UnicodeEncodeError（exe 其實已打好）→ stdout 改 UTF-8、workflow 加 `PYTHONUTF8=1`。v0.10.1 標籤同樣沒有 Release。
