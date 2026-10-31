@@ -17,7 +17,7 @@ web 子命令（改本機偏好並立即套用；偏好存 <CLAUDE_HOME>/claude-
 video 子命令：不帶參數＝啟用（pip 安裝並登記）；--off 取消登記；--show 只檢查依賴與金鑰
 gui 子命令：開設定視窗（同 `python installer/gui.py`）：所有開關、金鑰、門檻在視窗裡改，按套用才生效
 selftest 子命令：用全新無頭 claude -p 重跑 config/selftest.json 的九題，比對實際呼叫的工具（--list 列題目、--only 題號 只跑幾題、
-  --report-dir 路徑 存每題呼叫清單）；每題約一場短對話的用量、全部約 20～40 分鐘，只手動跑
+  --report-dir 路徑 存每題呼叫清單、--dry-run 只印指令不跑）；每題約一場短對話的用量、全部約 20～40 分鐘，只手動跑
 結束碼：0 成功／全部通過；1 check 或 verify 有 ❌；2 用法或狀態錯誤。
 """
 from __future__ import annotations
@@ -61,6 +61,7 @@ def main(argv=None) -> int:
     ap.add_argument("--list", action="store_true", help="selftest：只列題目")
     ap.add_argument("--only", action="append", default=[], metavar="題號", help="selftest：只跑這些題（可重複）")
     ap.add_argument("--report-dir", help="selftest：把每題的工具呼叫清單與回答存成 JSON 的資料夾")
+    ap.add_argument("--dry-run", action="store_true", help="selftest：只印每題會執行的指令，不跑（零用量）")
     a = ap.parse_args(argv)
     lay = Layout(claude_home(a.claude_home))
     if a.cmd == "gui":
@@ -68,7 +69,7 @@ def main(argv=None) -> int:
         return gui.main(["--claude-home", str(lay.home)])
     if a.cmd == "selftest":
         from cds import selftest  # noqa: PLC0415
-        return selftest.run(only=a.only or None, list_only=a.list, report_dir=Path(a.report_dir) if a.report_dir else None)
+        return selftest.run(only=a.only or None, list_only=a.list, report_dir=Path(a.report_dir) if a.report_dir else None, dry_run=a.dry_run)
     if a.cmd == "check":
         rows = env_report(lay.home)
         for name, ok, msg in rows:

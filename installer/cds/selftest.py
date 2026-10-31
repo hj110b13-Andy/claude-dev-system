@@ -101,8 +101,9 @@ def build_cmd(exe: str, case: dict, cfg: dict) -> list[str]:
 
 
 def run(only: list[str] | None = None, list_only: bool = False, cases_path: Path | None = None, runner=default_runner,
-        which=shutil.which, log=print, report_dir: Path | None = None) -> int:
-    """跑題目並印表。回 0 全過、1 有 ❌、2 用法錯誤。report_dir 給了就把每題的呼叫清單與回答存成 JSON（不含金鑰）。"""
+        which=shutil.which, log=print, report_dir: Path | None = None, dry_run: bool = False) -> int:
+    """跑題目並印表。回 0 全過、1 有 ❌、2 用法錯誤。report_dir 給了就把每題的呼叫清單與回答存成 JSON（不含金鑰）。
+    dry_run=True：不跑 claude，只印每題會執行的完整指令（確認旗標與題目，零用量）。"""
     cfg = load_cases(cases_path)
     cases = cfg.get("cases") or []
     if only:
@@ -120,6 +121,12 @@ def run(only: list[str] | None = None, list_only: bool = False, cases_path: Path
         log(f"{BAD} 找不到 claude 指令")
         return 2
     timeout = int(cfg.get("timeoutSec") or 540)
+    if dry_run:
+        for c in cases:
+            log(f"── {c['id']}：{c['name']}")
+            log("   " + " ".join(f'"{a}"' if " " in a or "，" in a else a for a in build_cmd(exe, c, cfg)))
+        log(f"{OK} dry-run：{len(cases)} 題的指令如上，未執行")
+        return 0
     results = []
     with tempfile.TemporaryDirectory(prefix="cds-selftest-") as cwd:  # 空資料夾：只吃全域規則，不吃任何專案 CLAUDE.md
         for c in cases:

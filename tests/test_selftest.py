@@ -69,6 +69,9 @@ class SelfTest(unittest.TestCase):
         self.assertIn("--allowedTools", seen[0])
         self.assertTrue(any("1/2 題通過" in x for x in logs))
         self.assertEqual(st.run(only=["nope"], which=lambda n: "claude", log=logs.append), 2)
+        logs.clear()
+        self.assertEqual(st.run(only=["chrome"], which=lambda n: "claude", log=logs.append, dry_run=True, runner=lambda *a: self.fail("dry-run 不可執行")), 0)
+        self.assertTrue(any("--chrome" in x and "example.com" in x for x in logs), logs)
         self.assertEqual(st.run(list_only=True, log=logs.append), 0)
         self.assertEqual(st.run(which=lambda n: None, log=logs.append), 2)
 
