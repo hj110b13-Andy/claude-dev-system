@@ -20,7 +20,7 @@ from tkinter import filedialog, messagebox, ttk
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from cds import commands, gui_model as gm, web  # noqa: E402
+from cds import commands, gui_model as gm, selftest, web  # noqa: E402
 from cds.paths import REPO, Layout, claude_home  # noqa: E402
 
 MARK = {True: "✅", False: "❌", None: "⚠️"}
@@ -210,6 +210,11 @@ class App:
         self._no_wheel_change(ttk.Spinbox(tcf, from_=1, to=120, width=5, textvariable=self.tc_min_var, command=self.update_diff)).pack(side="left")
         ttk.Label(tcf, text="分鐘自動檢查一次所有任務（結束或出錯就處理；全部結束就停；沒有任務時不會跑）").pack(side="left")
         self.tc_min_var.trace_add("write", lambda *a: self.update_diff())
+        uf = ttk.Frame(core); uf.pack(anchor="w", fill="x", pady=(6, 0))
+        self.usage_var = tk.StringVar(value=s.get("usage", {}).get("text", ""))
+        self.notes.append(ttk.Label(uf, textvariable=self.usage_var, wraplength=800, justify="left")); self.notes[-1].pack(side="left")
+        ttk.Button(uf, text="重新讀取用量", command=self.do_usage).pack(side="left", padx=8)
+        ttk.Button(uf, text="自我測試（9 題，約 30 分鐘）", command=self.do_selftest).pack(side="left")
 
         # 聯網
         webf = self._section("聯網來源（免金鑰搜尋／文件 MCP ＋ WebSearch 上限）")
@@ -265,7 +270,10 @@ class App:
         ttk.Label(kf, text="狀態", font=hdr).grid(row=0, column=1, sticky="w")
         ttk.Label(kf, text="金鑰值（按「顯示」看明文）", font=hdr).grid(row=0, column=2, sticky="w")
         ttk.Label(kf, text="模式", font=hdr).grid(row=0, column=5, sticky="w")
+        ttk.Label(kf, text="帳號備註（哪個帳號申請的）", font=hdr).grid(row=0, column=7, sticky="w", padx=6)
         self.key_orig: dict[str, str] = {}
+        self.note_vars: dict[str, tk.StringVar] = {}
+        self.note_orig: dict[str, str] = {}
         for i, (n, k) in enumerate(s["keys"].items(), start=1):
             ttk.Label(kf, text=f"{k['label']}（{n}）").grid(row=i, column=0, sticky="w")
             self.key_status[n] = tk.StringVar(value="已設定" if k["present"] else "未設定")
@@ -293,9 +301,14 @@ class App:
             else:
                 ttk.Label(kf, text="只能用金鑰", foreground="#555").grid(row=i, column=5, sticky="w")
             ttk.Button(kf, text="註冊網頁", width=8, command=lambda u=k["url"]: webbrowser.open(u)).grid(row=i, column=6, padx=4)
-            self._note(kf, k["note"], wrap=300, row=i, column=7, sticky="w", padx=6)
-        kf.columnconfigure(7, weight=1)
-        ttk.Label(kf, text="「只能用金鑰」＝此服務沒有免金鑰版；「免費優先」＝免金鑰版與金鑰版並存、撞限流才用金鑰（沒填金鑰時不可選）；「註冊網頁」開官方申請頁，金鑰免費", foreground="#555").grid(row=len(s["keys"]) + 1, column=0, columnspan=8, sticky="w", pady=(6, 0))
+            nv = tk.StringVar(value=k.get("account", ""))
+            self.note_vars[n] = nv
+            self.note_orig[n] = k.get("account", "")
+            nv.trace_add("write", lambda *a: self.update_diff())
+            ttk.Entry(kf, textvariable=nv, width=22).grid(row=i, column=7, sticky="w", padx=6)
+            self._note(kf, k["note"], wrap=300, row=i, column=8, sticky="w", padx=6)
+        kf.columnconfigure(8, weight=1)
+        ttk.Label(kf, text="「只能用金鑰」＝此服務沒有免金鑰版；「免費優先」＝免金鑰版與金鑰版並存、撞限流才用金鑰（沒填金鑰時不可選）；「註冊網頁」開官方申請頁，金鑰免費", foreground="#555").grid(row=len(s["keys"]) + 1, column=0, columnspan=9, sticky="w", pady=(6, 0))
 
         # Chrome
         cf = self._section("Claude in Chrome（開網頁看、操作需登入網站、教操作前核對畫面）")
@@ -330,6 +343,9 @@ class App:
         for n, mv in self.mode_vars.items():
             has_key = bool(self.key_vars[n].get().strip())
             f.key_modes[n] = "always" if (mv.get() == "一律用金鑰" and has_key) else "fallback"
+        for n, nv in self.note_vars.items():
+            if nv.get().strip() != self.note_orig.get(n, ""):
+                f.key_notes[n] = nv.get().strip()
         try:
             f.thresholds = {"fiveHour": float(self.five_var.get()), "sevenDay": float(self.seven_var.get())}
         except ValueError:
@@ -412,6 +428,8 @@ class App:
                 elif kind == "keystatus":
                     n, text = payload
                     self.key_status[n].set(text)
+                elif kind == "usage":
+                    self.usage_var.set(payload)
         except queue.Empty:
             pass
         self.root.after(100, self._pump)
@@ -491,7 +509,28 @@ class App:
         def job():
             ok, msg = gm.test_key(n, val, keys)
             self.q.put(("keystatus", (n, f"{'✅ 有效' if ok else '❌ 無效'} {msg}")))
-            self._log(f"金鑰 {n} 測試：{'✅' if ok else '❌'} {msg}")
+            acct = self.note_vars[n].get().strip() if n in self.note_vars else ""
+            self._log(f"金鑰 {n}{'（帳號：' + acct + '）' if acct else '（帳號備註未填）'} 測試：{'✅' if ok else '❌'} {msg}")
+        self._run_bg(job, refresh_after=False)
+
+    def do_usage(self):
+        def job():
+            u = gm.refresh_usage(self.lay, PY)
+            self.q.put(("usage", u["text"]))
+            self._log(u["text"])
+        self._run_bg(job, refresh_after=False)
+
+    def do_selftest(self):
+        msg = ("會用全新的無頭 Claude Code 對話重跑 9 道題（停車場 TDX、PowerShell 編碼、影片逐字稿、即時數值 API、"
+               "程式庫文件、影片數據與截圖、國外空品、影片動作 Gemini、Chrome 開頁），比對它實際用了哪些工具。"
+               + chr(10) * 2 + "約 20～40 分鐘、用掉約九場短對話的用量；Chrome 題需要瀏覽器開著。結果會逐題印在下方紀錄。繼續？")
+        if not messagebox.askyesno("自我測試", msg):
+            return
+
+        def job():
+            self._log("=== 自我測試開始（claude -p × 9）===")
+            code = selftest.run(log=self._log, report_dir=self.lay.payload / "selftest-reports")
+            self._log(f"=== 自我測試{'全部通過' if code == 0 else '有題目未通過（見 ❌）'} ===")
         self._run_bg(job, refresh_after=False)
 
     def do_chrome_test(self):
@@ -546,6 +585,9 @@ class App:
             if v and n in self.key_vars:
                 self.key_vars[n].set(v)
                 n_keys += 1
+        for n, v in f.key_notes.items():
+            if v is not None and n in self.note_vars:
+                self.note_vars[n].set(v)
         self._log(f"已匯入 {p}" + (f"（含 {n_keys} 把金鑰，按套用才寫入）" if n_keys else "（不含金鑰）"))
         self.update_diff()
 

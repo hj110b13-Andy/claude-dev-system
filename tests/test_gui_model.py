@@ -198,6 +198,54 @@ class ReadAndDiff(Base):
         with self.assertRaises(ValueError):
             gm.import_profile(f, {"foo": 1})
 
+    def test_key_account_notes_roundtrip_and_export(self):
+        s = self.state()
+        f = gm.form_from_state(s)
+        f.keys["gemini"] = "G-SECRET"
+        f.key_notes["gemini"] = "hj9@gmail.com"
+        f.key_notes["cwa"] = "   "  # 空白＝沒變（原本也空）
+        texts = [c.text for c in gm.diff(s, f)]
+        self.assertTrue(any("Gemini 帳號備註 → hj9@gmail.com" in t for t in texts))
+        self.assertFalse(any("中央氣象署 帳號備註" in t for t in texts))
+        self.assertEqual(self.apply(f, s), 0, chr(10).join(self.logs))
+        s = self.state()
+        self.assertEqual(s["keys"]["gemini"]["account"], "hj9@gmail.com")
+        self.assertEqual(web.load_local(self.lay)["keyNotes"], {"gemini": "hj9@gmail.com"})
+        self.assertEqual(gm.diff(s, gm.form_from_state(s)), [])
+        data = gm.export_profile(s, gm.form_from_state(s))
+        self.assertEqual(data["key_notes"], {"gemini": "hj9@gmail.com"})
+        self.assertNotIn("G-SECRET", json.dumps(data))
+        g = gm.import_profile(gm.form_from_state(s), {"claude-dev-system-profile": 1, "key_notes": {"cwa": "work@x"}})
+        self.assertEqual(g.key_notes["cwa"], "work@x")
+        f = gm.form_from_state(s)
+        f.key_notes["gemini"] = ""
+        self.assertTrue(any("（清除）" in c.text for c in gm.diff(s, f)))
+        self.apply(f, s)
+        self.assertEqual(web.load_local(self.lay)["keyNotes"], {})
+
+    def test_usage_read_and_refresh(self):
+        self.assertIsNone(gm.read_usage(self.lay)["five"])
+        self.assertIn("尚無用量資料", gm.read_usage(self.lay)["text"])
+        (self.lay.home / "state").mkdir(parents=True)
+        (self.lay.home / "state" / "usage.json").write_text(json.dumps({"five_hour_pct": 12.0, "seven_day_pct": 34.0,
+            "five_hour_resets_at": "2026-11-01T03:00:00+00:00", "seven_day_resets_at": "2026-11-07T12:59:59+00:00", "updated_at": "2026-11-01T02:03:51+0800"}), encoding="utf-8")
+        u = gm.read_usage(self.lay)
+        self.assertEqual((u["five"], u["seven"]), (12.0, 34.0))
+        self.assertIn("5 小時 12%", u["text"])
+        self.assertIn("7 天 34%", u["text"])
+        self.assertIn("2026-11-01 02:03", u["text"])
+        self.assertIn("usage", self.state())
+        self.assertIn("尚未安裝核心", gm.refresh_usage(self.lay, PY)["text"])
+        self.apply(gm.form_from_state(self.state()))
+        calls = []
+
+        class R:
+            stdout, stderr = "5 小時 12%".encode("utf-8"), b""
+        u = gm.refresh_usage(self.lay, PY, run=lambda cmd, **k: (calls.append((cmd, k)), R)[1])
+        self.assertTrue(calls[0][0][1].endswith("usage_guard.py") and calls[0][0][2] == "--print")
+        self.assertEqual(calls[0][1]["env"]["CLAUDE_CONFIG_DIR"], str(self.lay.home))
+        self.assertIn("5 小時 12%", u["text"])
+
     def test_chrome_default_toggle_writes_claude_json_with_backup(self):
         p = web.user_config_path(self.lay)
         p.parent.mkdir(parents=True, exist_ok=True)

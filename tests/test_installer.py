@@ -151,7 +151,13 @@ class Preservation(Base):
         self.assertIn("（我改過）", self.lay.claude_md.read_text(encoding="utf-8"))
         self.assertIn('"fiveHour": 81', cfg.read_text(encoding="utf-8"))
         self.assertTrue((self.lay.payload / "CLAUDE-block.new.md").exists())
+        self.assertFalse((cfg.parent / "dispatch-config.json.new").exists(), "可編輯設定檔不該再生 .new（0.9.6）")
+        self.assertTrue(any("保留使用者設定" in x for x in log))
         self.assertTrue(any("使用者改動" in x for x in log))
+        (cfg.parent / "dispatch-config.json.new").write_text("{}", encoding="utf-8")  # 模擬舊版留下的
+        log = self.install(mode="update")
+        self.assertFalse((cfg.parent / "dispatch-config.json.new").exists(), "舊版留下的 .new 應被清掉")
+        self.assertTrue(any("移除多餘的" in x for x in log))
         code, out = self.verify()
         self.assertEqual(code, 0, "\n".join(out))
         self.assertTrue(any(x.startswith("⚠️") for x in out))

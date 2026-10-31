@@ -45,7 +45,16 @@ python installer/install.py verify     # 全部 ✅ 才算完成；重開 Claude
 ```bash
 python installer/install.py gui        # Windows：py -3 installer/install.py gui
 ```
-所有選用項目、金鑰（框內顯示目前值、可測試）、用量守門開關與門檻、背景任務巡檢（每 N 分鐘）、WebSearch 上限、下載資料夾、Claude in Chrome 都在視窗裡改；底下會列「將變更 N 項」，按「套用」才動，按「取消」回到實際狀態。開啟與套用後都重讀真實檔案，畫面不會和實際不一樣。缺 ffmpeg／PowerShell 7／faster-whisper 有安裝按鈕。打包成 exe 與視窗內更新在下一版。
+所有選用項目、金鑰（框內顯示目前值、可測試、可填「哪個帳號申請的」備註）、用量守門開關與門檻、目前用量（5 小時／7 天 %）、背景任務巡檢（每 N 分鐘）、WebSearch 上限、下載資料夾、Claude in Chrome 都在視窗裡改；底下會列「將變更 N 項」，按「套用」才動，按「取消」回到實際狀態。開啟與套用後都重讀真實檔案，畫面不會和實際不一樣。缺 ffmpeg／PowerShell 7／faster-whisper 有安裝按鈕。打包成 exe 與視窗內更新在下一版。
+
+## 自我測試（確認 Claude Code 真的會自己用這些工具）
+
+```bash
+python installer/install.py selftest --list          # 列九題
+python installer/install.py selftest                 # 全跑（約 20～40 分鐘、九場短對話的用量；Chrome 題要瀏覽器開著）
+python installer/install.py selftest --only video --only live-data
+```
+每題在全新無頭 `claude -p` 對話裡只給問題、不提工具名，讀它實際呼叫的工具與 `config/selftest.json` 的預期比對（例如停車場題要先打 TDX 再跨索引、即時數值題不得用 firecrawl 抓頁、影片動作題要走 Gemini `ask`）。改了規則就跑一次；視窗核心區也有同一顆按鈕。
 
 ## 選用：聯網來源
 

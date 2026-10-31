@@ -2,6 +2,15 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.9.6（2026-11-01）
+
+- `install.py selftest`／視窗「自我測試」：用全新無頭 `claude -p` 重跑 `config/selftest.json` 的九題（TDX 停車場、mslearn、video.py 逐字稿、環境部／氣象署／匯率 API、context7／deepwiki、YouTube Data API＋frames、OpenAQ、Gemini ask、Claude in Chrome），讀 stream-json 的 tool_use 比對「該用的工具有沒有用、不該用的有沒有出現」，逐題 ✅／❌、可 `--only` 挑題、`--report-dir` 存呼叫清單。只手動觸發（約九場短對話用量）。
+- 視窗核心區顯示目前用量（5 小時／7 天 %、重置時間、讀取時間，來源 `state/usage.json`），「重新讀取用量」按鈕跑一次 `usage_guard.py --print`。
+- 每把金鑰多一欄「帳號備註」（存 local.json `keyNotes`，匯出設定一律帶、不算機密）；金鑰測試紀錄會註明帳號。來源：使用者「金鑰測試註明是哪個帳號是每個金鑰都會套用對吧，不只 Gemini」。
+- `update` 不再對 `dispatch-config.json`（使用者本來就可改的設定檔）生 `.new` 副本，並清掉舊版留下的 `dispatch-config.json.new`；CLAUDE.md 區塊等其他檔的 `.new` 行為不變。
+- 規則：Chrome 重型頁面（Google Cloud 控制台、TDX、各家儀表板）截圖連續失敗 2 次就改 `find`／`get_page_text` 讀文字，不再截圖（2026-11-01 核對額度時三站各卡 3 次以上才改）。
+- 來源：使用者「好，這些優化都可以做」。
+
 ## 0.9.5（2026-11-01）
 
 - 用量門檻預設改為 5 小時 85%、7 天 97%（repo 預設、hook 內建預設、視窗預設、README、workflow 規則同步；使用者本機設定 95／99 不變）。來源：使用者「預設從 80／97 改成 85／97（預設改就好，我當前的設定不用改）」。

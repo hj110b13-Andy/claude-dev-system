@@ -5,6 +5,10 @@
 3. `python installer/install.py verify`：逐項 ✅／❌（安裝紀錄、版本、檔案雜湊、hook、腳本可編譯、CLAUDE.md 區塊、每個 skill、Claude Code 版本）。結束碼 0＝全通過。
 4. **重開** Claude Code 對話（或 VSCode 視窗）讓新的 CLAUDE.md、skills、hook 生效。在新對話請 Claude 列出可用的 skill，應看到 `cds-*` 四個。
 
+## 安裝後自我測試（選用）
+
+`python installer/install.py selftest`：用全新無頭 Claude Code 對話重跑 `config/selftest.json` 的九題，比對它實際呼叫的工具是否符合規則（細節見 README「自我測試」）。`--list` 列題、`--only 題號` 挑題、`--report-dir 路徑` 把每題的工具呼叫清單與回答存成 JSON。費用約九場短對話的用量，不會自動跑。
+
 ## 目標位置
 
 - 預設 `~/.claude`；若有設環境變數 `CLAUDE_CONFIG_DIR` 則用它；也可 `--claude-home <路徑>` 指定（測試用）。

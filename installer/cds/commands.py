@@ -71,6 +71,9 @@ def _sync_files(lay: Layout, repo: Path, version: str, old: dict, new: dict, for
         if cur is not None and rec is not None and cur != rec and not force:
             new["files"][rel] = rec  # 保留使用者改動；紀錄維持舊雜湊，verify 標「使用者已修改」
             np = p.with_name(p.name + ".new")
+            if rel in payload.USER_EDITABLE:  # 本來就給使用者改的設定檔（門檻、巡檢由視窗管理）：安靜保留，不生 .new
+                log.append(f"保留使用者設定 {rel}")
+                continue
             atomic_write_bytes(np, data)
             extra.append(np.relative_to(home).as_posix())
             log.append(f"{WARN} {rel} 有使用者改動，保留不覆蓋；新版放在 {np.name}（--force 可覆蓋）")
@@ -81,7 +84,12 @@ def _sync_files(lay: Layout, repo: Path, version: str, old: dict, new: dict, for
         atomic_write_bytes(p, data)
         new["files"][rel] = want
         log.append(("更新 " if cur else "新增 ") + rel)
-    new["extraFiles"] = sorted(set(old.get("extraFiles", [])) | set(extra))
+    stale = {f"{r}.new" for r in payload.USER_EDITABLE}  # 0.9.6 前每次 update 都會生的 dispatch-config.json.new：清掉
+    for rel in stale:
+        if (home / rel).exists():
+            (home / rel).unlink()
+            log.append(f"移除多餘的 {rel}（設定檔本來就可改，不需新版副本）")
+    new["extraFiles"] = sorted((set(old.get("extraFiles", [])) | set(extra)) - stale)
     for rel, rec in old["files"].items():
         if rel in desired:
             continue

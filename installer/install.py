@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """claude-dev-system 安裝器（只用 Python 標準庫，需 Python ≥ 3.10）。
 
-用法：python installer/install.py [--claude-home 路徑] <check|install|verify|update|uninstall|status|web> [選項]
+用法：python installer/install.py [--claude-home 路徑] <check|install|verify|update|uninstall|status|web|video|gui|selftest> [選項]
   --claude-home     目標設定目錄（預設：環境變數 CLAUDE_CONFIG_DIR，否則 ~/.claude）；測試時指向暫存資料夾
   --python          hook 用的 Python 執行檔（預設：執行本安裝器的這個 Python）
   --force           install／update：覆蓋使用者改過的本工具檔案或區塊；uninstall：連使用者改過的也刪
@@ -16,6 +16,8 @@ web 子命令（改本機偏好並立即套用；偏好存 <CLAUDE_HOME>/claude-
   --usage-guard on|off              開關用量守門 hook（off：不註冊、update 時移除；規則仍在）
 video 子命令：不帶參數＝啟用（pip 安裝並登記）；--off 取消登記；--show 只檢查依賴與金鑰
 gui 子命令：開設定視窗（同 `python installer/gui.py`）：所有開關、金鑰、門檻在視窗裡改，按套用才生效
+selftest 子命令：用全新無頭 claude -p 重跑 config/selftest.json 的九題，比對實際呼叫的工具（--list 列題目、--only 題號 只跑幾題、
+  --report-dir 路徑 存每題呼叫清單）；每題約一場短對話的用量、全部約 20～40 分鐘，只手動跑
 結束碼：0 成功／全部通過；1 check 或 verify 有 ❌；2 用法或狀態錯誤。
 """
 from __future__ import annotations
@@ -41,7 +43,7 @@ def main(argv=None) -> int:
         return 2
     ap = argparse.ArgumentParser(description="claude-dev-system 安裝器")
     ap.add_argument("--claude-home")
-    ap.add_argument("cmd", choices=["check", "install", "verify", "update", "uninstall", "status", "web", "video", "gui"])
+    ap.add_argument("cmd", choices=["check", "install", "verify", "update", "uninstall", "status", "web", "video", "gui", "selftest"])
     ap.add_argument("--python", default=Path(sys.executable).as_posix())
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--restore-backup", action="store_true")
@@ -56,11 +58,17 @@ def main(argv=None) -> int:
     ap.add_argument("--usage-guard", choices=["on", "off"], help="web 子命令：開關用量守門 hook（off＝不註冊，update 時移除）")
     ap.add_argument("--off", action="store_true")
     ap.add_argument("--show", action="store_true")
+    ap.add_argument("--list", action="store_true", help="selftest：只列題目")
+    ap.add_argument("--only", action="append", default=[], metavar="題號", help="selftest：只跑這些題（可重複）")
+    ap.add_argument("--report-dir", help="selftest：把每題的工具呼叫清單與回答存成 JSON 的資料夾")
     a = ap.parse_args(argv)
     lay = Layout(claude_home(a.claude_home))
     if a.cmd == "gui":
         import gui  # noqa: PLC0415
         return gui.main(["--claude-home", str(lay.home)])
+    if a.cmd == "selftest":
+        from cds import selftest  # noqa: PLC0415
+        return selftest.run(only=a.only or None, list_only=a.list, report_dir=Path(a.report_dir) if a.report_dir else None)
     if a.cmd == "check":
         rows = env_report(lay.home)
         for name, ok, msg in rows:

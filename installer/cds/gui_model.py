@@ -209,6 +209,47 @@ def write_thresholds(lay: Layout, five: float, seven: float) -> None:
     write_json(p, d)
 
 
+def _local_time(iso: str | None) -> str:
+    """hook 寫的重置時間是 UTC ISO；畫面顯示本地時間 月/日 時:分。"""
+    if not iso:
+        return "？"
+    try:
+        return _dt.datetime.fromisoformat(str(iso).replace("Z", "+00:00")).astimezone().strftime("%m/%d %H:%M")
+    except Exception:  # noqa: BLE001
+        return str(iso)[:16]
+
+
+def read_usage(lay: Layout) -> dict:
+    """讀用量守門 hook 寫的 <home>/state/usage.json（只有百分比與重置時間，沒有權杖）。沒有檔就回 text 說明。"""
+    p = lay.home / "state" / "usage.json"
+    try:
+        d = read_json(p)
+    except Exception:  # noqa: BLE001
+        return {"five": None, "seven": None, "text": "尚無用量資料（用量守門 hook 跑過一次對話後才有；或按「重新讀取用量」）"}
+    five, seven = d.get("five_hour_pct"), d.get("seven_day_pct")
+    fmt = lambda v: f"{v:.0f}%" if isinstance(v, (int, float)) else "？"  # noqa: E731
+    text = (f"目前用量：5 小時 {fmt(five)}（重置 {_local_time(d.get('five_hour_resets_at'))}）；"
+            f"7 天 {fmt(seven)}（重置 {_local_time(d.get('seven_day_resets_at'))}）；讀於 {str(d.get('updated_at') or '？')[:16].replace('T', ' ')}")
+    return {"five": five, "seven": seven, "five_reset": d.get("five_hour_resets_at"), "seven_reset": d.get("seven_day_resets_at"),
+            "updated_at": d.get("updated_at"), "text": text}
+
+
+def refresh_usage(lay: Layout, python: str, run=subprocess.run) -> dict:
+    """主動打一次用量端點（跑已安裝的 hooks/usage_guard.py --print），再讀 usage.json。失敗時 text 說明原因。"""
+    script = lay.payload / "hooks" / "usage_guard.py"
+    if not script.exists():
+        return {**read_usage(lay), "text": "尚未安裝核心（hooks/usage_guard.py 不存在），無法讀用量"}
+    try:
+        r = run([python, str(script), "--print"], capture_output=True, timeout=30, env={**os.environ, "CLAUDE_CONFIG_DIR": str(lay.home), "PYTHONUTF8": "1"})
+        out = (r.stdout or b"").decode("utf-8", "replace").strip()
+    except Exception as e:  # noqa: BLE001
+        return {**read_usage(lay), "text": f"讀用量失敗：{type(e).__name__}"}
+    u = read_usage(lay)
+    if not out:
+        u["text"] = u["text"] + "（這次沒拿到新資料：沒有登入憑證或端點改版）"
+    return u
+
+
 def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.default_importer, ffmpeg=video.ffmpeg_path) -> dict:
     """畫面的唯一真相來源。"""
     m = mf.load(lay.manifest)
@@ -235,7 +276,8 @@ def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.de
     for name, (label, kind, note, url) in KEY_INFO.items():
         val = (local.get("keys") or {}).get(name) or ""
         keys[name] = {"label": label, "kind": kind, "note": note, "url": url, "present": bool(val), "value": val,  # value 只給畫面輸入框用，不可寫進紀錄
-                      "mode": web.key_mode(local, name) if kind == "search" else None}
+                      "mode": web.key_mode(local, name) if kind == "search" else None,
+                      "account": str((local.get("keyNotes") or {}).get(name) or "")}  # 使用者自填：這把金鑰是哪個帳號申請的
     vcfg = {}
     vp = lay.payload / "config" / "video.json"
     if vp.exists():
@@ -256,6 +298,7 @@ def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.de
                   "packages": {mod: importer(mod) for mod in video.IMPORTS},
                   "download_dir": ((local.get("video") or {}).get("downloadDir") or vcfg.get("downloadDir") or "")},
         "keys": keys,
+        "usage": read_usage(lay),
         "thresholds": read_thresholds(lay) if m else dict(DEFAULT_THRESHOLDS),
         "task_check": read_task_check(lay) if m else dict(DEFAULT_TASK_CHECK),
         "chrome": {"extension": chrome_extension_installed(), "native_host": chrome_native_host_registered(),
@@ -275,6 +318,7 @@ class Form:
     video_enabled: bool = False
     keys: dict = field(default_factory=dict)           # name -> None（不變）| ""（清掉）| "值"
     key_modes: dict = field(default_factory=dict)      # name -> fallback|always
+    key_notes: dict = field(default_factory=dict)      # name -> None（不變）| "帳號備註"（""＝清除）
     thresholds: dict = field(default_factory=lambda: dict(DEFAULT_THRESHOLDS))
     download_dir: str = ""
     chrome_default_enabled: bool | None = None
@@ -293,6 +337,7 @@ def form_from_state(state: dict) -> Form:
     f.video_enabled = state["video"]["enabled"]
     f.keys = {n: None for n in state["keys"]}
     f.key_modes = {n: k["mode"] for n, k in state["keys"].items() if k["mode"]}
+    f.key_notes = {n: None for n in state["keys"]}
     f.thresholds = dict(state["thresholds"])
     f.download_dir = state["video"]["download_dir"]
     f.chrome_default_enabled = state["chrome"]["default_enabled"]
@@ -350,6 +395,9 @@ def diff(state: dict, form: Form) -> list[Change]:
     for n, m in form.key_modes.items():
         if state["keys"].get(n, {}).get("mode") and m != state["keys"][n]["mode"]:
             ch.append(Change("keys", f"{state['keys'][n]['label']} 金鑰模式 → {'一律用金鑰' if m == 'always' else '免費優先'}"))
+    for n, v in form.key_notes.items():
+        if v is not None and n in state["keys"] and str(v).strip() != state["keys"][n].get("account", ""):
+            ch.append(Change("keys", f"{state['keys'][n]['label']} 帳號備註 → {str(v).strip() or '（清除）'}"))
     for k in ("fiveHour", "sevenDay"):
         if float(form.thresholds.get(k, state["thresholds"][k])) != float(state["thresholds"][k]):
             ch.append(Change("thresholds", f"用量門檻 {'5 小時' if k == 'fiveHour' else '7 天'}：{state['thresholds'][k]}% → {form.thresholds[k]}%"))
@@ -393,6 +441,18 @@ def apply_form(lay: Layout, python: str, state: dict, form: Form, log, repo: Pat
         local["usageGuard"] = bool(form.usage_guard)
         web.save_local(lay, local)
         log(f"用量守門 → {'開' if form.usage_guard else '關'}（local.json usageGuard）")
+    notes = {n: str(v).strip() for n, v in form.key_notes.items() if v is not None and n in state["keys"] and str(v).strip() != state["keys"][n].get("account", "")}
+    if notes:
+        local = _local(lay)
+        kn = local.get("keyNotes") if isinstance(local.get("keyNotes"), dict) else {}
+        for n, v in notes.items():
+            if v:
+                kn[n] = v
+            else:
+                kn.pop(n, None)
+        local["keyNotes"] = kn
+        web.save_local(lay, local)
+        log(f"金鑰帳號備註寫入 local.json：{'、'.join(notes)}")
     # 1) 先只寫 local.json（keys／enable／disable／env／keyMode），用 show=True 避免中途套用
     if keys or enable or disable or env_args or modes or env_reset:
         if not state["installed"]:
@@ -594,12 +654,14 @@ def chrome_live_test(run=subprocess.run, timeout: int = 150) -> tuple[bool, str]
 # ---------- 匯出／匯入、備份 ----------
 
 def export_profile(state: dict, form: Form, include_keys: bool = False, current_keys: dict | None = None) -> dict:
-    """開關、env、模式、門檻、下載資料夾、用量守門、Chrome 預設；include_keys=True 時另附金鑰明文（給搬到新裝置用，檔案要妥善保管）。
+    """開關、env、模式、門檻、下載資料夾、用量守門、Chrome 預設、金鑰帳號備註；include_keys=True 時另附金鑰明文（給搬到新裝置用，檔案要妥善保管）。
     不含環境安裝（ffmpeg、PowerShell 7、faster-whisper 是裝在系統裡的，匯入後在新裝置按安裝鈕）。"""
     d = {"claude-dev-system-profile": 1, "web_enabled": form.web_enabled, "servers": dict(form.servers), "env": dict(form.env),
          "video_enabled": form.video_enabled, "key_modes": dict(form.key_modes), "thresholds": dict(form.thresholds),
          "download_dir": form.download_dir, "chrome_default_enabled": form.chrome_default_enabled, "usage_guard": form.usage_guard,
-         "task_check": dict(form.task_check)}
+         "task_check": dict(form.task_check),
+         "key_notes": {n: (form.key_notes.get(n) if form.key_notes.get(n) is not None else k.get("account", "")) for n, k in state["keys"].items()
+                       if (form.key_notes.get(n) if form.key_notes.get(n) is not None else k.get("account", ""))}}
     if include_keys:
         keys = dict(current_keys or {})
         for n, v in form.keys.items():  # 表單裡尚未套用的新值優先
@@ -624,6 +686,10 @@ def import_profile(form: Form, data: dict) -> Form:
         for n, v in data["keys"].items():
             if n in KEY_INFO and isinstance(v, str) and v:
                 f.keys[n] = v
+    if isinstance(data.get("key_notes"), dict):
+        for n, v in data["key_notes"].items():
+            if n in KEY_INFO and isinstance(v, str):
+                f.key_notes[n] = v
     return f
 
 

@@ -1,0 +1,27 @@
+{
+  "_comment": "`install.py selftest` 用：每題在全新無頭 `claude -p` session 跑一次（只給問題，不提工具名），比對它實際呼叫的工具是否符合 expect（每條是對「工具名 :: 參數摘要」的正規表達式，全部命中才算 ✅）。chrome=true 的題目加 --chrome，其餘 --no-chrome。allowed 是 --allowedTools 清單（無頭模式沒有權限提示）。費用為訂閱用量，印出的 USD 是估算值。",
+  "allowed": "Bash,PowerShell,Read,Write,Grep,Glob,WebFetch,WebSearch,ToolSearch,Agent,mcp__parallel__web_search,mcp__parallel__web_fetch,mcp__exa__web_search_exa,mcp__exa__web_fetch_exa,mcp__tavily__tavily_search,mcp__tavily-key__tavily_search,mcp__firecrawl__firecrawl_search,mcp__firecrawl__firecrawl_scrape,mcp__mslearn__microsoft_docs_search,mcp__mslearn__microsoft_docs_fetch,mcp__context7__resolve-library-id,mcp__context7__query-docs,mcp__deepwiki__read_wiki_structure,mcp__deepwiki__ask_wiki_question,mcp__deepwiki__read_wiki_contents,mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__tabs_create_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__computer,mcp__claude-in-chrome__read_page,mcp__claude-in-chrome__find,mcp__claude-in-chrome__get_page_text,mcp__claude-in-chrome__tabs_close_mcp,mcp__claude-in-chrome__browser_batch",
+  "maxTurns": 24,
+  "timeoutSec": 540,
+  "cases": [
+    {"id": "parking", "name": "台灣停車場（TDX＋跨索引）", "prompt": "車埕的「林班道商圈」停車場是平面還是立體？有幾個車位？請照全域規則查證並附來源。",
+     "expect": ["(?i)^(Bash|PowerShell) ::.*tdx", "^mcp__(parallel|exa)__"]},
+    {"id": "pwsh", "name": "版本事實（mslearn）", "prompt": "PowerShell 7 的 Get-Content 預設讀檔編碼是什麼？Windows PowerShell 5.1 呢？請附官方文件來源。",
+     "expect": ["^mcp__mslearn__"]},
+    {"id": "video", "name": "影片逐字稿（video.py）", "prompt": "這支影片在講什麼？https://www.youtube.com/watch?v=jNQXAC9IVRw 請用全域規則的影片工具處理，附時間戳。",
+     "expect": ["(?i)^(Bash|PowerShell) ::.*video\\.py.*transcript"]},
+    {"id": "live-data", "name": "即時數值（環境部／氣象署／匯率 API）", "prompt": "汐止現在的空氣品質（AQI）多少？板橋明天會不會下雨？今天台幣兌日圓匯率？請照全域規則查，附來源。",
+     "expect": ["(?i)^(Bash|PowerShell|WebFetch) ::.*moenv", "(?i)^(Bash|PowerShell|WebFetch) ::.*cwa\\.gov\\.tw", "(?i)^(Bash|PowerShell|WebFetch) ::.*open\\.er-api"],
+     "forbid": ["^mcp__firecrawl__firecrawl_scrape"]},
+    {"id": "docs", "name": "程式庫文件與 repo（context7／deepwiki）", "prompt": "Python 的 requests 套件 timeout 參數可以同時設連線與讀取逾時嗎？語法是什麼？請附官方文件。另外 yt-dlp 這個 GitHub repo 裡 Bilibili 的 extractor 放在哪個檔案？",
+     "expect": ["^mcp__context7__", "^mcp__deepwiki__"]},
+    {"id": "yt-stats", "name": "影片數據與招牌（YouTube Data API＋frames --at）", "prompt": "這支影片 https://www.youtube.com/watch?v=7bztj9j7JZw 有多少人看過、最熱門留言說什麼？另外影片 11:32 到 12:30 那段畫面上的店招牌寫什麼？",
+     "expect": ["(?i)^(Bash|PowerShell) ::.*video\\.py.*(stats|comments)", "(?i)^(Bash|PowerShell) ::.*video\\.py.*frames"]},
+    {"id": "openaq", "name": "國外空品（OpenAQ）", "prompt": "東京現在的空氣品質（AQI 或 PM2.5）如何？要官方測站的實測值，附來源與資料時間。",
+     "expect": ["(?i)openaq"]},
+    {"id": "motion", "name": "影片連續動作（Gemini ask）", "prompt": "這支影片 https://www.youtube.com/watch?v=_4QjeaRGXRs 從 0:40 到 1:05 這 25 秒內，鏡頭和畫面中的人物做了哪些連續動作（移動、轉向、進出什麼地方）？請依時間順序描述。",
+     "expect": ["(?i)^(Bash|PowerShell) ::.*video\\.py.* ask "]},
+    {"id": "chrome", "name": "實際開網頁（Claude in Chrome）", "prompt": "用瀏覽器實際打開 https://example.com ，告訴我頁面標題和第一段文字是什麼，並截一張圖。", "chrome": true,
+     "expect": ["^mcp__claude-in-chrome__navigate"]}
+  ]
+}
