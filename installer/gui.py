@@ -562,7 +562,7 @@ class App:
 
         def job():
             self._log("=== 自我測試開始（claude -p × 9）===")
-            code = selftest.run(log=self._log, report_dir=self.lay.payload / "selftest-reports")
+            code = selftest.run(log=self._log, report_dir=self.lay.home / "state" / "selftest-reports")
             self._log(f"=== 自我測試{'全部通過' if code == 0 else '有題目未通過（見 ❌）'} ===")
         self._run_bg(job, refresh_after=False)
 

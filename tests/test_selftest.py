@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -45,6 +46,36 @@ class SelfTest(unittest.TestCase):
         ok, notes = st.judge({"expect": ["^mcp__mslearn__"], "forbid": ["^mcp__parallel__"]}, calls)
         self.assertFalse(ok)
         self.assertEqual(sum(n.startswith("❌") for n in notes), 2)
+
+    def test_warn_and_write_content_and_mask(self):
+        calls = ["Write :: C:/tmp/q.py import requests; requests.get('https://data.moenv.gov.tw/api?api_key=SECRET-KEY-1')",
+                 "mcp__firecrawl__firecrawl_scrape :: https://rate.bot.com.tw"]
+        ok, notes = st.judge({"expect": [r"(?i)^(Bash|PowerShell|WebFetch|Write) ::.*moenv"], "warn": ["^mcp__firecrawl__firecrawl_scrape"]}, calls)
+        self.assertTrue(ok, "warn 命中不算失敗")
+        self.assertTrue(any(n.startswith("⚠️") for n in notes))
+        raw = stream(("Write", {"file_path": "q.py", "content": "key=SECRET-KEY-1"}))
+        c, _ = st.parse_stream(raw)
+        self.assertIn("SECRET-KEY-1", c[0], "Write 的 content 要進摘要才比對得到")
+        import tempfile
+        from cds import web
+        from cds.paths import Layout
+        with tempfile.TemporaryDirectory() as td:
+            lay = Layout(Path(td))
+            web.save_local(lay, {"keys": {"moenv": "SECRET-KEY-1"}, "enable": [], "disable": [], "env": {}})
+            old_env = os.environ.get("CLAUDE_CONFIG_DIR")
+            os.environ["CLAUDE_CONFIG_DIR"] = td
+            try:
+                logs = []
+                code = st.run(only=["live-data"], runner=lambda cmd, cwd, t: (0, raw, ""), which=lambda n: "claude", log=logs.append, report_dir=Path(td) / "rep")
+            finally:
+                if old_env is None:
+                    os.environ.pop("CLAUDE_CONFIG_DIR", None)
+                else:
+                    os.environ["CLAUDE_CONFIG_DIR"] = old_env
+            rep = next((Path(td) / "rep").glob("*.json")).read_text(encoding="utf-8")
+            self.assertNotIn("SECRET-KEY-1", rep, "報告不可含金鑰")
+            self.assertNotIn("SECRET-KEY-1", chr(10).join(logs), "紀錄不可含金鑰")
+            self.assertIn("***", rep)
 
     def test_run_with_fake_runner_and_report(self):
         import tempfile

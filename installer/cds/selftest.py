@@ -16,15 +16,28 @@ import tempfile
 import time
 from pathlib import Path
 
-from .paths import REPO
+from .paths import REPO, Layout, claude_home
+from . import web
 
 OK, BAD, WARN = "✅", "❌", "⚠️"
-SUMMARY_KEYS = ("command", "url", "query", "search_queries", "objective", "prompt", "libraryName", "question", "repoName", "file_path", "pattern", "urls")
+SUMMARY_KEYS = ("command", "url", "query", "search_queries", "objective", "prompt", "libraryName", "question", "repoName", "file_path", "pattern", "urls", "content", "new_string")  # content／new_string：Claude 先 Write 腳本再執行時，金鑰與網址在檔案內容裡
 
 
 def load_cases(path: Path | None = None) -> dict:
+    """題目檔：repo 的 config/selftest.json；沒有 repo（例如只裝了執行檔）就用已安裝的那份。"""
     p = path or (REPO / "config" / "selftest.json")
+    if not p.exists():
+        p = Layout(claude_home(None)).payload / "config" / "selftest.json"
     return json.loads(p.read_text(encoding="utf-8"))
+
+
+def _masker():
+    """把本機 local.json 的金鑰值從呼叫摘要與回答裡遮掉（Bash 指令或 Write 內容常直接帶金鑰）。"""
+    try:
+        local = web.load_local(Layout(claude_home(None)))
+    except Exception:  # noqa: BLE001
+        local = {}
+    return lambda t: web.mask(t, local)
 
 
 def summarize_input(inp) -> str:
@@ -80,6 +93,9 @@ def judge(case: dict, calls: list[str]) -> tuple[bool, list[str]]:
             notes.append(f"{BAD} 不該出現 {pat} ← {hit[0][:90]}")
         else:
             notes.append(f"{OK} 未出現 {pat}")
+    for pat in case.get("warn", []):  # 規則允許在退路時用、但不該是第一步的工具：只標 ⚠️ 不算失敗（順序無法從清單判定）
+        hit = [c for c in calls if re.search(pat, c)]
+        notes.append(f"{WARN} 有用到 {pat}（規則只允許當退路，請看報告確認順序）← {hit[0][:90]}" if hit else f"{OK} 未用到 {pat}")
     return ok, notes
 
 
@@ -128,22 +144,24 @@ def run(only: list[str] | None = None, list_only: bool = False, cases_path: Path
         log(f"{OK} dry-run：{len(cases)} 題的指令如上，未執行")
         return 0
     results = []
+    mask = _masker()
     with tempfile.TemporaryDirectory(prefix="cds-selftest-") as cwd:  # 空資料夾：只吃全域規則，不吃任何專案 CLAUDE.md
         for c in cases:
             t0 = time.time()
             log(f"── {c['id']}：{c['name']}")
             code, out, err = runner(build_cmd(exe, c, cfg), cwd, timeout)
             calls, res = parse_stream(out)
+            calls = [mask(x) for x in calls]
             ok, notes = judge(c, calls)
             if code != 0 and not calls:
                 ok = False
-                notes.append(f"{BAD} claude 結束碼 {code}：{(err or out)[-200:].strip()}")
+                notes.append(f"{BAD} claude 結束碼 {code}：{mask((err or out)[-200:].strip())}")
             for n in notes:
                 log("   " + n)
             cost = res.get("total_cost_usd")
             log(f"   工具呼叫 {len(calls)} 次、{time.time() - t0:.0f} 秒" + (f"、用量約 ${cost:.2f} 等值（訂閱制為估算）" if isinstance(cost, (int, float)) else ""))
             results.append({"id": c["id"], "name": c["name"], "ok": ok, "calls": calls, "notes": notes, "cost_usd": cost,
-                            "answer": (res.get("result") or "")[:4000], "exit": code})
+                            "answer": mask((res.get("result") or "")[:4000]), "exit": code})
     passed = sum(1 for r in results if r["ok"])
     log(f"{OK if passed == len(results) else BAD} 自我測試 {passed}/{len(results)} 題通過")
     if report_dir:

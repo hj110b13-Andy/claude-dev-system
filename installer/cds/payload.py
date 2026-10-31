@@ -22,7 +22,7 @@ def entries(repo: Path, version: str) -> dict[str, bytes]:
         for p in _files_under(repo / sub):
             out[f"{PAYLOAD_ROOT}/{sub}/{p.relative_to(repo / sub).as_posix()}"] = p.read_bytes()
     out[f"{PAYLOAD_ROOT}/hooks/usage_guard.py"] = (repo / "hooks" / "usage_guard.py").read_bytes()
-    for name in ("VERSION", "compat.json", "dispatch-config.json", "web-sources.json", "video.json"):
+    for name in ("VERSION", "compat.json", "dispatch-config.json", "web-sources.json", "video.json", "selftest.json"):
         out[f"{PAYLOAD_ROOT}/config/{name}"] = (repo / "config" / name).read_bytes()
     for sk in skill_names(repo):
         for p in _files_under(repo / "skills" / sk):

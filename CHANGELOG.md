@@ -14,6 +14,7 @@
 - 視窗「將變更」區改成淡黃底框：標題一行寫「共 N 項」，每項變更各占一行編號列出（超過 6 行在框內捲）；每一區標題加總數（環境 ✅⚠️❌ 各幾項、MCP 幾個開幾個、套件幾/幾、金鑰幾把已設定幾把、Chrome 幾項通過）。來源：使用者「每項變更都換一行…將變更那區塊也改顏色…每塊都再新增寫上共幾個」。以實際開窗、模擬 12 項變更截圖核對。
 - 修視窗「③ 實際連線測試」失敗：原本叫 Claude 開 about:blank 截圖，擴充功能拒絕「Can't interact with browser-internal or unparseable URLs」；改開 https://example.com 讀標題後關分頁，並明給 --allowedTools。來源：使用者「我剛剛按實際連線測試發現測試失敗，但你用是可以的」。
 - selftest 加 `--dry-run`（只印每題會執行的完整指令，零用量），並核對過本機 claude 的旗標（--chrome／--no-chrome／--allowedTools／--max-turns／--output-format stream-json／--verbose／--no-session-persistence 都存在）；另用一題最小真實無頭對話驗證 stream-json 解析與判定。來源：使用者「有辦法不測試但確認沒有像剛剛的實際連線測試一樣有問題嗎」。
+- 整體自審（使用者「你再整體全部確認有沒有甚麼漏洞、bug、疏忽、邏輯」）修了五處：①selftest 報告與視窗紀錄會把 local.json 的金鑰值遮成 ***（Bash 指令或 Write 腳本內容常直接帶金鑰）；②selftest 摘要納入 Write／Edit 的內容，題目的 expect 允許 Write（Claude 先寫腳本再執行時原本會誤判 ❌）；③firecrawl 從 forbid 改成 warn（規則允許它當退路，清單看不出順序，只標 ⚠️）；④update 對使用者改過的 dispatch-config.json 會補上新版新增的頂層鍵（值不動），verify 對它改顯示 ✅「使用者自己的設定值」；⑤selftest.json 進安裝 payload、報告改存 state/selftest-reports，沒有 repo 的機器也能跑。
 - 來源：使用者「好，這些優化都可以做」。
 
 ## 0.9.5（2026-11-01）

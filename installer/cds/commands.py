@@ -71,8 +71,9 @@ def _sync_files(lay: Layout, repo: Path, version: str, old: dict, new: dict, for
         if cur is not None and rec is not None and cur != rec and not force:
             new["files"][rel] = rec  # 保留使用者改動；紀錄維持舊雜湊，verify 標「使用者已修改」
             np = p.with_name(p.name + ".new")
-            if rel in payload.USER_EDITABLE:  # 本來就給使用者改的設定檔（門檻、巡檢由視窗管理）：安靜保留，不生 .new
-                log.append(f"保留使用者設定 {rel}")
+            if rel in payload.USER_EDITABLE:  # 本來就給使用者改的設定檔（門檻、巡檢由視窗管理）：保留，不生 .new；新版多出的頂層鍵補進去
+                added = _merge_new_keys(p, data)
+                log.append(f"保留使用者設定 {rel}" + (f"（補上新版新增的 {', '.join(added)}）" if added else ""))
                 continue
             atomic_write_bytes(np, data)
             extra.append(np.relative_to(home).as_posix())
@@ -100,6 +101,23 @@ def _sync_files(lay: Layout, repo: Path, version: str, old: dict, new: dict, for
         elif p.exists():
             log.append(f"{WARN} 舊版檔案 {rel} 有使用者改動，保留")
     new["skills"] = [s for s in payload.skill_names(repo) if s not in conflicts]
+
+
+def _merge_new_keys(user_file: Path, new_bytes: bytes) -> list[str]:
+    """使用者改過的 JSON 設定檔：新版多出的頂層鍵（例如 0.8 加的 taskCheck）補進去，已有的鍵一律不動。兩邊任一不是 JSON 物件就不做。"""
+    import json
+    try:
+        cur, new = read_json(user_file), json.loads(new_bytes.decode("utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+    if not isinstance(cur, dict) or not isinstance(new, dict):
+        return []
+    added = [k for k in new if k not in cur]
+    if added:
+        for k in added:
+            cur[k] = new[k]
+        write_json(user_file, cur)
+    return added
 
 
 def usage_guard_enabled(lay: Layout) -> bool:
@@ -413,7 +431,7 @@ def verify(lay: Layout, repo: Path | None = REPO, check_claude: bool = True, imp
     n = len(m["files"])
     rows.append((OK if not bad else BAD, f"檔案雜湊 {n - len([b for b in bad if not b.startswith('與 repo')])}/{n} 一致"
                  + ("" if not bad else "：" + "；".join(bad[:8]))))
-    rows.extend((WARN, f"{e} 已被使用者修改（允許，update 會保留）") for e in edited)
+    rows.extend((OK, f"{e} 使用者自己的設定值（update 會保留、新版新增的鍵會補上）") if e in payload.USER_EDITABLE else (WARN, f"{e} 已被使用者修改（允許，update 會保留）") for e in edited)
     s = read_json(lay.settings) if lay.settings.exists() else {}
     script = (lay.payload / "hooks" / "usage_guard.py").as_posix()
     guard_on = usage_guard_enabled(lay)
