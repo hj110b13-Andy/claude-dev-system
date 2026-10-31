@@ -92,7 +92,7 @@ class App:
         canvas = tk.Canvas(body, highlightthickness=0)
         vsb = ttk.Scrollbar(body, orient="vertical", command=canvas.yview)
         self.inner = ttk.Frame(canvas, padding=8)
-        self.inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        self.inner.bind("<Configure>", lambda e: (canvas.configure(scrollregion=canvas.bbox("all")), self._fit_notes()))
         self.win = canvas.create_window((0, 0), window=self.inner, anchor="nw")
         # 內容區寬度跟著視窗，長文字才會在視窗內換行而不是被截掉；版面變動後重算每個說明文字的換行寬
         self.notes: list = []
@@ -155,12 +155,14 @@ class App:
     def _fit_notes_now(self):
         self._fit_job = None
         try:
-            right = self.canvas.winfo_rootx() + self.canvas.winfo_width() - 28
+            self.root.update_idletasks()  # 先讓版面定位，rootx 才準
+            right = self.inner.winfo_rootx() + self.inner.winfo_width() - 24
             for lb in self.notes:
                 if not lb.winfo_exists():
                     continue
                 avail = right - lb.winfo_rootx()
-                lb.configure(wraplength=max(140, avail))
+                if avail > 0 and abs(int(lb.cget("wraplength")) - avail) > 8:
+                    lb.configure(wraplength=max(140, avail))
         except tk.TclError:
             pass
 
@@ -215,24 +217,23 @@ class App:
                 st += "（純免費服務，沒有金鑰機制）"
             elif sv["registered"]:
                 st += "（免金鑰版；填金鑰後會多註冊金鑰版）"
-            ttk.Checkbutton(webf, text=f"{n}（{', '.join(sv['tools'][:3])}）", variable=var, command=self.update_diff).grid(row=row, column=0, sticky="w")
-            self._note(webf, st, wrap=300, row=row, column=1, sticky="w", padx=8)
+            ttk.Checkbutton(webf, text=n, variable=var, command=self.update_diff).grid(row=row, column=0, sticky="w")
+            self._note(webf, f"{st}　工具：{', '.join(sv['tools'])}", wrap=600, row=row, column=1, columnspan=2, sticky="w", padx=8)
             row += 1
         for k, dv in s["web"]["env_defaults"].items():
             var = tk.StringVar(value=f.env.get(k, dv))
             self.env_vars[k] = var
             var.trace_add("write", lambda *a: self.update_diff())
-            ttk.Label(webf, text=k).grid(row=row, column=0, sticky="w")
+            ttk.Label(webf, text=k).grid(row=row, column=0, sticky="w", pady=(6, 0))
             ent = ttk.Entry(webf, textvariable=var, width=12)
-            ent.grid(row=row, column=1, sticky="w", padx=8)
+            ent.grid(row=row, column=1, sticky="w", padx=8, pady=(6, 0))
             if k in gm.ENV_READONLY:  # 編碼設定固定值，只顯示不可改（使用者回饋：不知道該填什麼）
                 ent.state(["readonly"])
-                self._note(webf, f"{gm.ENV_DESC.get(k, '')}；固定值，不可改；目前 settings.json：{s['web']['env'].get(k) or '未寫入'}",
-                           wrap=760, row=row, column=2, sticky="w")
+                desc = f"{gm.ENV_DESC.get(k, '')}；固定值，不可改；目前 settings.json：{s['web']['env'].get(k) or '未寫入'}"
             else:
-                self._note(webf, f"{gm.ENV_DESC.get(k, '')}；預設 {dv}；目前 settings.json：{s['web']['env'].get(k) or '未寫入'}",
-                           wrap=760, row=row, column=2, sticky="w")
-            row += 1
+                desc = f"{gm.ENV_DESC.get(k, '')}；預設 {dv}；目前 settings.json：{s['web']['env'].get(k) or '未寫入'}"
+            self._note(webf, desc, wrap=900, row=row + 1, column=0, columnspan=3, sticky="w", padx=(24, 0))
+            row += 2
         webf.columnconfigure(2, weight=1)
 
         # 影片
