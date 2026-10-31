@@ -146,7 +146,7 @@ def env_status(repo: Path = REPO, which=shutil.which, importer=video.default_imp
     ok, msg = claude_status(repo)
     out["claude"] = EnvItem(ok, msg, None if ok else "claude")
     ff = ffmpeg()
-    out["ffmpeg"] = EnvItem(bool(ff), ff or "未裝（影片截圖與語音辨識需要）", None if ff else "ffmpeg")
+    out["ffmpeg"] = EnvItem(bool(ff), (f"ffmpeg 可用（{Path(ff).parent.name}／{Path(ff).parent.parent.name}）" if ff else "未裝（影片截圖與語音辨識需要）"), None if ff else "ffmpeg")  # 全路徑太長會撐出視窗，只顯示最後兩層
     out["pwsh"] = _pwsh_status(which, run)
     out["winget"] = EnvItem(bool(which("winget")), "winget 可用" if which("winget") else "無 winget（安裝按鈕不可用，請手動裝）")
     out["git"] = EnvItem(True if which("git") else None, "git 可用" if which("git") else "無 git（exe 模式不需要）")
@@ -677,9 +677,9 @@ def install_action(action: str, python: str, gpu: bool = False, run=subprocess.r
     return r.returncode, out[-1500:]
 
 
-def chrome_live_test(run=subprocess.run, timeout: int = 150) -> tuple[bool, str]:
+def chrome_live_test(run=subprocess.run, timeout: int = 150, which=shutil.which) -> tuple[bool, str]:
     """第三層：背景跑一次 claude -p --chrome 叫它開 example.com 讀標題。會用掉約一場對話開場的用量，只手動觸發。"""
-    exe = shutil.which("claude")
+    exe = which("claude")
     if not exe:
         return False, "找不到 claude 指令"
     # 不能用 about:blank：擴充功能會拒絕「browser-internal or unparseable URLs」（2026-11-01 使用者按視窗按鈕實測失敗），改開 example.com

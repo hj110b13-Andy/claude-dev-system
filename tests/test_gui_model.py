@@ -331,9 +331,9 @@ class KeyTests(unittest.TestCase):
         class R:
             def __init__(self, out):
                 self.stdout, self.stderr = out.encode(), b""
-        ok, msg = gm.chrome_live_test(run=lambda *a, **k: R(json.dumps({"result": "CHROME_OK", "total_cost_usd": 0.5})))
-        self.assertTrue(ok and "0.50" in msg)
-        ok, msg = gm.chrome_live_test(run=lambda *a, **k: R(json.dumps({"result": "CHROME_FAIL: 未連線"})))
+        ok, msg = gm.chrome_live_test(run=lambda *a, **k: R(json.dumps({"result": "CHROME_OK", "total_cost_usd": 0.5})), which=lambda n: "claude")
+        self.assertTrue(ok and "0.50" in msg, msg)
+        ok, msg = gm.chrome_live_test(run=lambda *a, **k: R(json.dumps({"result": "CHROME_FAIL: 未連線"})), which=lambda n: "claude")
         self.assertFalse(ok)
         self.assertIn("未連線", msg)
 
