@@ -24,6 +24,10 @@ from cds import commands, gui_model as gm, selftest, web  # noqa: E402
 from cds.paths import REPO, Layout, claude_home  # noqa: E402
 
 MARK = {True: "✅", False: "❌", None: "⚠️"}
+
+
+def base_font_name() -> str:
+    return "Microsoft JhengHei UI" if sys.platform == "win32" else ""
 PY = Path(sys.executable).as_posix()
 
 
@@ -115,8 +119,14 @@ class App:
 
         bottom = ttk.Frame(r, padding=8)
         bottom.pack(fill="x")
+        # 「將變更」區：淡黃底＋邊框和上面的設定區分開；標題一行，每項變更各一行（使用者回饋：擠在一行太亂）
+        dbox = tk.Frame(bottom, bg="#fff6d6", highlightbackground="#e0b400", highlightthickness=2, padx=8, pady=6)
+        dbox.pack(fill="x", pady=(0, 4))
         self.diff_var = tk.StringVar(value="將變更：無")
-        ttk.Label(bottom, textvariable=self.diff_var, wraplength=940, justify="left").pack(fill="x")
+        tk.Label(dbox, textvariable=self.diff_var, bg="#fff6d6", fg="#7a5200", font=(base_font_name(), 11, "bold"), anchor="w", justify="left").pack(fill="x")
+        self.diff_text = tk.Text(dbox, height=1, wrap="word", bg="#fff6d6", fg="#333", relief="flat", font=(base_font_name(), 11), state="disabled", cursor="arrow")
+        self.diff_text.pack(fill="x")
+        self.diff_text.bind("<MouseWheel>", lambda e: (self.diff_text.yview_scroll(-int(e.delta / 120), "units"), "break")[1])
         btns = ttk.Frame(bottom)
         btns.pack(fill="x", pady=4)
         self.apply_btn = ttk.Button(btns, text="套用", command=self.do_apply)
@@ -128,7 +138,7 @@ class App:
         ttk.Button(btns, text="匯入設定", command=self.do_import).pack(side="left", padx=4)
         ttk.Button(btns, text="備份／還原", command=self.do_backups).pack(side="left", padx=4)
         ttk.Button(btns, text="解除安裝", command=self.do_uninstall).pack(side="right")
-        self.log = tk.Text(bottom, height=9, wrap="word", state="disabled", font=("Consolas", 10))
+        self.log = tk.Text(bottom, height=7, wrap="word", state="disabled", font=("Consolas", 10))
         self.log.pack(fill="x")
         self.log.bind("<MouseWheel>", lambda e: (self.log.yview_scroll(-int(e.delta / 120), "units"), "break")[1])
 
@@ -179,7 +189,8 @@ class App:
         self.title_var.set(f"repo v{s['repo_version']}　已安裝：{('v' + s['version']) if s['installed'] else '尚未安裝'}　設定目錄：{self.lay.home}")
 
         # 環境
-        env = self._section("環境（每次開啟實際偵測）")
+        ev = list(s["env"].values())
+        env = self._section(f"環境（每次開啟實際偵測）　共 {len(ev)} 項：✅ {sum(1 for x in ev if x.ok is True)}　⚠️ {sum(1 for x in ev if x.ok is None)}　❌ {sum(1 for x in ev if x.ok is False)}")
         for i, (k, it) in enumerate(s["env"].items()):
             lb = ttk.Label(env, text=f"{MARK[it.ok]} {it.detail}", wraplength=1000, justify="left")
             lb.grid(row=i, column=0, sticky="w")
@@ -192,7 +203,7 @@ class App:
         env.columnconfigure(0, weight=1)
 
         # 核心
-        core = self._section("核心（規則、skill）——安裝後永遠啟用")
+        core = self._section("核心（規則、skill）——安裝後永遠啟用　共 3 項設定：用量守門、門檻、背景任務巡檢")
         ttk.Label(core, text=f"{MARK[s['installed']]} {'已安裝' if s['installed'] else '尚未安裝（按套用會安裝）'}").pack(anchor="w")
         self.notes.append(ttk.Label(core, text=gm.TOOL_DESC["core"], foreground="#555", wraplength=900, justify="left")); self.notes[-1].pack(anchor="w")
         self.guard_var = tk.BooleanVar(value=f.usage_guard)
@@ -222,7 +233,8 @@ class App:
         ttk.Button(uf, text="重新讀取用量", command=self.do_usage).pack(side="left", padx=8)
 
         # 聯網
-        webf = self._section("聯網來源（免金鑰搜尋／文件 MCP ＋ WebSearch 上限）")
+        srv = s["web"]["servers"]
+        webf = self._section(f"聯網來源（免金鑰搜尋／文件 MCP ＋ WebSearch 上限）　共 {len(srv)} 個 MCP：目前開啟 {sum(1 for x in srv.values() if x['wanted'])}、已註冊 {sum(1 for x in srv.values() if x['registered'])}；環境變數 {len(s['web']['env_defaults'])} 個")
         self.web_var = tk.BooleanVar(value=f.web_enabled)
         ttk.Checkbutton(webf, text="啟用聯網來源", variable=self.web_var, command=self.update_diff).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
         row = 1
@@ -261,7 +273,8 @@ class App:
         webf.columnconfigure(1, weight=1)
 
         # 影片
-        vf = self._section("影片來源（YouTube／網路影片／本機 mp4）")
+        pk0 = s["video"]["packages"]
+        vf = self._section(f"影片來源（YouTube／網路影片／本機 mp4）　套件 {sum(1 for v in pk0.values() if v is not None)}/{len(pk0)} 已裝")
         self.notes.append(ttk.Label(vf, text=gm.TOOL_DESC["video"], foreground="#555", wraplength=900, justify="left")); self.notes[-1].grid(row=2, column=0, columnspan=3, sticky="w", pady=(4, 0))
         self.video_var = tk.BooleanVar(value=f.video_enabled)
         ttk.Checkbutton(vf, text="啟用影片來源（pip 裝 yt-dlp、youtube-transcript-api）", variable=self.video_var, command=self.update_diff).grid(row=0, column=0, sticky="w")
@@ -274,7 +287,7 @@ class App:
         ttk.Button(vf, text="瀏覽…", command=self.pick_dir).grid(row=1, column=2, sticky="w")
 
         # 金鑰
-        kf = self._section("金鑰（存本機 local.json，不進 repo；框內是目前的值，改了才會更新；搜尋類預設「免費優先」）")
+        kf = self._section(f"金鑰（存本機 local.json，不進 repo；框內是目前的值，改了才會更新；搜尋類預設「免費優先」）　共 {len(s['keys'])} 把：已設定 {sum(1 for k in s['keys'].values() if k['present'])}、未設定 {sum(1 for k in s['keys'].values() if not k['present'])}")
         hdr = ("", 9, "bold")
         ttk.Label(kf, text="名稱", font=hdr).grid(row=0, column=0, sticky="w")
         ttk.Label(kf, text="狀態", font=hdr).grid(row=0, column=1, sticky="w")
@@ -322,7 +335,8 @@ class App:
         ttk.Label(kf, text="「只能用金鑰」＝此服務沒有免金鑰版；「免費優先」＝免金鑰版與金鑰版並存、撞限流才用金鑰（沒填金鑰時不可選）；「註冊網頁」開官方申請頁，金鑰免費", foreground="#555").grid(row=2 * len(s["keys"]) + 1, column=0, columnspan=8, sticky="w", pady=(6, 0))
 
         # Chrome
-        cf = self._section("Claude in Chrome（開網頁看、操作需登入網站、教操作前核對畫面）")
+        c0 = s["chrome"]
+        cf = self._section(f"Claude in Chrome（開網頁看、操作需登入網站、教操作前核對畫面）　共 3 項檢查：✅ {sum(1 for v in (c0['extension'], c0['native_host']) if v is True)} 已通過、1 項要手動按")
         c = s["chrome"]
         ttk.Label(cf, text=f"① 擴充功能已安裝：{MARK[c['extension']]}　② 已和 Claude Code 登記（native host）：{MARK[c['native_host']]}　"
                            f"③ 實際連線：按右邊按鈕測（約一場對話開場的用量，不自動跑）", wraplength=900, justify="left").grid(row=0, column=0, sticky="w")
@@ -395,8 +409,16 @@ class App:
             ch = gm.diff(self.state, self._collect())
         except Exception as e:  # noqa: BLE001
             self.diff_var.set(f"將變更：（表單有誤：{e}）")
+            self.diff_text.configure(state="normal"); self.diff_text.delete("1.0", "end"); self.diff_text.configure(state="disabled", height=1)
             return
-        self.diff_var.set("將變更：無（按套用不會動任何東西）" if not ch else f"將變更 {len(ch)} 項：" + "；".join(c.text for c in ch))
+        self._set_diff(ch)
+
+    def _set_diff(self, ch):
+        self.diff_var.set("將變更：無（按套用不會動任何東西）" if not ch else f"將變更 共 {len(ch)} 項：")
+        self.diff_text.configure(state="normal")
+        self.diff_text.delete("1.0", "end")
+        self.diff_text.insert("end", chr(10).join(f"{i}. {c.text}" for i, c in enumerate(ch, 1)))
+        self.diff_text.configure(state="disabled", height=max(1, min(len(ch), 6)))  # 最多 6 行，再多就在框內捲（滾輪）
 
     def set_preset(self, on: bool):
         f = gm.preset(self._collect(), self.state, on)
