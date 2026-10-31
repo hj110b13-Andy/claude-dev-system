@@ -5,7 +5,7 @@
 ## 0.9.4（2026-11-01）
 
 - 補測三題（全新無頭 session）：⑦東京空品——OpenAQ v3（資料提供者標環境省そらまめくん）✅；⑨用瀏覽器開 example.com——Claude in Chrome 自己載入、開頁、讀文字、截圖 ✅；⑧影片 25 秒連續動作——**沒用 Gemini**，改每秒截 26 張逐張看、動作只能標推測。規則修正（可判定）：問「連續動作／鏡頭移動／進出哪裡／過程」且有 gemini 金鑰 → 直接 `ask --clip`，截圖只做佐證。
-- 另修匯率題的偏差：第 ④ 題跳過 open.er-api 直接 `firecrawl_scrape` 台銀頁。規則加「即時數值不得直接跳 firecrawl 抓頁；匯率先 open.er-api，指定台銀牌告才抓頁且照三步順序」。來源：使用者「這三個都在測」「firecrawl 不是也是免費版沒結果才切嗎」。
+- 另修匯率題的偏差：第 ④ 題跳過 open.er-api 直接 `firecrawl_scrape` 台銀頁。規則加「即時數值不得直接跳 firecrawl 抓頁；匯率先 open.er-api，指定台銀牌告才抓頁且照三步順序」。規則修正後重測：影片動作題改為先 `ask --clip`（Gemini）再以 `frames --at` 13 張佐證，回答逐段標〔Gemini〕／〔截圖〕；匯率題先 open.er-api（JPY 4.830028，附資料時間）→ 台銀 CSV 被擋 → Jina 抓台銀頁，完全照 API→WebFetch→Jina 順序、未用 firecrawl。來源：使用者「這三個都在測」「firecrawl 不是也是免費版沒結果才切嗎」。
 
 ## 0.9.3（2026-11-01）
 
