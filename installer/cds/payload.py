@@ -16,17 +16,26 @@ def _files_under(d: Path):
             yield p
 
 
+def _text(p: Path) -> bytes:
+    """payload 全是文字檔：換行一律正規化成 LF。否則同一版在不同 checkout（Windows autocrlf、CI runner、exe 內建快照）位元組不同，
+    verify 會報「與 repo 不一致」（2026-11-01 使用者用 CI 打的 exe 按 verify，8 個檔只差 CRLF）。"""
+    return p.read_bytes().replace(CRLF_B, LF_B)
+
+
+CRLF_B, LF_B = bytes([13, 10]), bytes([10])
+
+
 def entries(repo: Path, version: str) -> dict[str, bytes]:
     out: dict[str, bytes] = {}
     for sub in ("rules", "tools"):
         for p in _files_under(repo / sub):
-            out[f"{PAYLOAD_ROOT}/{sub}/{p.relative_to(repo / sub).as_posix()}"] = p.read_bytes()
-    out[f"{PAYLOAD_ROOT}/hooks/usage_guard.py"] = (repo / "hooks" / "usage_guard.py").read_bytes()
+            out[f"{PAYLOAD_ROOT}/{sub}/{p.relative_to(repo / sub).as_posix()}"] = _text(p)
+    out[f"{PAYLOAD_ROOT}/hooks/usage_guard.py"] = _text(repo / "hooks" / "usage_guard.py")
     for name in ("VERSION", "compat.json", "dispatch-config.json", "web-sources.json", "video.json", "selftest.json"):
-        out[f"{PAYLOAD_ROOT}/config/{name}"] = (repo / "config" / name).read_bytes()
+        out[f"{PAYLOAD_ROOT}/config/{name}"] = _text(repo / "config" / name)
     for sk in skill_names(repo):
         for p in _files_under(repo / "skills" / sk):
-            out[f"skills/{sk}/{p.relative_to(repo / 'skills' / sk).as_posix()}"] = p.read_bytes()
+            out[f"skills/{sk}/{p.relative_to(repo / 'skills' / sk).as_posix()}"] = _text(p)
         out[f"skills/{sk}/{SKILL_MARKER_FILE}"] = f"installed-by claude-dev-system v{version}\n".encode("utf-8")
     return out
 

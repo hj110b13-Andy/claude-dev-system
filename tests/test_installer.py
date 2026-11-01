@@ -126,6 +126,22 @@ class FullCycle(Base):
         self.assertEqual(self.settings(), want)
 
 
+class PayloadLineEndings(Base):
+    def test_entries_are_lf_only_and_crlf_checkout_installs_identically(self):
+        from cds import payload as pl
+        ents = pl.entries(REPO, "9.9.9")
+        self.assertTrue(all(bytes([13, 10]) not in b for b in ents.values()), "payload 不可含 CRLF")
+        # 模擬 CRLF 的 checkout（CI runner／autocrlf）：內容逐位元組相同
+        crlf = Path(tempfile.mkdtemp(prefix="cds-crlf-"))
+        self.addCleanup(shutil.rmtree, crlf, ignore_errors=True)
+        for sub in ("rules", "tools", "hooks", "config", "skills"):
+            shutil.copytree(REPO / sub, crlf / sub)
+        for p in crlf.rglob("*"):
+            if p.is_file() and p.suffix in (".md", ".py", ".json", "") and "__pycache__" not in p.parts:
+                p.write_bytes(p.read_bytes().replace(bytes([13, 10]), bytes([10])).replace(bytes([10]), bytes([13, 10])))
+        self.assertEqual(pl.entries(crlf, "9.9.9"), ents, "CRLF checkout 與 LF checkout 的 payload 要完全相同")
+
+
 class EnvStaleKeyRemoved(Base):
     def test_previously_created_env_key_not_in_new_desired_is_removed(self):
         from cds import web as w

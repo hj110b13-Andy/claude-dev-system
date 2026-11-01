@@ -526,7 +526,7 @@ class App:
     def do_verify(self):
         def job():
             self._log("=== verify ===")
-            code, lines = commands.verify(self.lay, repo=self.repo)
+            code, lines = commands.verify(self.lay, repo=self.repo, importer=gm.system_importer(PY) if FROZEN else gm.video.default_importer)  # exe 內建的 Python 沒裝 yt-dlp，要問系統 Python
             for ln in lines:
                 self._log(web.mask(ln, gm._local(self.lay)))
         self._run_bg(job, refresh_after=False)
