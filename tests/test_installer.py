@@ -126,6 +126,22 @@ class FullCycle(Base):
         self.assertEqual(self.settings(), want)
 
 
+class KeyModeFree(Base):
+    def test_free_mode_registers_keyless_only(self):
+        from cds import web as w
+        src = {"mcpServers": {"exa": {"url": "https://mcp.exa.ai/mcp", "default": True, "keyHeader": "x-api-key"}}}
+        both = w.desired_servers(src, {"keys": {"exa": "K"}, "enable": [], "disable": [], "env": {}})
+        self.assertEqual(set(both), {"exa", "exa-key"})
+        free = w.desired_servers(src, {"keys": {"exa": "K"}, "enable": [], "disable": [], "env": {}, "keyMode": {"exa": "free"}})
+        self.assertEqual(set(free), {"exa"})
+        self.assertNotIn("x-api-key", free["exa"]["headers"], "free 模式不帶金鑰")
+        local = {"keys": {}}
+        w.set_key_mode_arg(local, "exa=free")
+        self.assertEqual(local["keyMode"]["exa"], "free")
+        with self.assertRaises(ValueError):
+            w.set_key_mode_arg(local, "exa=bogus")
+
+
 class Preservation(Base):
     def test_existing_usage_guard_hook_not_duplicated(self):
         s = copy.deepcopy(USER_SETTINGS)

@@ -446,7 +446,7 @@ def diff(state: dict, form: Form) -> list[Change]:
             ch.append(Change("keys", f"{'更新' if had else '新增'}金鑰 {state['keys'][n]['label']}"))
     for n, m in form.key_modes.items():
         if state["keys"].get(n, {}).get("mode") and m != state["keys"][n]["mode"]:
-            ch.append(Change("keys", f"{state['keys'][n]['label']} 金鑰模式 → {'一律用金鑰' if m == 'always' else '免費優先'}"))
+            ch.append(Change("keys", f"{state['keys'][n]['label']} 金鑰模式 → {dict(fallback='免費優先', always='一律用金鑰', free='只用免金鑰').get(m, m)}"))
     for n, v in form.key_notes.items():
         if v is not None and n in state["keys"] and str(v).strip() != state["keys"][n].get("account", ""):
             ch.append(Change("keys", f"{state['keys'][n]['label']} 帳號備註 → {str(v).strip() or '（清除）'}"))

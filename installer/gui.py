@@ -24,6 +24,8 @@ from cds import appdir, commands, gui_model as gm, selftest, web  # noqa: E402
 from cds.paths import FROZEN, REPO, Layout, claude_home, repo_version  # noqa: E402
 
 MARK = {True: "✅", False: "❌", None: "⚠️"}
+MODE_LABEL = {"fallback": "免費優先", "always": "一律用金鑰", "free": "只用免金鑰"}  # local.json keyMode ↔ 視窗文字
+MODE_VALUE = {v: k for k, v in MODE_LABEL.items()}
 
 
 def base_font_name() -> str:
@@ -320,9 +322,9 @@ class App:
             ttk.Button(bf, text="測試", width=5, command=lambda n=n: self.do_test_key(n)).pack(side="left")
             ttk.Button(bf, text="清除", width=5, command=lambda n=n: self._key_clear(n)).pack(side="left", padx=2)
             if k["mode"]:
-                mv = tk.StringVar(value="免費優先" if (f.key_modes.get(n, k["mode"]) == "fallback" or not k["present"]) else "一律用金鑰")
+                mv = tk.StringVar(value=MODE_LABEL.get(f.key_modes.get(n, k["mode"]), "免費優先") if k["present"] else "免費優先")
                 self.mode_vars[n] = mv
-                cb = self._no_wheel_change(ttk.Combobox(kf, textvariable=mv, values=["免費優先", "一律用金鑰"], width=10, state="readonly"))
+                cb = self._no_wheel_change(ttk.Combobox(kf, textvariable=mv, values=list(MODE_LABEL.values()), width=11, state="readonly"))
                 cb.grid(row=i, column=5, sticky="w")
                 cb.bind("<<ComboboxSelected>>", lambda e: self.update_diff())
                 self.mode_boxes[n] = cb
@@ -338,7 +340,7 @@ class App:
             ttk.Entry(kf, textvariable=nv, width=22).grid(row=i, column=7, sticky="w", padx=6)
             self._note(kf, k["note"], wrap=900, row=i + 1, column=0, columnspan=8, sticky="w", padx=(24, 0), pady=(0, 6))
         kf.columnconfigure(7, weight=1)
-        ttk.Label(kf, text="「只能用金鑰」＝此服務沒有免金鑰版；「免費優先」＝免金鑰版與金鑰版並存、撞限流才用金鑰（沒填金鑰時不可選）；「註冊網頁」開官方申請頁，金鑰免費；「測試」對 parallel／exa／tavily 會真的用掉 1 次搜尋額度", foreground="#555").grid(row=2 * len(s["keys"]) + 1, column=0, columnspan=8, sticky="w", pady=(6, 0))
+        ttk.Label(kf, text="「只能用金鑰」＝此服務沒有免金鑰版；「免費優先」＝免金鑰版與金鑰版並存、撞限流才用金鑰（沒填金鑰時不可選）；「只用免金鑰」＝金鑰留著不註冊；每多註冊一個金鑰版，每次工具呼叫約多讀 1,900 token 的伺服器說明（五個約 9,400，2026-11-01 實測）；「註冊網頁」開官方申請頁，金鑰免費；「測試」對 parallel／exa／tavily 會真的用掉 1 次搜尋額度", foreground="#555").grid(row=2 * len(s["keys"]) + 1, column=0, columnspan=8, sticky="w", pady=(6, 0))
 
         # Chrome
         c0 = s["chrome"]
@@ -373,7 +375,7 @@ class App:
                 f.keys[n] = v.get().strip()
         for n, mv in self.mode_vars.items():
             has_key = bool(self.key_vars[n].get().strip())
-            f.key_modes[n] = "always" if (mv.get() == "一律用金鑰" and has_key) else "fallback"
+            f.key_modes[n] = MODE_VALUE.get(mv.get(), "fallback") if has_key else "fallback"
         for n, nv in self.note_vars.items():
             if nv.get().strip() != self.note_orig.get(n, ""):
                 f.key_notes[n] = nv.get().strip()
@@ -671,7 +673,7 @@ class App:
         self.five_var.set(str(f.thresholds.get("fiveHour", self.five_var.get())))
         self.seven_var.set(str(f.thresholds.get("sevenDay", self.seven_var.get())))
         for n, mv in self.mode_vars.items():
-            mv.set("一律用金鑰" if f.key_modes.get(n) == "always" else "免費優先")
+            mv.set(MODE_LABEL.get(f.key_modes.get(n), "免費優先"))
         if f.chrome_default_enabled is not None and self.state["chrome"]["default_enabled"] is not None:
             self.chrome_var.set(f.chrome_default_enabled)
         n_keys = 0

@@ -70,7 +70,7 @@ def installed_servers(lay: Layout) -> dict:
         return {}
 
 
-KEY_MODES = ("fallback", "always")  # fallback：免金鑰版＋金鑰版（<名稱>-key）同時註冊，規則先用免金鑰；always：只註冊金鑰版
+KEY_MODES = ("fallback", "always", "free")  # fallback（預設）：免金鑰版＋金鑰版（<名稱>-key）同時註冊，規則先用免金鑰；always：只註冊金鑰版；free：只註冊免金鑰版（金鑰留著不用；少一個伺服器＝每次工具呼叫少讀一段說明，2026-11-01 實測 5 個 -key 共約 9,400 token）
 
 
 def _entry(spec: dict, key: str | None = None) -> dict:
@@ -92,7 +92,7 @@ def key_mode(local: dict, name: str) -> str:
 def desired_servers(src: dict, local: dict) -> dict[str, dict]:
     """名稱 → {url, headers}；default 與 local 的 enable／disable 決定開關。
     有金鑰時依 keyMode：fallback（預設）＝免金鑰版 `<名稱>` 與金鑰版 `<名稱>-key` 都註冊，規則先用免金鑰、撞限流才用 -key；
-    always＝只註冊金鑰版 `<名稱>`。"""
+    always＝只註冊金鑰版 `<名稱>`；free＝只註冊免金鑰版（金鑰保留在 local.json 但不用）。"""
     out: dict[str, dict] = {}
     for name, spec in (src.get("mcpServers") or {}).items():
         on = bool(spec.get("default"))
@@ -104,12 +104,13 @@ def desired_servers(src: dict, local: dict) -> dict[str, dict]:
             continue
         key = (local.get("keys") or {}).get(spec.get("keyName") or name)
         keyable = bool(spec.get("keyParam") or spec.get("keyHeader"))
-        if key and keyable and key_mode(local, name) == "always":
+        mode = key_mode(local, name)
+        if key and keyable and mode == "always":
             out[name] = _entry(spec, key)
-        elif key and keyable:
+        elif key and keyable and mode == "fallback":
             out[name] = _entry(spec)
             out[name + "-key"] = _entry(spec, key)
-        else:
+        else:  # 沒金鑰、不可帶金鑰、或 free
             out[name] = _entry(spec)
     return out
 
@@ -270,9 +271,9 @@ def set_key_arg(local: dict, kv: str) -> None:
 
 
 def set_key_mode_arg(local: dict, kv: str) -> None:
-    m = re.fullmatch(r"([A-Za-z0-9_-]+)=(fallback|always)", kv.strip())
+    m = re.fullmatch(r"([A-Za-z0-9_-]+)=(fallback|always|free)", kv.strip())
     if not m:
-        raise ValueError(f"--key-mode 格式應為 名稱=fallback|always：{kv}")
+        raise ValueError(f"--key-mode 格式應為 名稱=fallback|always|free：{kv}")
     local.setdefault("keyMode", {})[m.group(1)] = m.group(2)
 
 
