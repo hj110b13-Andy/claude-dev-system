@@ -213,6 +213,9 @@ def apply_env(settings: dict, env: dict[str, str], old_created: list[str]) -> tu
             continue
         s["env"][k] = v
         created.append(f"env.{k}")
+    for key in old:  # 本工具以前寫的、新版不再要的鍵：拿掉（0.10.9 撤回 CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH 時發現殘留）
+        if key.startswith("env.") and key[4:] not in env and key[4:] in s["env"]:
+            del s["env"][key[4:]]
     return s, created, skipped
 
 

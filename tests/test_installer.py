@@ -126,6 +126,16 @@ class FullCycle(Base):
         self.assertEqual(self.settings(), want)
 
 
+class EnvStaleKeyRemoved(Base):
+    def test_previously_created_env_key_not_in_new_desired_is_removed(self):
+        from cds import web as w
+        settings = {"env": {"A": "1", "B": "2", "MINE": "x"}}
+        s2, created, skipped = w.apply_env(settings, {"A": "1"}, ["env", "env.A", "env.B"])
+        self.assertNotIn("B", s2["env"], "本工具以前寫的、新版不要的鍵要拿掉")
+        self.assertEqual(s2["env"]["MINE"], "x", "使用者自己的鍵不動")
+        self.assertEqual(created, ["env", "env.A"])
+
+
 class KeyModeFree(Base):
     def test_free_mode_registers_keyless_only(self):
         from cds import web as w

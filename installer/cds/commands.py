@@ -221,6 +221,7 @@ def _sync_web(lay: Layout, old: dict, new: dict, enable: bool, runner, log: list
         before = s.get("env") if isinstance(s.get("env"), dict) else {}
         log.extend(f"settings.json 寫入 env {k[4:]}={s2['env'][k[4:]]}" for k in created
                    if k.startswith("env.") and before.get(k[4:]) != s2["env"][k[4:]])
+        log.extend(f"settings.json 移除不再需要的 env {k}" for k in before if k not in (s2.get("env") or {}))
     new["web"] = {"enabled": True, "mcpAdded": rec["mcpAdded"], "envCreatedKeys": created, "skipped": rec["skipped"]}
 
 
