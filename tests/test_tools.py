@@ -222,6 +222,9 @@ class ProjectScan(unittest.TestCase):
         (tmp / "package.json").write_text('{"scripts": {"dev": "next dev"}}', encoding="utf-8")
         (tmp / "node_modules").mkdir()
         (tmp / "node_modules" / "junk.js").write_text("x", encoding="utf-8")
+        (tmp / "frames").mkdir()
+        for i in range(30):
+            (tmp / "frames" / f"f{i}.png").write_bytes(b"png")
         tool = str(REPO / "tools" / "project-scan.py")
         r = subprocess.run([sys.executable, tool, str(tmp), "--max-lines", "800"], capture_output=True, env=ENV)
         self.assertEqual(r.returncode, 0, r.stderr.decode("utf-8", "replace"))
@@ -230,6 +233,8 @@ class ProjectScan(unittest.TestCase):
         self.assertEqual(idx["counts"]["source"], 4, idx["counts"])
         self.assertEqual(idx["counts"]["test"], 1)
         self.assertNotIn("node_modules/junk.js", idx["files"])
+        self.assertFalse(any(r.startswith("frames/") for r in idx["files"]), "資源檔不進索引")
+        self.assertEqual(idx["counts"]["asset"], 30, "但要計數")
         self.assertEqual(len(idx["cycles"]), 1)
         self.assertIn("pkg/big.py", md)
         kinds = {p["kind"] for p in idx["problems"]}

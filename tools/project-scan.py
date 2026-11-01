@@ -188,9 +188,14 @@ def entry_points(root: Path) -> list[str]:
 def scan(root: Path, max_lines: int, ignore: set | None = None) -> dict:
     files = {}
     unreadable = []
+    assets = 0  # 資源檔（圖片、影片、PDF、字型）只計數：不雜湊、不進索引，否則一個有幾千張截圖的資料夾索引會變 700 KB、每次 --check 都重算
     for p in walk(root):
         rel = p.relative_to(root).as_posix()
         if ignore and rel in ignore:  # 自己產出的盤點與索引不計入，否則剛掃完 --check 就說「新增 2 個檔」
+            continue
+        kind = classify(rel)
+        if kind == "asset":
+            assets += 1
             continue
         try:
             size = p.stat().st_size
@@ -198,7 +203,6 @@ def scan(root: Path, max_lines: int, ignore: set | None = None) -> dict:
         except OSError:
             unreadable.append(rel)
             continue
-        kind = classify(rel)
         lines = count_lines(p) if kind in ("source", "test", "script", "config", "doc") and size < 5_000_000 else None
         files[rel] = {"sha256": h, "size": size, "lines": lines, "kind": kind, "ext": p.suffix.lower()}
     src = [r for r, f in files.items() if f["kind"] in ("source", "test", "script")]
@@ -222,7 +226,7 @@ def scan(root: Path, max_lines: int, ignore: set | None = None) -> dict:
     if n_src >= 10 and n_test == 0:
         problems.append({"kind": "no-tests", "detail": f"{n_src} 個原始碼檔、0 個測試檔"})
     return {"version": 1, "root": str(root), "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%S"), "maxLines": max_lines,
-            "counts": {k: sum(1 for f in files.values() if f["kind"] == k) for k in ("source", "test", "script", "config", "doc", "asset", "other")},
+            "counts": {**{k: sum(1 for f in files.values() if f["kind"] == k) for k in ("source", "test", "script", "config", "doc", "other")}, "asset": assets},
             "languages": _lang_counts(files), "entryPoints": entry_points(root), "files": files, "graphEdges": sum(len(v) for v in g.values()),
             "cycles": cycles, "mostDepended": hot, "biggest": [(r, n) for n, r in big[:10]], "problems": problems, "unreadable": unreadable,
             "refactorDecision": None}
@@ -259,7 +263,9 @@ def check(root: Path, json_path: Path, ignore: set | None = None) -> int:
     except Exception:  # noqa: BLE001
         print(f"沒有索引 {json_path}，先跑一次完整盤點")
         return 2
-    now = {p.relative_to(root).as_posix(): p for p in walk(root) if not (ignore and p.relative_to(root).as_posix() in ignore)}
+    now = {p.relative_to(root).as_posix(): p for p in walk(root)
+           if not (ignore and p.relative_to(root).as_posix() in ignore) and classify(p.relative_to(root).as_posix()) != "asset"}
+    old["files"] = {r: f for r, f in old["files"].items() if f.get("kind") != "asset"}  # 舊版索引可能還存著資源檔，忽略
     added = sorted(set(now) - set(old["files"]))
     removed = sorted(set(old["files"]) - set(now))
     changed = sorted(r for r in set(now) & set(old["files"]) if sha256(now[r]) != old["files"][r]["sha256"])
