@@ -2,6 +2,10 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.10.13（2026-11-01，需換新 exe）
+
+- 自我測試跑完自動清暫存：每題的工作目錄本來就是 TemporaryDirectory；現在連 Claude Code 替那個目錄建的 `%LOCALAPPDATA%/Temp/claude/<slug>`（Claude 寫的腳本、截圖都在那，之前要我手動刪）也一起刪，只刪 slug 含 `cds-selftest-` 的；報告 `state/selftest-reports/` 只留最近 10 份；紀錄最後印一行說清了什麼。影片快取維持 video.py 的 7／30 天自動清。來源：使用者「跑自我測試按鈕產生的文件與檔案跑完後也會自動刪除嗎」。
+
 ## 0.10.12（2026-11-01，需換新 exe）
 
 - 修 exe 按「檢查（verify）」的兩個假失敗（使用者貼的輸出）：①「檔案雜湊與 repo 不一致」8 個檔——本機安裝的檔案是 CRLF、CI 打包進 exe 的快照是 LF，內容相同只差換行；payload 現在一律正規化成 LF 再比對與寫入（有測試：CRLF checkout 與 LF checkout 的 payload 逐位元組相同），下次 update 會把那 8 個檔重寫成 LF。②「影片套件 yt-dlp／youtube-transcript-api 未安裝」——exe 模式的 verify 用 exe 內建的 Python 檢查套件；改問系統 Python（環境區早已這樣做，verify 路徑漏了）。

@@ -111,6 +111,29 @@ class SelfTest(unittest.TestCase):
         self.assertEqual(len(seen), 3, "--smoke 只跑三題")
         self.assertTrue(any("token 合計" in x for x in logs))
 
+    def test_cleanup_helpers(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as td:
+            rep = Path(td)
+            for i in range(13):
+                (rep / f"selftest-2026010{i % 10}-00000{i}.json").write_text("[]", encoding="utf-8")
+            self.assertEqual(st.prune_reports(rep), 3)
+            self.assertEqual(len(list(rep.glob("selftest-*.json"))), 10)
+            old = os.environ.get("LOCALAPPDATA")
+            os.environ["LOCALAPPDATA"] = td
+            try:
+                cwd = r"C:" + chr(92) + "x" + chr(92) + "cds-selftest-abc"
+                junk = Path(td) / "Temp" / "claude" / "C--x-cds-selftest-abc"
+                self.assertIsNone(st.claude_temp_dir_for(cwd), "資料夾不存在就回 None")
+                junk.mkdir(parents=True)
+                self.assertEqual(st.claude_temp_dir_for(cwd), junk)
+                self.assertIsNone(st.claude_temp_dir_for(r"C:" + chr(92) + "x" + chr(92) + "other"), "不是 selftest 的 cwd 絕不清")
+            finally:
+                if old is None:
+                    os.environ.pop("LOCALAPPDATA", None)
+                else:
+                    os.environ["LOCALAPPDATA"] = old
+
     def test_run_with_fake_runner_and_report(self):
         import tempfile
         seen = []

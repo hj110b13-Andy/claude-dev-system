@@ -121,6 +121,25 @@ def usage_of(res: dict) -> dict:
     return out
 
 
+def claude_temp_dir_for(cwd: str) -> Path | None:
+    """Claude Code 替每個工作目錄在 %LOCALAPPDATA%/Temp/claude/<slug> 放 scratchpad、截圖等（slug：路徑的 : 與分隔符換成 -）。
+    題目跑完這些檔沒人要，一起清掉；路徑算不出來就不清。"""
+    base = os.environ.get("LOCALAPPDATA")
+    if not base or not cwd:
+        return None
+    slug = cwd.replace(":", "-").replace(chr(92), "-").replace("/", "-")
+    d = Path(base) / "Temp" / "claude" / slug
+    return d if d.is_dir() and "cds-selftest-" in slug else None
+
+
+def prune_reports(report_dir: Path, keep: int = 10) -> int:
+    """報告只留最近 keep 份（與備份同一原則），回刪掉幾個。"""
+    files = sorted(report_dir.glob("selftest-*.json"))
+    for old in files[:-keep]:
+        old.unlink(missing_ok=True)
+    return max(0, len(files) - keep)
+
+
 def default_runner(cmd: list[str], cwd: str, timeout: int) -> tuple[int, str, str]:
     try:
         r = subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=timeout,
@@ -187,6 +206,9 @@ def run(only: list[str] | None = None, list_only: bool = False, cases_path: Path
             cost = res.get("total_cost_usd")
             log(f"   工具呼叫 {len(calls)} 次、{time.time() - t0:.0f} 秒" + (f"、用量約 ${cost:.2f} 等值（訂閱制為估算）" if isinstance(cost, (int, float)) else "")
                 + (f"、token 合計 {usage['total']:,}（輸入 {usage['input_tokens']:,}／輸出 {usage['output_tokens']:,}／快取建 {usage['cache_creation_input_tokens']:,}／快取讀 {usage['cache_read_input_tokens']:,}）" if usage else ""))
+            junk = claude_temp_dir_for(cwd)
+            if junk:
+                shutil.rmtree(junk, ignore_errors=True)  # 這題 Claude 寫的腳本、截圖、暫存都在這
             results.append({"id": c["id"], "name": c["name"], "ok": ok, "calls": [x[:400] for x in calls], "notes": notes, "cost_usd": cost, "usage": usage,
                             "answer": mask((res.get("result") or "")[:4000]), "exit": code})
         passed = sum(1 for r in results if r["ok"])
@@ -196,5 +218,7 @@ def run(only: list[str] | None = None, list_only: bool = False, cases_path: Path
             report_dir.mkdir(parents=True, exist_ok=True)
             rp = report_dir / f"selftest-{time.strftime('%Y%m%d-%H%M%S')}.json"
             rp.write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
-            log(f"報告：{rp}")
+            pruned = prune_reports(report_dir)
+            log(f"報告：{rp}" + (f"（舊報告刪 {pruned} 份，只留 10 份）" if pruned else ""))
+            log("暫存：每題的工作目錄與 Claude Code 的暫存資料夾已刪；影片快取由 video.py 依 7／30 天規則自動清")
     return 0 if passed == len(results) else 1
