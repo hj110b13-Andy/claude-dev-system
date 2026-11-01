@@ -87,6 +87,30 @@ class SelfTest(unittest.TestCase):
         ok, notes = st.judge({"expect": [r"(?i)^Write ::.*cwa\.gov\.tw"]}, calls)
         self.assertTrue(ok, "第 300 字之後的內容也要比對得到（2026-11-01 實跑誤判 ❌ 的原因）")
 
+    def test_answer_checks_usage_and_smoke(self):
+        calls = ["mcp__mslearn__microsoft_docs_search :: q"]
+        ok, notes = st.judge({"expect": ["^mcp__mslearn__"], "answer_expect": ["來源", "https://"], "answer_warn": ["查證過程"]}, calls,
+                             "答案… 來源：https://learn.microsoft.com/x（2026-11-01 查）")
+        self.assertTrue(ok, notes)
+        self.assertTrue(any(n.startswith("⚠️") and "查證過程" in n for n in notes))
+        ok, notes = st.judge({"expect": ["^mcp__mslearn__"], "answer_expect": ["來源", "https://"]}, calls, "沒附來源的答案")
+        self.assertFalse(ok)
+        raw = json.dumps({"type": "result", "result": "x", "total_cost_usd": 0.1,
+                          "usage": {"input_tokens": 10, "output_tokens": 20, "cache_creation_input_tokens": 300, "cache_read_input_tokens": 4000}})
+        _, res = st.parse_stream(raw)
+        self.assertEqual(st.usage_of(res)["total"], 4330)
+        cfg = st.load_cases()
+        self.assertEqual(set(cfg["smoke"]), {"pwsh", "live-data", "video"})
+        seen = []
+
+        def runner(cmd, cwd, timeout):
+            seen.append(cmd[cmd.index("-p") + 1][:10])
+            return 0, stream(("WebSearch", {"query": "x"})), ""
+        logs = []
+        st.run(runner=runner, which=lambda n: "claude", log=logs.append, smoke=True)
+        self.assertEqual(len(seen), 3, "--smoke 只跑三題")
+        self.assertTrue(any("token 合計" in x for x in logs))
+
     def test_run_with_fake_runner_and_report(self):
         import tempfile
         seen = []
@@ -95,7 +119,8 @@ class SelfTest(unittest.TestCase):
             seen.append(cmd)
             prompt = cmd[cmd.index("-p") + 1]
             if "PowerShell 7" in prompt:
-                return 0, stream(("mcp__mslearn__microsoft_docs_search", {"query": "Get-Content encoding"})), ""
+                return 0, stream(("mcp__mslearn__microsoft_docs_search", {"query": "Get-Content encoding"}),
+                                 text="PowerShell 7 預設 UTF-8。來源：https://learn.microsoft.com/x（2026-11-01 查）"), ""
             return 0, stream(("WebSearch", {"query": "x"})), ""
         logs = []
         with tempfile.TemporaryDirectory() as td:

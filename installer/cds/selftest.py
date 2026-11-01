@@ -75,8 +75,9 @@ def parse_stream(raw: str) -> tuple[list[str], dict]:
     return calls, result
 
 
-def judge(case: dict, calls: list[str]) -> tuple[bool, list[str]]:
-    """expect 每條至少命中一個呼叫；forbid 每條都不得命中。回 (通過?, 說明列)。"""
+def judge(case: dict, calls: list[str], answer: str = "") -> tuple[bool, list[str]]:
+    """expect 每條至少命中一個呼叫；forbid 每條都不得命中；answer_expect 每條要在回答文字裡命中（查證型回答的硬規則：來源、網址…）；
+    answer_warn 沒命中只標 ⚠️。回 (通過?, 說明列)。"""
     notes = []
     ok = True
     if not case.get("expect"):
@@ -98,7 +99,26 @@ def judge(case: dict, calls: list[str]) -> tuple[bool, list[str]]:
     for pat in case.get("warn", []):  # 規則允許在退路時用、但不該是第一步的工具：只標 ⚠️ 不算失敗（順序無法從清單判定）
         hit = [c for c in calls if re.search(pat, c)]
         notes.append(f"{WARN} 有用到 {pat}（規則只允許當退路，請看報告確認順序）← {hit[0][:90]}" if hit else f"{OK} 未用到 {pat}")
+    for pat in case.get("answer_expect", []):
+        if re.search(pat, answer or ""):
+            notes.append(f"{OK} 回答含 {pat}")
+        else:
+            ok = False
+            notes.append(f"{BAD} 回答缺 {pat}（查證型回答的格式規則）")
+    for pat in case.get("answer_warn", []):
+        notes.append(f"{OK} 回答含 {pat}" if re.search(pat, answer or "") else f"{WARN} 回答缺 {pat}")
     return ok, notes
+
+
+def usage_of(res: dict) -> dict:
+    """result 事件的 usage：input／output／cache 建立／cache 讀取；加總成 total 方便比較。沒有就空。"""
+    u = res.get("usage") or {}
+    if not isinstance(u, dict):
+        return {}
+    keys = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+    out = {k: int(u.get(k) or 0) for k in keys}
+    out["total"] = sum(out.values())
+    return out
 
 
 def default_runner(cmd: list[str], cwd: str, timeout: int) -> tuple[int, str, str]:
@@ -120,11 +140,13 @@ def build_cmd(exe: str, case: dict, cfg: dict) -> list[str]:
 
 
 def run(only: list[str] | None = None, list_only: bool = False, cases_path: Path | None = None, runner=default_runner,
-        which=shutil.which, log=print, report_dir: Path | None = None, dry_run: bool = False) -> int:
+        which=shutil.which, log=print, report_dir: Path | None = None, dry_run: bool = False, smoke: bool = False) -> int:
     """跑題目並印表。回 0 全過、1 有 ❌、2 用法錯誤。report_dir 給了就把每題的呼叫清單與回答存成 JSON（不含金鑰）。
     dry_run=True：不跑 claude，只印每題會執行的完整指令（確認旗標與題目，零用量）。"""
     cfg = load_cases(cases_path)
     cases = cfg.get("cases") or []
+    if smoke and not only:  # 快測：selftest.json 的 smoke 清單（改規則後 10 分鐘內確認的三題）
+        only = list(cfg.get("smoke") or [])
     if only:
         unknown = [o for o in only if o not in {c["id"] for c in cases}]
         if unknown:
@@ -155,18 +177,21 @@ def run(only: list[str] | None = None, list_only: bool = False, cases_path: Path
             code, out, err = runner(build_cmd(exe, c, cfg), cwd, timeout)
             calls, res = parse_stream(out)
             calls = [mask(x) for x in calls]
-            ok, notes = judge(c, calls)
+            ok, notes = judge(c, calls, (res.get("result") or ""))
+            usage = usage_of(res)
             if code != 0 and not calls:
                 ok = False
                 notes.append(f"{BAD} claude 結束碼 {code}：{mask((err or out)[-200:].strip())}")
             for n in notes:
                 log("   " + n)
             cost = res.get("total_cost_usd")
-            log(f"   工具呼叫 {len(calls)} 次、{time.time() - t0:.0f} 秒" + (f"、用量約 ${cost:.2f} 等值（訂閱制為估算）" if isinstance(cost, (int, float)) else ""))
-            results.append({"id": c["id"], "name": c["name"], "ok": ok, "calls": [x[:400] for x in calls], "notes": notes, "cost_usd": cost,
+            log(f"   工具呼叫 {len(calls)} 次、{time.time() - t0:.0f} 秒" + (f"、用量約 ${cost:.2f} 等值（訂閱制為估算）" if isinstance(cost, (int, float)) else "")
+                + (f"、token 合計 {usage['total']:,}（輸入 {usage['input_tokens']:,}／輸出 {usage['output_tokens']:,}／快取建 {usage['cache_creation_input_tokens']:,}／快取讀 {usage['cache_read_input_tokens']:,}）" if usage else ""))
+            results.append({"id": c["id"], "name": c["name"], "ok": ok, "calls": [x[:400] for x in calls], "notes": notes, "cost_usd": cost, "usage": usage,
                             "answer": mask((res.get("result") or "")[:4000]), "exit": code})
         passed = sum(1 for r in results if r["ok"])
-        log(f"{OK if passed == len(results) else BAD} 自我測試 {passed}/{len(results)} 題通過")
+        tot = sum((r.get("usage") or {}).get("total", 0) for r in results)
+        log(f"{OK if passed == len(results) else BAD} 自我測試 {passed}/{len(results)} 題通過" + (f"；token 合計 {tot:,}" if tot else ""))
         if report_dir:  # 在 with 裡面寫：就算暫存資料夾清不掉，20～40 分鐘的結果也已存好
             report_dir.mkdir(parents=True, exist_ok=True)
             rp = report_dir / f"selftest-{time.strftime('%Y%m%d-%H%M%S')}.json"

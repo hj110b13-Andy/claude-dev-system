@@ -193,6 +193,9 @@ def set_chrome_default_enabled(lay: Layout, enabled: bool) -> str:
     if p.exists():
         bk = lay.backups / f"claude-json-{_dt.datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
         shutil.copy2(p, bk)
+        olds = sorted(lay.backups.glob("claude-json-*.json"))
+        for stale in olds[:-10]:  # 與 settings.json 備份一樣只留最近 10 份
+            stale.unlink(missing_ok=True)
     data["claudeInChromeDefaultEnabled"] = bool(enabled)
     try:
         write_json(p, data)

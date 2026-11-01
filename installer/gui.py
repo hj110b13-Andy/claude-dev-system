@@ -63,6 +63,7 @@ class App:
         self.refresh()
         root.protocol("WM_DELETE_WINDOW", self.on_close)  # 有未套用的變更時關閉要先問
         root.after(100, self._pump)
+        root.after(1500, self._auto_check_update)  # 開窗後安靜檢查一次 GitHub 版本；有新版才問，連不上只記一行
 
     def on_close(self):
         if self.busy:  # 套用是多步驟（local.json → install → 門檻），中途砍掉會留半套狀態：做完才能關
@@ -559,6 +560,21 @@ class App:
             self._log(f"金鑰 {n}{'（帳號：' + acct + '）' if acct else '（帳號備註未填）'} 測試：{'✅' if ok else '❌'} {msg}")
         self._run_bg(job, refresh_after=False)
 
+    def _auto_check_update(self):
+        if self.busy:
+            return
+
+        def job():
+            info = appdir.check_update(self.lay, REPO)
+            if info["error"]:
+                self._log(f"自動檢查更新：{info['error']}（可稍後按「檢查更新」）")
+            elif info["newer"]:
+                self._log(f"自動檢查更新：有新版 v{info['local']} → v{info['remote']}")
+                self.q.put(("ask_update", info))
+            else:
+                self._log(f"自動檢查更新：已是最新 v{info['local']}")
+        self._run_bg(job, refresh_after=False)
+
     def do_check_update(self):
         def job():
             self._log("=== 檢查更新（GitHub master 的 config/VERSION）===")
@@ -600,12 +616,14 @@ class App:
                "程式庫文件、影片數據與截圖、國外空品、影片動作 Gemini、Chrome 開頁），比對它實際用了哪些工具。"
                + chr(10) * 2 + "通常 20～40 分鐘（每題上限 9 分鐘，最壞約 80 分鐘）、用掉約九場短對話的用量；Chrome 題需要瀏覽器開著。"
                + chr(10) + "注意：測試中 Claude 會自己執行指令、寫檔、讀網頁，沒有人逐步確認；它只在一個空的暫存資料夾工作，但讀到的網頁內容是不受信任的。結果會逐題印在下方紀錄。繼續？")
-        if not messagebox.askyesno("自我測試", msg):
+        ans = messagebox.askyesnocancel("自我測試", msg + chr(10) * 2 + "是＝只跑快測 3 題（PowerShell 編碼、即時數值 API、影片逐字稿，約 10 分鐘）　否＝全部 9 題　取消＝不跑")
+        if ans is None:
             return
+        smoke = bool(ans)
 
         def job():
-            self._log("=== 自我測試開始（claude -p × 9）===")
-            code = selftest.run(log=self._log, report_dir=self.lay.home / "state" / "selftest-reports")
+            self._log(f"=== 自我測試開始（claude -p × {3 if smoke else 9}）===")
+            code = selftest.run(log=self._log, report_dir=self.lay.home / "state" / "selftest-reports", smoke=smoke)
             self._log(f"=== 自我測試{'全部通過' if code == 0 else '有題目未通過（見 ❌）'} ===")
         self._run_bg(job, refresh_after=False)
 

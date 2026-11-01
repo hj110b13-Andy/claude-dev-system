@@ -2,6 +2,14 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.10.6（2026-11-01）
+
+- 自我測試：每題記錄 result 事件的真實 token（輸入／輸出／快取建立／快取讀取與合計）並印出，報告存 `usage`；查證型題目加 `answer_expect`（回答必須含「來源」與網址）、`answer_warn`（缺「查證過程」只標 ⚠️），影片題要含 `[mm:ss]` 時間戳，Chrome 題要含 Example Domain；`--smoke`／視窗「是＝快測 3 題」只跑 pwsh、live-data、video。來源：使用者「值得做的 1、2、3 都可以做」。
+- 用量守門 hook 的 PostToolUse matcher 由 `*` 縮為 `Bash|PowerShell|Agent|Task|Edit|Write|NotebookEdit|Workflow`：實測每次觸發啟動 Python 約 120 ms，Read／Grep／Glob 不再觸發；用量檢查本來就有 5 分鐘 TTL。`update` 會自動換成新 matcher。
+- 視窗開啟 1.5 秒後安靜檢查一次 GitHub 版本：有新版才跳問、已是最新或連不上只在紀錄寫一行。`~/.claude.json` 的備份（Chrome 開關每按一次存一份）改為只留最近 10 份。
+- core.md 的「上網查資料」「影片」兩條再精簡（細則已在 web-quick.md），core.md 由 3,310 字減到 2,886 字。progress-diff 對舊 core.md 報 18 句找不到，逐句核對都是 0.10.0 寫的「觸發句改寫」（例如「數據用 stats／comments」「直播 --live 秒數」），原始規則原文仍在 web-quick.md 的 A、C 段，沒有內容遺失。
+- 使用者全域 CLAUDE.md 開頭的舊「本機影片（mp4）處理 → video-pipeline.md」段已移除（video.py 取代；改前備份到 `~/.claude/backups/…-CLAUDE-before-remove-videonote.md`）。來源：使用者「5 你也幫我做」。
+
 ## 0.10.5（2026-11-01）
 
 - 速查拆成小檔 `rules/web-quick.md`（約 6,100 字：上網、即時數值 API 精簡表、影片、教操作、巡檢指標），core.md 改成「第一次查東西／處理影片前先 Read web-quick.md」；完整版 `web-sources.md` 的三段速查改為指標，細則不動。搬移以 progress-diff 逐句比對（web-sources 539 句、core 全部找得到）；新測試保證小檔每個網址都逐字存在於完整版、小檔不超過 12,000 字。

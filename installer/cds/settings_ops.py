@@ -6,7 +6,9 @@ import copy
 from . import HOOK_MARK
 
 # (事件, matcher)；matcher None 表示該事件不需要 matcher（UserPromptSubmit）
-HOOK_SPECS = [("UserPromptSubmit", None), ("PostToolUse", "*")]
+# PostToolUse 只掛在「會推進工作」的工具：每次觸發都要啟動一個 Python 程序（2026-11-01 實測每次約 120 ms），
+# Read／Grep／Glob 這類一場對話幾十上百次的工具不掛，用量檢查本來就有 5 分鐘 TTL，不會漏
+HOOK_SPECS = [("UserPromptSubmit", None), ("PostToolUse", "Bash|PowerShell|Agent|Task|Edit|Write|NotebookEdit|Workflow")]
 HOOK_SCRIPT = "usage_guard.py"
 
 

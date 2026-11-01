@@ -300,6 +300,10 @@ class ReadAndDiff(Base):
         d = json.loads(p.read_text(encoding="utf-8"))
         self.assertTrue(d["claudeInChromeDefaultEnabled"] and d["other"] == 1)
         self.assertTrue(list(self.lay.backups.glob("claude-json-*.json")))
+        for i in range(12):
+            (self.lay.backups / f"claude-json-2020010{i % 10}-00000{i}.json").write_text("{}", encoding="utf-8")
+        gm.set_chrome_default_enabled(self.lay, False)
+        self.assertLessEqual(len(list(self.lay.backups.glob("claude-json-*.json"))), 10, "~/.claude.json 備份只留 10 份")
 
 
 class KeyTests(unittest.TestCase):
