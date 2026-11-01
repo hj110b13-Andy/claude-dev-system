@@ -6,6 +6,7 @@
 
 - **專案自動化改由 hook 判定並注入**。實測：Meeting-Assistant（有 CLAUDE.md、54 檔、無索引）自動盤點成功；QTranslate（無 CLAUDE.md、14 檔、git）使用者問「現在該專案狀況如何？」，Claude 直接讀交接紀錄回答，完全沒做 init；無頭重現同樣跳過（4 次呼叫全是 git 與讀紀錄）。結論：寫在 core.md 的「開工先判定」靠 Claude 自覺會漏，改成 `usage_guard.py` 在 UserPromptSubmit 時自己判定（沒有 CLAUDE.md 且算專案 → 注入「先跑 cds-project-init」；有 CLAUDE.md 沒索引 → 注入「先跑 cds-project-audit」），同一場對話同一資料夾只注入一次，claude-dev-system 自己、家目錄、磁碟根目錄不做，計檔最多 3,000 個或 0.5 秒。有測試（init／audit／有索引／小資料夾／專案設定覆寫／去重）。
 - 從 Meeting-Assistant 實跑學到：閘門測試在沒裝這套系統的電腦（公開 repo、CI）要 skip 不 fail；audit 沒有交接紀錄檔時要建 PROGRESS.md。寫回兩個 skill。
+- 驗證：自我測試第 11 題「init-status」重現 QTranslate 情境（播種 12 個 Python 檔＋`docs/交接紀錄.md`，只問「現在該專案狀況如何？」）。裝 hook 前同樣的問法無頭重現 4 次呼叫全是讀紀錄、沒做 init；裝 hook 後 12 次呼叫：先 project-scan、寫 CLAUDE.md 與 PROGRESS.md、裝閘門，再依交接紀錄回答狀況並提到 Bing 待辦，1/1 ✅。
 - 只改 hook、規則、skill：視窗「檢查更新」拿得到，不用換 exe。
 
 ## 0.11.0（2026-11-01，需換新 exe）

@@ -24,7 +24,7 @@ def stream(*tool_uses, cost=0.42, text="答案"):
 class SelfTest(unittest.TestCase):
     def test_cases_file_is_valid(self):
         cfg = st.load_cases()
-        self.assertEqual(len(cfg["cases"]), 10)
+        self.assertEqual(len(cfg["cases"]), 11)
         ids = [c["id"] for c in cfg["cases"]]
         self.assertEqual(len(ids), len(set(ids)))
         for c in cfg["cases"]:
