@@ -113,7 +113,7 @@ urllib.request.urlopen(url, context=ctx)
 
 ## 2c. 免費優先：有金鑰的搜尋服務怎麼用（0.7.0 起，可判定）
 
-安裝器對有金鑰的搜尋類服務（parallel、exa、tavily、context7、firecrawl）預設註冊**兩個** MCP：免金鑰版 `<名稱>` 與金鑰版 `<名稱>-key`（`local.json` 的 `keyMode[名稱]` 設 `always` 則只有金鑰版、設 `free` 則只有免金鑰版）。代價：每多一個伺服器，每次工具呼叫多讀約 1,900 token 的伺服器說明（2026-11-01 實測 5 個 -key 共 9,435）；在意用量的人可在設定視窗改成「一律用金鑰」或「只用免金鑰」。規則：
+安裝器對有金鑰的搜尋類服務（parallel、exa、tavily、context7、firecrawl）預設註冊**兩個** MCP：免金鑰版 `<名稱>` 與金鑰版 `<名稱>-key`（`local.json` 的 `keyMode[名稱]` 設 `always` 則只有金鑰版、設 `free` 則只有免金鑰版）。代價：每多一個伺服器，每次工具呼叫多讀約 1,900 token 的伺服器說明（2026-11-01 實測 5 個 -key 共 9,435）；安裝器自 0.10.8 起在 settings.json env 寫 `CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH=1024`，把每個伺服器的說明與工具描述截到 1,024 字，14 個 MCP 的開場 context 由 61,946 降到 43,222 token，比拿掉雙註冊省得多且不用放棄免費優先；還想再省可改「一律用金鑰」或「只用免金鑰」。規則：
 
 1. 先用免金鑰版。
 2. 免金鑰版回 **429、5xx、402，或單次呼叫超過 60 秒沒回應** 任一 → 這一次改用 `-key` 版重做。

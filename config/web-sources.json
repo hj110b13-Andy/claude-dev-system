@@ -98,9 +98,10 @@
     }
   },
   "env": {
-    "_comment": "寫入 settings.json 的 env，Claude Code 的所有工具子程序（Bash、PowerShell 內啟動的 python 等）都會繼承。WebSearch 上限：官方預設 200／100 常讓多 agent 研究中途停住，放寬 3 倍仍保留煞車。PYTHONUTF8／PYTHONIOENCODING：Windows 系統碼頁 950 時 Python 子程序印中文會 UnicodeEncodeError 或亂碼（2026-10-27 實測），強制 UTF-8 後 API 回應的中日文才讀得對；非 Windows 無害。local.json 的 env 可覆寫。",
+    "_comment": "寫入 settings.json 的 env，Claude Code 的所有工具子程序（Bash、PowerShell 內啟動的 python 等）都會繼承。WebSearch 上限：官方預設 200／100 常讓多 agent 研究中途停住，放寬 3 倍仍保留煞車。PYTHONUTF8／PYTHONIOENCODING：Windows 系統碼頁 950 時 Python 子程序印中文會 UnicodeEncodeError 或亂碼（2026-10-27 實測），強制 UTF-8 後 API 回應的中日文才讀得對；非 Windows 無害。CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH：MCP 伺服器說明與工具描述送給模型的字數上限（官方預設 4,096／16,384）；2026-11-01 實測 14 個 MCP 時設 1024 讓開場 context 從 61,946 降到 43,222 token（每次工具呼叫都重讀這段，是最大的可控用量），三題實測工具選擇不變。設太小會截掉工具說明，不建議低於 1024。local.json 的 env 可覆寫。",
     "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION": "600",
     "CLAUDE_CODE_WEB_SEARCH_REFILLS_PER_HOUR": "300",
+  "CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH": "1024",
     "PYTHONUTF8": "1",
     "PYTHONIOENCODING": "utf-8"
   }

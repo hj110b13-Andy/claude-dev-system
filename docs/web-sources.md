@@ -44,7 +44,7 @@ python installer/install.py web --usage-guard off                   # 關閉用�
 
 ## 免費優先（搜尋類金鑰的模式，0.7.0 起）
 
-金鑰模式三種：`fallback`（預設，免費優先，雙註冊）、`always`（只金鑰版）、`free`（只免金鑰版，金鑰留著不用）；雙註冊每次工具呼叫多讀約 9,400 token 的伺服器說明（五個服務）。填了 exa／tavily／context7／parallel／firecrawl 的金鑰後，安裝器預設同時註冊**免金鑰版** `<名稱>` 與**金鑰版** `<名稱>-key`；規則（`rules/web-sources.md` 第 2c 節）先用免金鑰版，回 429／5xx／402 才用 `-key` 版，之後連續 3 次用 `-key`、第 4 次再試免金鑰。想一律用金鑰：`web --key-mode exa=always`（只註冊金鑰版）；改回：`--key-mode exa=fallback`。`web --show` 會列出目前模式。
+env 另寫 `CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH=1024`（0.10.8 起）：MCP 伺服器說明與工具描述截到 1,024 字，開場 context 少約 18,700 token（每次工具呼叫都省），視窗聯網區可改；Claude Code 需 v2.1.280 以上，舊版會忽略這個變數。金鑰模式三種：`fallback`（預設，免費優先，雙註冊）、`always`（只金鑰版）、`free`（只免金鑰版，金鑰留著不用）；雙註冊每次工具呼叫多讀約 9,400 token 的伺服器說明（五個服務）。填了 exa／tavily／context7／parallel／firecrawl 的金鑰後，安裝器預設同時註冊**免金鑰版** `<名稱>` 與**金鑰版** `<名稱>-key`；規則（`rules/web-sources.md` 第 2c 節）先用免金鑰版，回 429／5xx／402 才用 `-key` 版，之後連續 3 次用 `-key`、第 4 次再試免金鑰。想一律用金鑰：`web --key-mode exa=always`（只註冊金鑰版）；改回：`--key-mode exa=fallback`。`web --show` 會列出目前模式。
 
 ## 安裝器怎麼避免動到你的東西
 

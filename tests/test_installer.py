@@ -126,6 +126,15 @@ class FullCycle(Base):
         self.assertEqual(self.settings(), want)
 
 
+class McpDescriptionCap(Base):
+    def test_env_default_has_description_cap(self):
+        src = json.loads((REPO / "config" / "web-sources.json").read_text(encoding="utf-8"))
+        self.assertEqual(src["env"]["CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH"], "1024")
+        from cds import web as w
+        env = w.desired_env(src, {"keys": {}, "enable": [], "disable": [], "env": {}})
+        self.assertEqual(env["CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH"], "1024")
+
+
 class KeyModeFree(Base):
     def test_free_mode_registers_keyless_only(self):
         from cds import web as w
