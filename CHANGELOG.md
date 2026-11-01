@@ -8,6 +8,7 @@
 - 用量守門 hook 的 PostToolUse matcher 由 `*` 縮為 `Bash|PowerShell|Agent|Task|Edit|Write|NotebookEdit|Workflow`：實測每次觸發啟動 Python 約 120 ms，Read／Grep／Glob 不再觸發；用量檢查本來就有 5 分鐘 TTL。`update` 會自動換成新 matcher。
 - 視窗開啟 1.5 秒後安靜檢查一次 GitHub 版本：有新版才跳問、已是最新或連不上只在紀錄寫一行。`~/.claude.json` 的備份（Chrome 開關每按一次存一份）改為只留最近 10 份。
 - core.md 的「上網查資料」「影片」兩條再精簡（細則已在 web-quick.md），core.md 由 3,310 字減到 2,886 字。progress-diff 對舊 core.md 報 18 句找不到，逐句核對都是 0.10.0 寫的「觸發句改寫」（例如「數據用 stats／comments」「直播 --live 秒數」），原始規則原文仍在 web-quick.md 的 A、C 段，沒有內容遺失。
+- 快測三題實跑（0.10.6 規則）3/3 ✅，首次有真實 token 數：pwsh 合計 306,567（快取讀 253,410）、video 458,283（快取讀 431,740）、live-data 730,128（快取讀 685,994）。可見一場短查證的用量幾乎全是「每次工具呼叫重讀整個開場 context（約 5～6 萬）」的快取讀取，工具呼叫次數才是用量的槓桿，規則檔字數不是。回答格式檢查抓到兩題都缺「查證過程」段（⚠️）→ core.md 與 web-quick.md 補明「回覆末尾固定來源與查證過程兩段」。
 - 使用者全域 CLAUDE.md 開頭的舊「本機影片（mp4）處理 → video-pipeline.md」段已移除（video.py 取代；改前備份到 `~/.claude/backups/…-CLAUDE-before-remove-videonote.md`）。來源：使用者「5 你也幫我做」。
 
 ## 0.10.5（2026-11-01）
