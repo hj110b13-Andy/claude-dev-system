@@ -10,6 +10,8 @@
    舊結構仍支援：plan.current 指定目前方案，usageThresholdPct[方案] 給 fiveHour／sevenDay；方案若有 until 日期，
    到期日（含）起自動改用 plan.after。--print 會印出實際採用的是哪一份。
 4. 若有任務看板檔（<CLAUDE_HOME>/state/task-board.md），對標「該追問」的 agent 注入逾時提醒；沒有就略過。
+5. 專案自動化（0.11.1）：UserPromptSubmit 時看 cwd——沒有 CLAUDE.md 且算專案 → 注入「先跑 cds-project-init」；有 CLAUDE.md 沒索引 → 注入「先跑 cds-project-audit」。
+   同一場對話同一資料夾只注入一次（state/project-auto.json）。規則寫在 core.md 但 Claude 會漏（QTranslate 2026-11-01 實測沒觸發），所以改由 hook 判定。
 
 安全：權杖只在記憶體使用、只送往 api.anthropic.com，不印、不寫檔、不記 log。任何錯誤一律 exit 0 不輸出。
 手動檢查：python usage_guard.py --print
@@ -151,6 +153,103 @@ def stale_agents():
     return out
 
 
+# ---------- 專案自動化（0.11.1）：hook 判定、注入提示，不靠 Claude 自己記得 ----------
+PA_STATE = os.path.join(STATE_DIR, "project-auto.json")
+PA_EXCLUDE = {"node_modules", ".git", "dist", "build", ".venv", "venv", "__pycache__", ".next", "out", "coverage", ".pytest_cache",
+              ".mypy_cache", ".idea", ".vscode", "vendor", "third_party", ".cache", "worktrees"}
+PA_SOURCE_EXT = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".cs", ".go", ".rs", ".java", ".kt", ".swift", ".c", ".cpp", ".h", ".rb", ".php",
+                 ".ps1", ".cmd", ".bat", ".sh"}
+
+
+def _pa_config(cwd):
+    """projectAutomation：專案 .claude/dispatch-config.json 優先，再全域，再預設。"""
+    cfg = {"autoInit": True, "autoAudit": True, "autoRefactor": False, "minSourceFiles": 10}
+    for path in (CONFIG, os.path.join(cwd, ".claude", "dispatch-config.json")):
+        try:
+            with open(path, encoding="utf-8") as f:
+                t = (json.load(f) or {}).get("projectAutomation") or {}
+        except Exception:
+            continue
+        for k in ("autoInit", "autoAudit", "autoRefactor"):
+            if isinstance(t.get(k), bool):
+                cfg[k] = t[k]
+        if isinstance(t.get("minSourceFiles"), (int, float)) and t["minSourceFiles"] >= 1:
+            cfg["minSourceFiles"] = int(t["minSourceFiles"])
+    return cfg
+
+
+def _pa_count_sources(cwd, limit=3000, budget=0.5):
+    """快速數原始碼檔：最多看 limit 個檔或 budget 秒，夠判定「算不算專案」就停。回 (原始碼檔數, 是否被截斷)。"""
+    n = seen = 0
+    t0 = time.time()
+    for dp, dns, fns in os.walk(cwd):
+        dns[:] = [d for d in dns if d not in PA_EXCLUDE and not d.startswith(".")]
+        for fn in fns:
+            seen += 1
+            if os.path.splitext(fn)[1].lower() in PA_SOURCE_EXT:
+                n += 1
+            if seen >= limit or time.time() - t0 > budget:
+                return n, True
+    return n, False
+
+
+def project_auto_msg(cwd, session_id=None):
+    """回要注入的提示字串，或 None。可判定條件（與 core.md「專案自動化」同一套）：
+    init  ＝ 沒有 CLAUDE.md、算專案（git 或原始碼 ≥ minSourceFiles）、autoInit；
+    audit ＝ 有 CLAUDE.md、沒有 .claude/project-scan.json、原始碼 ≥ minSourceFiles、autoAudit。
+    同一個資料夾同一場對話只注入一次；claude-dev-system 自己、家目錄、磁碟根目錄不做。"""
+    try:
+        if not cwd or not os.path.isdir(cwd):
+            return None
+        cwd = os.path.abspath(cwd)
+        home = os.path.expanduser("~")
+        if cwd in (home, os.path.dirname(cwd)) or os.path.dirname(cwd) == cwd:
+            return None
+        if os.path.exists(os.path.join(cwd, "installer", "cds", "paths.py")) and os.path.exists(os.path.join(cwd, "rules", "core.md")):
+            return None  # claude-dev-system 本身
+        cfg = _pa_config(cwd)
+        has_md = os.path.exists(os.path.join(cwd, "CLAUDE.md"))
+        has_idx = os.path.exists(os.path.join(cwd, ".claude", "project-scan.json"))
+        is_git = os.path.exists(os.path.join(cwd, ".git"))
+        n, truncated = _pa_count_sources(cwd)
+        is_project = is_git or n >= cfg["minSourceFiles"]
+        if not is_project:
+            return None
+        if not has_md and cfg["autoInit"]:
+            what, skill = "init", "cds-project-init"
+        elif has_md and not has_idx and n >= cfg["minSourceFiles"] and cfg["autoAudit"]:
+            what, skill = "audit", "cds-project-audit"
+        else:
+            return None
+        # 同一場對話同一資料夾只提醒一次
+        key = cwd.lower()
+        st = {}
+        try:
+            with open(PA_STATE, encoding="utf-8") as f:
+                st = json.load(f) or {}
+        except Exception:
+            st = {}
+        if session_id and st.get(key, {}).get("session") == session_id:
+            return None
+        st[key] = {"session": session_id, "what": what, "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        try:
+            os.makedirs(STATE_DIR, exist_ok=True)
+            with open(PA_STATE, "w", encoding="utf-8") as f:
+                json.dump(st, f, ensure_ascii=False)
+        except Exception:
+            pass
+        facts = f"沒有 CLAUDE.md、" if not has_md else "有 CLAUDE.md 但沒有盤點索引、"
+        facts += f"原始碼約 {n}{'+' if truncated else ''} 檔、{'git 專案' if is_git else '非 git'}"
+        if what == "init":
+            return ("【專案自動化（hook）】這個資料夾" + facts + f"，autoInit=true → 回答使用者之前先執行 skill `{skill}`"
+                    "（project-scan.py 盤點、寫專案 CLAUDE.md、裝閘門、建 PROGRESS.md），做完用一句話告知再回答原本的問題；不要問要不要做。")
+        return ("【專案自動化（hook）】這個資料夾" + facts + f"，autoAudit=true → 回答使用者之前先執行 skill `{skill}`"
+                "（project-scan.py 盤點、docs/ARCHITECTURE.md、docs/PROJECT-ISSUES.md），達門檻只問一次要不要分階段重整"
+                + ("（autoRefactor=true：不問，直接 cds-modularize）" if cfg["autoRefactor"] else "") + "，然後回答原本的問題。")
+    except Exception:
+        return None
+
+
 def main():
     printing = "--print" in sys.argv
     event = ""
@@ -204,6 +303,10 @@ def main():
         msgs.append("【用量守門（自動）】" + "、".join(hit) + "。主 agent：依全域規則「用量收尾」執行收尾"
                     "（不再派新 agent、列出已完成與未完成、通知執行中的 agent 收尾、更新專案的交接紀錄、推送）。"
                     "子 agent：把可運作的部分 commit、未完成改動存 patch，回報 main 後結束。")
+    if event == "UserPromptSubmit":  # 專案自動化：每則提示都判定，但同一場對話同一資料夾只注入一次
+        pa = project_auto_msg(hook_cwd, payload.get("session_id"))
+        if pa:
+            msgs.append(pa)
     stale = stale_agents()
     key = "|".join(sorted(stale))
     if stale and (key != s.get("stale_key") or now - s.get("stale_alerted_at", 0) >= STALE_REPEAT):

@@ -2,6 +2,12 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.11.1（2026-11-01）
+
+- **專案自動化改由 hook 判定並注入**。實測：Meeting-Assistant（有 CLAUDE.md、54 檔、無索引）自動盤點成功；QTranslate（無 CLAUDE.md、14 檔、git）使用者問「現在該專案狀況如何？」，Claude 直接讀交接紀錄回答，完全沒做 init；無頭重現同樣跳過（4 次呼叫全是 git 與讀紀錄）。結論：寫在 core.md 的「開工先判定」靠 Claude 自覺會漏，改成 `usage_guard.py` 在 UserPromptSubmit 時自己判定（沒有 CLAUDE.md 且算專案 → 注入「先跑 cds-project-init」；有 CLAUDE.md 沒索引 → 注入「先跑 cds-project-audit」），同一場對話同一資料夾只注入一次，claude-dev-system 自己、家目錄、磁碟根目錄不做，計檔最多 3,000 個或 0.5 秒。有測試（init／audit／有索引／小資料夾／專案設定覆寫／去重）。
+- 從 Meeting-Assistant 實跑學到：閘門測試在沒裝這套系統的電腦（公開 repo、CI）要 skip 不 fail；audit 沒有交接紀錄檔時要建 PROGRESS.md。寫回兩個 skill。
+- 只改 hook、規則、skill：視窗「檢查更新」拿得到，不用換 exe。
+
 ## 0.11.0（2026-11-01，需換新 exe）
 
 - **專案自動化**（使用者：「exe 執行並套用後全部會自動化全部完成，每個專案也不需要我特地說」）：三個新 skill——`cds-project-init`（新專案自動立規矩：專案 CLAUDE.md、盤點、依賴閘門、PROGRESS.md）、`cds-project-audit`（舊專案自動盤點：盤點清單、架構與資料流、九欄位問題清單；達門檻只問一次要不要重整，答案記進索引）、`cds-modularize`（A 基準→B 保護→C 逐模組→D 整合→E 驗收，刪前七項確認，閘門收尾）。core.md 加「專案自動化」與「什麼時候問使用者」兩條可判定規則；`dispatch-config.json` 加 `projectAutomation`（autoInit／autoAudit／autoRefactor／minSourceFiles），視窗核心區可改。

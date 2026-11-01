@@ -138,6 +138,40 @@ class UsageGuardConfig(unittest.TestCase):
             finally:
                 ug.STATE_DIR, ug.USAGE, ug.CONFIG, ug.fetch, sys.stdin = old
 
+    def test_project_auto_msg_decides_init_audit_none_and_dedupes(self):
+        import json
+        ug = self.ug
+        with tempfile.TemporaryDirectory() as td:
+            old = (ug.STATE_DIR, ug.PA_STATE, ug.CONFIG)
+            try:
+                ug.STATE_DIR, ug.PA_STATE, ug.CONFIG = td, str(Path(td) / "pa.json"), str(Path(td) / "none.json")
+                proj = Path(td) / "proj"
+                (proj / "src").mkdir(parents=True)
+                for i in range(12):
+                    (proj / "src" / f"m{i}.py").write_text("x=1", encoding="utf-8")
+                (proj / "node_modules").mkdir()
+                for i in range(50):
+                    (proj / "node_modules" / f"j{i}.js").write_text("x", encoding="utf-8")
+                msg = ug.project_auto_msg(str(proj), "s1")
+                self.assertIn("cds-project-init", msg)
+                self.assertIn("12 檔", msg)
+                self.assertIsNone(ug.project_auto_msg(str(proj), "s1"), "同一場對話不重複")
+                self.assertIn("cds-project-init", ug.project_auto_msg(str(proj), "s2"), "新對話再提醒")
+                (proj / "CLAUDE.md").write_text("# p", encoding="utf-8")
+                self.assertIn("cds-project-audit", ug.project_auto_msg(str(proj), "s3"))
+                (proj / ".claude").mkdir()
+                (proj / ".claude" / "project-scan.json").write_text("{}", encoding="utf-8")
+                self.assertIsNone(ug.project_auto_msg(str(proj), "s4"), "有索引就不提醒")
+                small = Path(td) / "small"
+                small.mkdir()
+                (small / "a.py").write_text("x", encoding="utf-8")
+                self.assertIsNone(ug.project_auto_msg(str(small), "s5"), "小腳本資料夾不做")
+                (proj / ".claude" / "dispatch-config.json").write_text(json.dumps({"projectAutomation": {"autoAudit": False}}), encoding="utf-8")
+                (proj / ".claude" / "project-scan.json").unlink()
+                self.assertIsNone(ug.project_auto_msg(str(proj), "s6"), "專案設定關掉 autoAudit")
+            finally:
+                ug.STATE_DIR, ug.PA_STATE, ug.CONFIG = old
+
     def test_flat_thresholds_format(self):
         self.assertEqual(self.ug.pick_thresholds({"usageThresholdPct": {"fiveHour": 95, "sevenDay": 99}}), (95.0, 99.0))
         self.assertIsNone(self.ug.pick_thresholds({"usageThresholdPct": {"fiveHour": "x"}}))
