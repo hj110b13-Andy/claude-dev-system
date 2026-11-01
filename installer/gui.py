@@ -194,7 +194,8 @@ class App:
         s, f = self.state, self.form
         self.key_vars.clear(); self.key_dirty.clear(); self.key_status.clear(); self.mode_vars.clear(); self.mode_boxes.clear(); self.server_vars.clear(); self.env_vars.clear()
         src = "執行檔內建" if (FROZEN and self.repo == REPO) else ("已下載的 app/" if self.repo != REPO else "原始碼 repo")
-        self.title_var.set(f"來源 v{s['repo_version']}（{src}）　已安裝：{('v' + s['version']) if s['installed'] else '尚未安裝'}　設定目錄：{self.lay.home}")
+        warn = "　⚠️ 來源比已安裝舊，按「檢查更新」再套用" if gm.source_older(s) else ""
+        self.title_var.set(f"來源 v{s['repo_version']}（{src}）　已安裝：{('v' + s['version']) if s['installed'] else '尚未安裝'}{warn}　設定目錄：{self.lay.home}")
 
         # 環境
         ev = list(s["env"].values())

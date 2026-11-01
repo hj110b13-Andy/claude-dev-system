@@ -415,10 +415,20 @@ class Change:
     text: str
 
 
+def source_older(state: dict) -> bool:
+    """來源 repo（原始碼、exe 內建或 app/）的版本比已安裝的舊（例如用舊 exe 開已從原始碼更新過的機器）。"""
+    if not state.get("installed"):
+        return False
+    a, b = parse_ver(state["repo_version"]), parse_ver(state["version"] or "0")
+    return bool(a and b and a < b)
+
+
 def diff(state: dict, form: Form) -> list[Change]:
     ch: list[Change] = []
     if not state["installed"]:
         ch.append(Change("install", "安裝核心（規則、skill、用量守門）"))
+    elif source_older(state):
+        pass  # exe 內建或 app/ 比已安裝舊：不提「更新」（安裝器會拒絕降版）；視窗另外顯示提醒，其他設定仍可套用
     elif parse_ver(state["repo_version"]) != parse_ver(state["version"] or "0"):
         ch.append(Change("update", f"更新 {state['version']} → {state['repo_version']}"))
     if form.usage_guard != state["hooks"]["usage_guard_pref"]:
@@ -477,6 +487,9 @@ def apply_form(lay: Layout, python: str, state: dict, form: Form, log, repo: Pat
 
     def run(code, lines):
         nonlocal worst
+        lines = list(lines)
+        if code in (1, 2) and lines and not any(str(x).startswith(("❌", "⚠️")) for x in lines):
+            lines[-1] = "❌ " + str(lines[-1])  # 安裝器的拒絕訊息（例如降版）沒有標記，補上讓人找得到
         for ln in lines:
             log(web.mask(ln, _local(lay)))
         worst = max(worst, code if code in (1, 2) else 0)
@@ -514,11 +527,24 @@ def apply_form(lay: Layout, python: str, state: dict, form: Form, log, repo: Pat
             code, lines = commands.web_config(lay, keys=keys, enable=enable, disable=disable, env=env_args, show=True, runner=runner, key_mode=modes)
             _reset_env_override(lay, env_reset)
             run(code, [x for x in lines if x.startswith("本機偏好")])
-    # 2) install／update（帶 web、video 開關）
-    mode = "install" if not state["installed"] else "update"
-    code, lines = commands.apply(lay, python, repo=repo, force=force, mode=mode, with_web=form.web_enabled, with_video=form.video_enabled,
-                                 runner=runner, pip=pip)
-    run(code, lines)
+    # 2) install／update（帶 web、video 開關）；來源比已安裝舊時不跑（安裝器會拒絕降版），改用 web／video 子命令直接套用
+    if source_older(state) and not force:
+        log(f"⚠️ 來源 v{state['repo_version']} 比已安裝的 v{state['version']} 舊，不更新規則與工具檔（按「檢查更新」下載最新版再套用）；其他設定照常套用")
+        if form.web_enabled != state["web"]["enabled"] or keys or enable or disable or env_args or modes or env_reset:
+            if form.web_enabled:
+                code, lines = commands.web_config(lay, keys=[], runner=runner)  # 依 local.json 重新對齊 MCP 與 env
+                run(code, lines)
+            else:
+                code, lines = commands.web_config(lay, off=True, runner=runner)
+                run(code, lines)
+        if form.video_enabled != state["video"]["enabled"]:
+            code, lines = commands.video_config(lay, python, off=not form.video_enabled, pip=pip)
+            run(code, lines)
+    else:
+        mode = "install" if not state["installed"] else "update"
+        code, lines = commands.apply(lay, python, repo=repo, force=force, mode=mode, with_web=form.web_enabled, with_video=form.video_enabled,
+                                     runner=runner, pip=pip)
+        run(code, lines)
     # 3) 門檻、下載資料夾、Chrome
     if any(c.kind == "thresholds" for c in changes):
         write_thresholds(lay, float(form.thresholds["fiveHour"]), float(form.thresholds["sevenDay"]))

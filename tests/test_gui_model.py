@@ -291,6 +291,39 @@ class ReadAndDiff(Base):
         local = {"keys": {"k": "ab/c+d"}}
         self.assertEqual(web.mask("x=ab%2Fc%2Bd y=ab/c+d", local), "x=*** y=***")
 
+    def test_older_source_does_not_propose_update_and_still_applies_settings(self):
+        s = self.state()
+        f = gm.form_from_state(s)
+        f.web_enabled = True
+        self.apply(f, s)
+        m = json.loads(self.lay.manifest.read_text(encoding="utf-8"))
+        m["version"] = "99.0.0"  # 模擬：已安裝比來源新（用舊 exe 開已從原始碼更新過的機器）
+        self.lay.manifest.write_text(json.dumps(m), encoding="utf-8")
+        s = self.state()
+        self.assertTrue(gm.source_older(s))
+        f = gm.form_from_state(s)
+        self.assertEqual([c.kind for c in gm.diff(s, f)], [], "來源較舊不可提「更新」")
+        f.keys["cwa"] = "NEWKEY"
+        f.thresholds = {"fiveHour": 90, "sevenDay": 98}
+        self.logs.clear()
+        code = self.apply(f, s)
+        self.assertEqual(code, 0, chr(10).join(self.logs))
+        self.assertTrue(any("比已安裝的 v99.0.0 舊" in x for x in self.logs))
+        self.assertFalse(any("降版" in x for x in self.logs), "不可再出現安裝器的降版拒絕")
+        s = self.state()
+        self.assertTrue(s["keys"]["cwa"]["present"])
+        self.assertEqual(s["thresholds"]["fiveHour"], 90.0)
+        self.assertEqual(s["version"], "99.0.0", "已安裝版本不可被降")
+
+    def test_failed_apply_log_has_cross_mark(self):
+        from cds import gui_model as g
+        logs = []
+        state = self.state()
+        f = gm.form_from_state(state)
+        f.web_enabled = True
+        g.apply_form(self.lay, PY, state, f, logs.append, repo=REPO, runner=lambda args: (1, "boom"), pip=self.pip)
+        self.assertTrue(any(x.startswith("❌") for x in logs), logs)
+
     def test_chrome_default_toggle_writes_claude_json_with_backup(self):
         p = web.user_config_path(self.lay)
         p.parent.mkdir(parents=True, exist_ok=True)
