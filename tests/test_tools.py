@@ -171,3 +171,20 @@ class VideoDownloadDir(unittest.TestCase):
         (cfg / "local.json").write_text('{"keys": {}, "video": {"downloadDir": "' + (home / "dl").as_posix() + '"}}', encoding="utf-8")
         self.assertEqual(Path(self.run_dir(home)), home / "dl")
         self.assertEqual(Path(self.run_dir(home, str(home / "x"))), home / "x")
+
+
+class WebQuickConsistency(unittest.TestCase):
+    """rules/web-quick.md（小檔）與 web-sources.md（完整版）要一致：小檔每個網址必須逐字存在於完整版；小檔要小（讀一次省 token 的意義才在）。"""
+
+    def test_urls_exist_in_full_file_and_size(self):
+        import re
+        quick = (REPO / "rules" / "web-quick.md").read_text(encoding="utf-8")
+        full = (REPO / "rules" / "web-sources.md").read_text(encoding="utf-8")
+        urls = re.findall(r"https://[^\s`|）)]+", quick)
+        self.assertGreater(len(urls), 10)
+        for u in urls:
+            self.assertIn(u, full, f"小檔的網址在完整版找不到：{u}")
+        self.assertLess(len(quick), 12000, f"小檔 {len(quick)} 字，超過 12,000 就失去意義（完整版 34,000）")
+        core = (REPO / "rules" / "core.md").read_text(encoding="utf-8")
+        self.assertIn("web-quick.md", core, "core.md 要指到小檔")
+
