@@ -24,7 +24,7 @@ def stream(*tool_uses, cost=0.42, text="答案"):
 class SelfTest(unittest.TestCase):
     def test_cases_file_is_valid(self):
         cfg = st.load_cases()
-        self.assertEqual(len(cfg["cases"]), 9)
+        self.assertEqual(len(cfg["cases"]), 10)
         ids = [c["id"] for c in cfg["cases"]]
         self.assertEqual(len(ids), len(set(ids)))
         for c in cfg["cases"]:
@@ -110,6 +110,17 @@ class SelfTest(unittest.TestCase):
         st.run(runner=runner, which=lambda n: "claude", log=logs.append, smoke=True)
         self.assertEqual(len(seen), 3, "--smoke 只跑三題")
         self.assertTrue(any("token 合計" in x for x in logs))
+
+    def test_seed_files_land_in_per_case_dir(self):
+        seen = {}
+
+        def runner(cmd, cwd, timeout):
+            seen[Path(cwd).name] = sorted(str(p.relative_to(cwd)).replace(chr(92), "/") for p in Path(cwd).rglob("*") if p.is_file())
+            return 0, stream(("Bash", {"command": "py -3 tools/project-scan.py ."}), ("Write", {"file_path": "CLAUDE.md", "content": "x"})), ""
+        logs = []
+        st.run(only=["init", "pwsh"], runner=runner, which=lambda n: "claude", log=logs.append)
+        self.assertIn("app/mod0.py", seen["init"])
+        self.assertEqual(seen["pwsh"], [], "沒播種的題目工作目錄是空的")
 
     def test_cleanup_helpers(self):
         import tempfile, os

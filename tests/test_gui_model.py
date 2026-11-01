@@ -324,6 +324,24 @@ class ReadAndDiff(Base):
         g.apply_form(self.lay, PY, state, f, logs.append, repo=REPO, runner=lambda args: (1, "boom"), pip=self.pip)
         self.assertTrue(any(x.startswith("❌") for x in logs), logs)
 
+    def test_project_auto_roundtrip(self):
+        s = self.state()
+        self.apply(gm.form_from_state(s), s)
+        s = self.state()
+        self.assertEqual(s["project_auto"], {"autoInit": True, "autoAudit": True, "autoRefactor": False, "minSourceFiles": 10})
+        f = gm.form_from_state(s)
+        f.project_auto = {"autoInit": True, "autoAudit": False, "autoRefactor": True, "minSourceFiles": 25}
+        texts = [c.text for c in gm.diff(s, f)]
+        self.assertTrue(any("舊專案自動盤點=關" in t and "專案門檻（原始碼檔數）=25" in t for t in texts), texts)
+        self.assertEqual(self.apply(f, s), 0, chr(10).join(self.logs))
+        s = self.state()
+        self.assertEqual(s["project_auto"]["autoRefactor"], True)
+        self.assertEqual(s["project_auto"]["minSourceFiles"], 25)
+        d = json.loads((self.lay.payload / "config" / "dispatch-config.json").read_text(encoding="utf-8"))
+        self.assertIn("taskCheck", d, "其他鍵保留")
+        data = gm.export_profile(s, gm.form_from_state(s))
+        self.assertEqual(data["project_auto"]["minSourceFiles"], 25)
+
     def test_chrome_default_toggle_writes_claude_json_with_backup(self):
         p = web.user_config_path(self.lay)
         p.parent.mkdir(parents=True, exist_ok=True)

@@ -58,9 +58,10 @@ MCP_DESC = {  # 視窗 MCP 列的功能說明（一句話）
     "firecrawl": "會執行 JavaScript 的網頁抓取，動態頁面抓不到時的第三步",
 }
 TOOL_DESC = {  # 其他功能說明
-    "core": "規則（查證格式、上網查資料分流、派工原則）合併進全域 CLAUDE.md；7 個 skill（派工、安全重構、文件治理、回饋稽核、波及範圍、專案驗證生成、接手）",
+    "core": "規則（查證格式、上網查資料分流、派工原則）合併進全域 CLAUDE.md；10 個 skill（派工、安全重構、文件治理、回饋稽核、波及範圍、專案驗證生成、接手、新專案立規矩、舊專案盤點、分階段重整）",
     "usage_guard": "每次對話與工具後讀用量，到門檻才注入「收尾」提醒；沒到完全不動",
     "task_check": "有背景任務時每 N 分鐘用 CronCreate 醒來檢查，全部結束就刪排程",
+    "project_auto": "第一次進一個專案：沒有 CLAUDE.md 就自動立規矩（cds-project-init），沒有盤點索引就自動盤點（cds-project-audit），達門檻只問一次要不要分階段重整（cds-modularize）；小腳本資料夾不做",
     "video": "video.py：搜影片、字幕／語音辨識逐字稿、場景截圖、直播錄一段、觀看數留言、Gemini 看畫面、最高畫質下載",
     "chrome": "Claude in Chrome：實際開網頁看、操作需登入網站、測自己的網站、教你操作前先核對畫面",
 }
@@ -221,6 +222,33 @@ def read_thresholds(lay: Layout) -> dict:
 
 
 DEFAULT_TASK_CHECK = {"enabled": True, "minutes": 15}
+DEFAULT_PROJECT_AUTO = {"autoInit": True, "autoAudit": True, "autoRefactor": False, "minSourceFiles": 10}
+
+
+def read_project_auto(lay: Layout) -> dict:
+    p = lay.payload / "config" / "dispatch-config.json"
+    out = dict(DEFAULT_PROJECT_AUTO)
+    try:
+        t = read_json(p).get("projectAutomation") or {}
+    except Exception:  # noqa: BLE001
+        return out
+    for k in ("autoInit", "autoAudit", "autoRefactor"):
+        if isinstance(t.get(k), bool):
+            out[k] = t[k]
+    if isinstance(t.get("minSourceFiles"), (int, float)) and t["minSourceFiles"] >= 1:
+        out["minSourceFiles"] = int(t["minSourceFiles"])
+    return out
+
+
+def write_project_auto(lay: Layout, auto: dict) -> None:
+    p = lay.payload / "config" / "dispatch-config.json"
+    d = read_json(p) if p.exists() else {}
+    t = d.get("projectAutomation") if isinstance(d.get("projectAutomation"), dict) else {}
+    desc = t.get("$說明") or "專案自動化：autoInit 新專案自動立規矩；autoAudit 舊專案自動盤點；autoRefactor 達門檻不問直接重整；minSourceFiles 小於此數且非 git 就不當專案。"
+    d["projectAutomation"] = {"$說明": desc, "autoInit": bool(auto.get("autoInit", True)), "autoAudit": bool(auto.get("autoAudit", True)),
+                              "autoRefactor": bool(auto.get("autoRefactor", False)), "minSourceFiles": int(auto.get("minSourceFiles", 10))}
+    d["updated"] = _dt.date.today().isoformat()
+    write_json(p, d)
 
 
 def read_task_check(lay: Layout) -> dict:
@@ -352,6 +380,7 @@ def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.de
         "usage": read_usage(lay),
         "thresholds": read_thresholds(lay) if m else dict(DEFAULT_THRESHOLDS),
         "task_check": read_task_check(lay) if m else dict(DEFAULT_TASK_CHECK),
+        "project_auto": read_project_auto(lay) if m else dict(DEFAULT_PROJECT_AUTO),
         "chrome": {"extension": chrome_extension_installed(), "native_host": chrome_native_host_registered(),
                    "default_enabled": chrome_default_enabled(lay)},
         "hooks": {"usage_guard": bool(m and (m.get("settings") or {}).get("hooksAdded")),
@@ -375,12 +404,14 @@ class Form:
     chrome_default_enabled: bool | None = None
     usage_guard: bool = True
     task_check: dict = field(default_factory=lambda: dict(DEFAULT_TASK_CHECK))
+    project_auto: dict = field(default_factory=lambda: dict(DEFAULT_PROJECT_AUTO))
 
 
 def form_from_state(state: dict) -> Form:
     f = Form()
     f.usage_guard = state["hooks"]["usage_guard_pref"]
     f.task_check = dict(state.get("task_check") or DEFAULT_TASK_CHECK)
+    f.project_auto = dict(state.get("project_auto") or DEFAULT_PROJECT_AUTO)
     f.web_enabled = state["web"]["enabled"]
     f.servers = {n: s["wanted"] for n, s in state["web"]["servers"].items()}
     f.env = {k: (state["web"]["env_override"].get(k) or state["web"]["env"].get(k) or state["web"]["env_defaults"].get(k) or "")
@@ -466,6 +497,11 @@ def diff(state: dict, form: Form) -> list[Change]:
     tc0 = state.get("task_check") or DEFAULT_TASK_CHECK
     if bool(form.task_check.get("enabled")) != bool(tc0["enabled"]) or int(form.task_check.get("minutes", tc0["minutes"])) != int(tc0["minutes"]):
         ch.append(Change("task_check", "背景任務巡檢 → " + (f"每 {int(form.task_check['minutes'])} 分鐘" if form.task_check.get("enabled") else "關閉")))
+    pa0 = state.get("project_auto") or DEFAULT_PROJECT_AUTO
+    pa_changed = [k for k in ("autoInit", "autoAudit", "autoRefactor", "minSourceFiles") if form.project_auto.get(k, pa0[k]) != pa0[k]]
+    if pa_changed:
+        lab = {"autoInit": "新專案自動立規矩", "autoAudit": "舊專案自動盤點", "autoRefactor": "達門檻不問直接重整", "minSourceFiles": "專案門檻（原始碼檔數）"}
+        ch.append(Change("project_auto", "專案自動化 → " + "、".join(f"{lab[k]}={'開' if form.project_auto[k] is True else ('關' if form.project_auto[k] is False else form.project_auto[k])}" for k in pa_changed)))
     if (form.download_dir or "") != (state["video"]["download_dir"] or ""):
         ch.append(Change("download_dir", f"下載資料夾 → {form.download_dir or '~/Downloads（預設）'}"))
     if form.chrome_default_enabled is not None and form.chrome_default_enabled != state["chrome"]["default_enabled"]:
@@ -552,6 +588,9 @@ def apply_form(lay: Layout, python: str, state: dict, form: Form, log, repo: Pat
     if any(c.kind == "task_check" for c in changes):
         write_task_check(lay, bool(form.task_check.get("enabled")), int(form.task_check.get("minutes", DEFAULT_TASK_CHECK["minutes"])))
         log(f"背景任務巡檢寫入：{'每 ' + str(int(form.task_check['minutes'])) + ' 分鐘' if form.task_check.get('enabled') else '關閉'}")
+    if any(c.kind == "project_auto" for c in changes):
+        write_project_auto(lay, form.project_auto)
+        log(f"專案自動化寫入：{form.project_auto}")
     if any(c.kind == "download_dir" for c in changes):
         local = _local(lay)
         local.setdefault("video", {})["downloadDir"] = form.download_dir or ""
@@ -740,7 +779,7 @@ def export_profile(state: dict, form: Form, include_keys: bool = False, current_
     d = {"claude-dev-system-profile": 1, "web_enabled": form.web_enabled, "servers": dict(form.servers), "env": dict(form.env),
          "video_enabled": form.video_enabled, "key_modes": dict(form.key_modes), "thresholds": dict(form.thresholds),
          "download_dir": form.download_dir, "chrome_default_enabled": form.chrome_default_enabled, "usage_guard": form.usage_guard,
-         "task_check": dict(form.task_check),
+         "task_check": dict(form.task_check), "project_auto": dict(form.project_auto),
          "key_notes": {n: (form.key_notes.get(n) if form.key_notes.get(n) is not None else k.get("account", "")) for n, k in state["keys"].items()
                        if (form.key_notes.get(n) if form.key_notes.get(n) is not None else k.get("account", ""))}}
     if include_keys:
@@ -773,7 +812,7 @@ def import_profile(form: Form, data: dict) -> Form:
     for k in ("web_enabled", "video_enabled", "download_dir", "chrome_default_enabled", "usage_guard"):
         if k in data:
             setattr(f, k, data[k])
-    for k in ("servers", "env", "key_modes", "thresholds", "task_check"):
+    for k in ("servers", "env", "key_modes", "thresholds", "task_check", "project_auto"):
         if isinstance(data.get(k), dict):
             vals = data[k]
             if k == "servers":

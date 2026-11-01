@@ -97,7 +97,7 @@ class App:
         ttk.Label(top, textvariable=self.title_var, font=("", 12, "bold")).pack(side="left")
         ttk.Button(top, text="重新整理（重讀狀態）", command=self.refresh).pack(side="right")
         ttk.Button(top, text="檢查（verify）", command=self.do_verify).pack(side="right", padx=4)
-        ttk.Button(top, text="自我測試（9 題無頭對話，約 30 分鐘）", command=self.do_selftest).pack(side="right", padx=4)
+        ttk.Button(top, text="自我測試（快測 3 題／全部 10 題）", command=self.do_selftest).pack(side="right", padx=4)
         ttk.Button(top, text="檢查更新", command=self.do_check_update).pack(side="right", padx=4)
 
         body = ttk.Frame(r)
@@ -236,6 +236,18 @@ class App:
         self._no_wheel_change(ttk.Spinbox(tcf, from_=1, to=120, width=5, textvariable=self.tc_min_var, command=self.update_diff)).pack(side="left")
         ttk.Label(tcf, text="分鐘自動檢查一次所有任務（結束或出錯就處理；全部結束就停；沒有任務時不會跑）").pack(side="left")
         self.tc_min_var.trace_add("write", lambda *a: self.update_diff())
+        pa = f.project_auto
+        paf = ttk.Frame(core); paf.pack(anchor="w", fill="x", pady=(4, 0))
+        self.pa_vars = {k: tk.BooleanVar(value=bool(pa.get(k))) for k in ("autoInit", "autoAudit", "autoRefactor")}
+        ttk.Label(paf, text="專案自動化：").pack(side="left")
+        for k, txt in (("autoInit", "新專案自動立規矩"), ("autoAudit", "舊專案自動盤點"), ("autoRefactor", "達門檻不問直接重整（預設關，會問一次）")):
+            ttk.Checkbutton(paf, text=txt, variable=self.pa_vars[k], command=self.update_diff).pack(side="left", padx=(0, 10))
+        ttk.Label(paf, text="專案門檻：原始碼 ≥").pack(side="left")
+        self.pa_min_var = tk.StringVar(value=str(int(pa.get("minSourceFiles", 10))))
+        self._no_wheel_change(ttk.Spinbox(paf, from_=1, to=999, width=5, textvariable=self.pa_min_var, command=self.update_diff)).pack(side="left")
+        ttk.Label(paf, text="個檔或是 git 專案才算").pack(side="left")
+        self.pa_min_var.trace_add("write", lambda *a: self.update_diff())
+        self.notes.append(ttk.Label(core, text=gm.TOOL_DESC["project_auto"], foreground="#555", wraplength=900, justify="left")); self.notes[-1].pack(anchor="w")
         uf = ttk.Frame(core); uf.pack(anchor="w", fill="x", pady=(6, 0))
         self.usage_var = tk.StringVar(value=s.get("usage", {}).get("text", ""))
         self.notes.append(ttk.Label(uf, textvariable=self.usage_var, wraplength=800, justify="left")); self.notes[-1].pack(side="left")
@@ -388,6 +400,11 @@ class App:
             f.task_check = {"enabled": self.tc_var.get(), "minutes": max(1, int(self.tc_min_var.get()))}
         except ValueError:
             f.task_check = dict(self.state.get("task_check") or gm.DEFAULT_TASK_CHECK)
+        try:
+            f.project_auto = {k: v.get() for k, v in self.pa_vars.items()}
+            f.project_auto["minSourceFiles"] = max(1, int(self.pa_min_var.get()))
+        except ValueError:
+            f.project_auto = dict(self.state.get("project_auto") or gm.DEFAULT_PROJECT_AUTO)
         if self.state["chrome"]["default_enabled"] is not None:
             f.chrome_default_enabled = self.chrome_var.get()
         return f
@@ -576,6 +593,10 @@ class App:
                 self.q.put(("ask_update", info))
             else:
                 self._log(f"自動檢查更新：已是最新 v{info['local']}")
+            rep = sorted((self.lay.home / "state" / "selftest-reports").glob("selftest-*.json")) if (self.lay.home / "state" / "selftest-reports").exists() else []
+            import time as _t
+            if not rep or _t.time() - rep[-1].stat().st_mtime > 30 * 86400:
+                self._log("提醒：超過 30 天沒跑自我測試（或從沒跑過）；外部服務與 Claude Code 改版會讓規則失效，建議按「自我測試」選快測 3 題（約 10 分鐘）")
         self._run_bg(job, refresh_after=False)
 
     def do_check_update(self):
@@ -615,17 +636,17 @@ class App:
         self._run_bg(job, refresh_after=False)
 
     def do_selftest(self):
-        msg = ("會用全新的無頭 Claude Code 對話重跑 9 道題（停車場 TDX、PowerShell 編碼、影片逐字稿、即時數值 API、"
-               "程式庫文件、影片數據與截圖、國外空品、影片動作 Gemini、Chrome 開頁），比對它實際用了哪些工具。"
+        msg = ("會用全新的無頭 Claude Code 對話重跑 10 道題（停車場 TDX、PowerShell 編碼、影片逐字稿、即時數值 API、"
+               "程式庫文件、影片數據與截圖、國外空品、影片動作 Gemini、Chrome 開頁、新專案自動立規矩），比對它實際用了哪些工具。"
                + chr(10) * 2 + "通常 20～40 分鐘（每題上限 9 分鐘，最壞約 80 分鐘）、用掉約九場短對話的用量；Chrome 題需要瀏覽器開著。"
                + chr(10) + "注意：測試中 Claude 會自己執行指令、寫檔、讀網頁，沒有人逐步確認；它只在一個空的暫存資料夾工作，但讀到的網頁內容是不受信任的。結果會逐題印在下方紀錄。繼續？")
-        ans = messagebox.askyesnocancel("自我測試", msg + chr(10) * 2 + "是＝只跑快測 3 題（PowerShell 編碼、即時數值 API、影片逐字稿，約 10 分鐘）　否＝全部 9 題　取消＝不跑")
+        ans = messagebox.askyesnocancel("自我測試", msg + chr(10) * 2 + "是＝只跑快測 3 題（PowerShell 編碼、即時數值 API、影片逐字稿，約 10 分鐘）　否＝全部 10 題　取消＝不跑")
         if ans is None:
             return
         smoke = bool(ans)
 
         def job():
-            self._log(f"=== 自我測試開始（claude -p × {3 if smoke else 9}）===")
+            self._log(f"=== 自我測試開始（claude -p × {3 if smoke else 10}）===")
             code = selftest.run(log=self._log, report_dir=self.lay.home / "state" / "selftest-reports", smoke=smoke)
             self._log(f"=== 自我測試{'全部通過' if code == 0 else '有題目未通過（見 ❌）'} ===")
         self._run_bg(job, refresh_after=False)
@@ -670,6 +691,9 @@ class App:
         self.guard_var.set(f.usage_guard)
         self.tc_var.set(bool(f.task_check.get("enabled")))
         self.tc_min_var.set(str(int(f.task_check.get("minutes", gm.DEFAULT_TASK_CHECK["minutes"]))))
+        for k, v in self.pa_vars.items():
+            v.set(bool(f.project_auto.get(k, v.get())))
+        self.pa_min_var.set(str(int(f.project_auto.get("minSourceFiles", self.pa_min_var.get()))))
         self.dl_var.set(f.download_dir or "")
         self.five_var.set(str(f.thresholds.get("fiveHour", self.five_var.get())))
         self.seven_var.set(str(f.thresholds.get("sevenDay", self.seven_var.get())))

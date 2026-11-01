@@ -1,6 +1,7 @@
 """通用工具測試：depgraph（循環偵測、別名、分層規則）、progress-diff（遺漏句偵測）。"""
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -171,6 +172,43 @@ class VideoDownloadDir(unittest.TestCase):
         (cfg / "local.json").write_text('{"keys": {}, "video": {"downloadDir": "' + (home / "dl").as_posix() + '"}}', encoding="utf-8")
         self.assertEqual(Path(self.run_dir(home)), home / "dl")
         self.assertEqual(Path(self.run_dir(home, str(home / "x"))), home / "x")
+
+
+class ProjectScan(unittest.TestCase):
+    def test_scan_inventory_cycles_bigfile_and_check(self):
+        tmp = Path(tempfile.mkdtemp(prefix="cds-scan-"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        (tmp / "pkg").mkdir()
+        (tmp / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+        (tmp / "pkg" / "a.py").write_text("from pkg import b" + chr(10), encoding="utf-8")
+        (tmp / "pkg" / "b.py").write_text("from pkg import a" + chr(10), encoding="utf-8")
+        (tmp / "pkg" / "big.py").write_text(("x = 1" + chr(10)) * 900, encoding="utf-8")
+        (tmp / "tests").mkdir()
+        (tmp / "tests" / "test_a.py").write_text("def test(): pass" + chr(10), encoding="utf-8")
+        (tmp / "package.json").write_text('{"scripts": {"dev": "next dev"}}', encoding="utf-8")
+        (tmp / "node_modules").mkdir()
+        (tmp / "node_modules" / "junk.js").write_text("x", encoding="utf-8")
+        tool = str(REPO / "tools" / "project-scan.py")
+        r = subprocess.run([sys.executable, tool, str(tmp), "--max-lines", "800"], capture_output=True, env=ENV)
+        self.assertEqual(r.returncode, 0, r.stderr.decode("utf-8", "replace"))
+        md = (tmp / "docs" / "PROJECT-INVENTORY.md").read_text(encoding="utf-8")
+        idx = json.loads((tmp / ".claude" / "project-scan.json").read_text(encoding="utf-8"))
+        self.assertEqual(idx["counts"]["source"], 4, idx["counts"])
+        self.assertEqual(idx["counts"]["test"], 1)
+        self.assertNotIn("node_modules/junk.js", idx["files"])
+        self.assertEqual(len(idx["cycles"]), 1)
+        self.assertIn("pkg/big.py", md)
+        kinds = {p["kind"] for p in idx["problems"]}
+        self.assertEqual(kinds, {"cycle", "big-file"})
+        self.assertTrue(any("npm run dev" in e for e in idx["entryPoints"]))
+        r = subprocess.run([sys.executable, tool, str(tmp), "--check"], capture_output=True, env=ENV)
+        self.assertEqual(r.returncode, 0, "沒改檔 --check 要回 0")
+        (tmp / "pkg" / "a.py").write_text("from pkg import b  # changed" + chr(10), encoding="utf-8")
+        r = subprocess.run([sys.executable, tool, str(tmp), "--check"], capture_output=True, env=ENV)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("pkg/a.py", r.stdout.decode("utf-8", "replace"))
+        r = subprocess.run([sys.executable, tool, str(tmp), "--summary"], capture_output=True, env=ENV)
+        self.assertIn("不算專案", r.stdout.decode("utf-8", "replace"), "4 個原始碼檔、沒 git → 小腳本資料夾")
 
 
 class WebQuickConsistency(unittest.TestCase):

@@ -2,6 +2,14 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.11.0（2026-11-01，需換新 exe）
+
+- **專案自動化**（使用者：「exe 執行並套用後全部會自動化全部完成，每個專案也不需要我特地說」）：三個新 skill——`cds-project-init`（新專案自動立規矩：專案 CLAUDE.md、盤點、依賴閘門、PROGRESS.md）、`cds-project-audit`（舊專案自動盤點：盤點清單、架構與資料流、九欄位問題清單；達門檻只問一次要不要重整，答案記進索引）、`cds-modularize`（A 基準→B 保護→C 逐模組→D 整合→E 驗收，刪前七項確認，閘門收尾）。core.md 加「專案自動化」與「什麼時候問使用者」兩條可判定規則；`dispatch-config.json` 加 `projectAutomation`（autoInit／autoAudit／autoRefactor／minSourceFiles），視窗核心區可改。
+- 新工具 `tools/project-scan.py`（標準庫）：檔案分類統計、入口、最大檔、Python 與 JS／TS 依賴圖與循環、被引用最多的模組、問題清單；`.claude/project-scan.json` 存每檔雜湊，`--check` 列出改過的檔（索引過期就重驗），`--summary` 一行判定「算不算專案」。有測試；對 claude-dev-system、QTranslate、Meeting-Assistant 各跑過 `--summary`（23／14／54 個原始碼檔，都判「算專案」）。
+- 紀錄細節：`cds-session-pickup` 定 PROGRESS.md 固定格式（四段＋「決策：日期｜決定｜原因｜證據」當下就寫）、開工先 `--check`。
+- 自我測試第 10 題「init」：在播種 12 個 Python 檔（含循環）的空專案裡只說「看一下結構」，驗 Claude 會不會自己跑 project-scan 並寫 CLAUDE.md；selftest 每題改用獨立子目錄、支援 `seed`。視窗按鈕改「自我測試（快測 3 題／全部 10 題）」；開窗若超過 30 天沒跑自我測試，紀錄區提醒一行。
+- 做不到、明說的：同一場對話聊太長的失憶（Claude Code context 上限）、外部服務壞掉（靠快測發現）、花大額度的重整決定（問一次）。
+
 ## 0.10.13（2026-11-01，需換新 exe）
 
 - 自我測試跑完自動清暫存：每題的工作目錄本來就是 TemporaryDirectory；現在連 Claude Code 替那個目錄建的 `%LOCALAPPDATA%/Temp/claude/<slug>`（Claude 寫的腳本、截圖都在那，之前要我手動刪）也一起刪，只刪 slug 含 `cds-selftest-` 的；報告 `state/selftest-reports/` 只留最近 10 份；紀錄最後印一行說清了什麼。影片快取維持 video.py 的 7／30 天自動清。來源：使用者「跑自我測試按鈕產生的文件與檔案跑完後也會自動刪除嗎」。

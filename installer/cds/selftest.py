@@ -193,7 +193,13 @@ def run(only: list[str] | None = None, list_only: bool = False, cases_path: Path
         for c in cases:
             t0 = time.time()
             log(f"── {c['id']}：{c['name']}")
-            code, out, err = runner(build_cmd(exe, c, cfg), cwd, timeout)
+            case_dir = os.path.join(cwd, c["id"])  # 每題獨立子目錄，播種的檔不互相影響
+            os.makedirs(case_dir, exist_ok=True)
+            for rel, content in (c.get("seed") or {}).items():  # seed：先在工作目錄放檔，用來測「專案自動化」這類看環境才觸發的規則
+                fp = Path(case_dir) / rel
+                fp.parent.mkdir(parents=True, exist_ok=True)
+                fp.write_text(content, encoding="utf-8")
+            code, out, err = runner(build_cmd(exe, c, cfg), case_dir, timeout)
             calls, res = parse_stream(out)
             calls = [mask(x) for x in calls]
             ok, notes = judge(c, calls, (res.get("result") or ""))
@@ -206,7 +212,7 @@ def run(only: list[str] | None = None, list_only: bool = False, cases_path: Path
             cost = res.get("total_cost_usd")
             log(f"   工具呼叫 {len(calls)} 次、{time.time() - t0:.0f} 秒" + (f"、用量約 ${cost:.2f} 等值（訂閱制為估算）" if isinstance(cost, (int, float)) else "")
                 + (f"、token 合計 {usage['total']:,}（輸入 {usage['input_tokens']:,}／輸出 {usage['output_tokens']:,}／快取建 {usage['cache_creation_input_tokens']:,}／快取讀 {usage['cache_read_input_tokens']:,}）" if usage else ""))
-            junk = claude_temp_dir_for(cwd)
+            junk = claude_temp_dir_for(case_dir)
             if junk:
                 shutil.rmtree(junk, ignore_errors=True)  # 這題 Claude 寫的腳本、截圖、暫存都在這
             results.append({"id": c["id"], "name": c["name"], "ok": ok, "calls": [x[:400] for x in calls], "notes": notes, "cost_usd": cost, "usage": usage,

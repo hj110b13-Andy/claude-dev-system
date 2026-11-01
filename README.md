@@ -8,7 +8,7 @@
 | 目錄 | 內容 | 安裝到（`<CLAUDE_HOME>`＝`~/.claude`） |
 |---|---|---|
 | `rules/` | 通用規則（分層說明見 `rules/README.md`）；`core.md` 是唯一會進 CLAUDE.md 的部分 | `claude-dev-system/rules/`；`core.md` 另合併進 `CLAUDE.md` 標記區塊 |
-| `skills/` | `cds-agent-dispatch`、`cds-safe-refactor`、`cds-doc-governance`、`cds-feedback-audit`、`cds-blast-radius`、`cds-verify-app`、`cds-session-pickup`（皆有 frontmatter） | `skills/<名稱>/`（Claude Code 原生個人 skill 位置） |
+| `skills/` | `cds-agent-dispatch`、`cds-safe-refactor`、`cds-doc-governance`、`cds-feedback-audit`、`cds-blast-radius`、`cds-verify-app`、`cds-session-pickup`、`cds-project-init`、`cds-project-audit`、`cds-modularize`（皆有 frontmatter） | `skills/<名稱>/`（Claude Code 原生個人 skill 位置） |
 | `hooks/usage_guard.py` | 用量守門 hook（通用版；門檻讀設定檔） | `claude-dev-system/hooks/`，並在 `settings.json` 註冊 UserPromptSubmit／PostToolUse |
 | `tools/` | `depgraph.py`（依賴圖／循環閘門）、`moduleInventory.py`（模組盤點）、`progress-diff.py`（文件瘦身逐句比對）、`video.py`（影片：搜尋、逐字稿、截圖、數據、Gemini 問答；選用，需 `--with-video`）；不寫死路徑，全用參數 | `claude-dev-system/tools/` |
 | `config/` | `VERSION`、`compat.json`、`dispatch-config.json`（用量門檻、方案期間、模型表；專案 `.claude/dispatch-config.json` 優先於全域）、`web-sources.json`（聯網來源：免金鑰搜尋 MCP 與 WebSearch 上限 env，選用）、`video.json`（影片來源：要 pip 的套件與 video.py 預設值，選用） | `claude-dev-system/config/`（dispatch-config 可自行修改，更新時保留；本機金鑰與開關在 `local.json`，不進 repo） |
@@ -46,6 +46,10 @@ python installer/install.py verify     # 全部 ✅ 才算完成；重開 Claude
 python installer/install.py gui        # Windows：py -3 installer/install.py gui
 ```
 所有選用項目、金鑰（框內顯示目前值、可測試、可填「哪個帳號申請的」備註）、用量守門開關與門檻、目前用量（5 小時／7 天 %）、背景任務巡檢（每 N 分鐘）、WebSearch 上限、下載資料夾、Claude in Chrome 都在視窗裡改；底下會列「將變更 N 項」，按「套用」才動，按「取消」回到實際狀態。開啟與套用後都重讀真實檔案，畫面不會和實際不一樣。缺 ffmpeg／PowerShell 7／faster-whisper 有安裝按鈕。打包成 exe 與視窗內更新在下一版。
+
+## 專案自動化（0.11.0；裝好後不用對任何專案做事）
+
+每場對話開工時 Claude 自己判斷：資料夾沒有 CLAUDE.md 且算得上專案（git 或原始碼 ≥10 檔）→ `cds-project-init` 立規矩（專案 CLAUDE.md、盤點、依賴閘門、PROGRESS.md），做完一句話告知；舊專案沒有盤點索引 → `cds-project-audit` 產出 `docs/PROJECT-INVENTORY.md`、`docs/ARCHITECTURE.md`、`docs/PROJECT-ISSUES.md`，問題達門檻只問一次「要不要分階段重整」（答過不再問）；說要就 `cds-modularize` 照 A～E 五階段做，刪任何東西前七項確認。小腳本資料夾什麼都不做。開關與門檻在設定視窗「核心」區（`projectAutomation`）。盤點工具 `tools/project-scan.py`（Python 與 JS／TS 的依賴圖、循環、大檔、入口、索引比對）。
 
 ## 執行檔（不用裝 Python 也能開設定視窗；Windows）
 

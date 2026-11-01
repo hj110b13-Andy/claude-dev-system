@@ -75,5 +75,12 @@
     "$說明": "背景任務巡檢：派出 Agent／背景指令／Monitor／Workflow 後，Claude 用 CronCreate 每 minutes 分鐘醒來檢查所有進行中的任務（結束或出錯就處理），全部結束後刪除排程；沒有背景任務時不建。enabled=false 則完全不做。",
     "enabled": true,
     "minutes": 15
+  },
+  "projectAutomation": {
+    "$說明": "專案自動化（0.11.0）：autoInit＝第一次進沒有 CLAUDE.md 的專案自動立規矩（cds-project-init）；autoAudit＝第一次進沒有盤點索引的舊專案自動盤點（cds-project-audit）；autoRefactor＝盤點後達門檻時不問直接分階段重整（預設 false，會問一次）；minSourceFiles＝原始碼檔少於此數且不是 git 專案就當小腳本資料夾，什麼都不做。專案 .claude/dispatch-config.json 同名鍵優先。",
+    "autoInit": true,
+    "autoAudit": true,
+    "autoRefactor": false,
+    "minSourceFiles": 10
   }
 }
