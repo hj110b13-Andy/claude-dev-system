@@ -500,11 +500,15 @@ class App:
             pass
         self.root.after(100, self._pump)
 
-    def _run_bg(self, fn, refresh_after=True):
+    def _busy_msg(self):
+        messagebox.showinfo("稍等", f"「{getattr(self, 'busy_what', '上一個工作')}」還在執行，請等它跑完再按（結果會印在下方紀錄；套用、檢查、更新、測試會寫同一份設定檔，所以一次只跑一個）。")
+
+    def _run_bg(self, fn, refresh_after=True, what="上一個工作"):
         if self.busy:
-            messagebox.showinfo("稍等", "有工作正在執行")
+            self._busy_msg()
             return
         self.busy = True
+        self.busy_what = what
         self.apply_btn.configure(state="disabled")
 
         def work():
@@ -543,7 +547,7 @@ class App:
             self._log("=== 套用開始 ===")
             code = gm.apply_form(self.lay, PY, state, form, self._log, repo=self.repo)
             self._log(f"=== 套用{'完成' if code == 0 else '完成但有項目失敗（見 ❌）'}；重開 Claude Code 對話後生效 ===")
-        self._run_bg(job)
+        self._run_bg(job, what="套用")
 
     def do_verify(self):
         def job():
@@ -551,7 +555,7 @@ class App:
             code, lines = commands.verify(self.lay, repo=self.repo, importer=gm.system_importer(PY) if FROZEN else gm.video.default_importer)  # exe 內建的 Python 沒裝 yt-dlp，要問系統 Python
             for ln in lines:
                 self._log(web.mask(ln, gm._local(self.lay)))
-        self._run_bg(job, refresh_after=False)
+        self._run_bg(job, refresh_after=False, what="檢查（verify）")
 
     def do_install(self, action: str):
         gpu = False
@@ -565,7 +569,7 @@ class App:
             code, out = gm.install_action(action, PY, gpu=gpu)
             self._log(out.strip()[-1200:] or "(無輸出)")
             self._log(f"{'✅' if code == 0 else '❌'} 結束碼 {code}")
-        self._run_bg(job)
+        self._run_bg(job, what="安裝環境元件")
 
     def do_test_key(self, n: str):
         keys = {m: v.get().strip() for m, v in self.key_vars.items() if v.get().strip()}  # 框內的值（含尚未套用的）
@@ -574,7 +578,7 @@ class App:
             messagebox.showinfo("測試", "請先輸入金鑰")
             return
         if self.busy:
-            messagebox.showinfo("稍等", "有工作正在執行")
+            self._busy_msg()
             return
         self.q.put(("keystatus", (n, "測試中…")))
 
@@ -583,7 +587,7 @@ class App:
             self.q.put(("keystatus", (n, f"{'✅ 有效' if ok else '❌ 無效'} {msg}")))
             acct = self.note_vars[n].get().strip() if n in self.note_vars else ""
             self._log(f"金鑰 {n}{'（帳號：' + acct + '）' if acct else '（帳號備註未填）'} 測試：{'✅' if ok else '❌'} {msg}")
-        self._run_bg(job, refresh_after=False)
+        self._run_bg(job, refresh_after=False, what="測試金鑰")
 
     def _auto_check_update(self):
         if self.busy:
@@ -602,7 +606,7 @@ class App:
             import time as _t
             if not rep or _t.time() - rep[-1].stat().st_mtime > 30 * 86400:
                 self._log("提醒：超過 30 天沒跑自我測試（或從沒跑過）；外部服務與 Claude Code 改版會讓規則失效，建議按「自我測試」選快測 3 題（約 10 分鐘）")
-        self._run_bg(job, refresh_after=False)
+        self._run_bg(job, refresh_after=False, what="開窗自動檢查更新")
 
     def do_check_update(self):
         def job():
@@ -616,7 +620,7 @@ class App:
                 return
             self._log(f"有新版：v{info['local']} → v{info['remote']}")
             self.q.put(("ask_update", info))
-        self._run_bg(job, refresh_after=False)
+        self._run_bg(job, refresh_after=False, what="檢查更新")
 
     def _ask_update(self, info):
         if not messagebox.askyesno("更新", f"GitHub 有新版 v{info['remote']}（目前 v{info['local']}）。\n\n要下載到 app/ 資料夾嗎？下載後按「套用」才會寫進 Claude Code。"):
@@ -631,14 +635,14 @@ class App:
             self.repo = appdir.effective_repo(self.lay)
             if FROZEN and appdir.code_changed_since(REPO, self.repo):
                 self._log(f"⚠️ 新版改了安裝器程式碼：規則／工具可直接套用，但視窗功能要換新執行檔才會更新 → {appdir.RELEASES_URL}")
-        self._run_bg(job)
+        self._run_bg(job, what="下載更新")
 
     def do_usage(self):
         def job():
             u = gm.refresh_usage(self.lay, PY)
             self.q.put(("usage", u["text"]))
             self._log(u["text"])
-        self._run_bg(job, refresh_after=False)
+        self._run_bg(job, refresh_after=False, what="重新讀取用量")
 
     def do_selftest(self):
         msg = ("會用全新的無頭 Claude Code 對話重跑 11 道題（停車場 TDX、PowerShell 編碼、影片逐字稿、即時數值 API、"
@@ -654,7 +658,7 @@ class App:
             self._log(f"=== 自我測試開始（claude -p × {3 if smoke else 11}）===")
             code = selftest.run(log=self._log, report_dir=self.lay.home / "state" / "selftest-reports", smoke=smoke)
             self._log(f"=== 自我測試{'全部通過' if code == 0 else '有題目未通過（見 ❌）'} ===")
-        self._run_bg(job, refresh_after=False)
+        self._run_bg(job, refresh_after=False, what="自我測試")
 
     def do_chrome_test(self):
         if not messagebox.askyesno("Chrome 實際連線測試", "會在背景跑一次 Claude Code（--chrome），約 40 秒，並用掉約一場對話開場的用量。繼續？"):
@@ -664,7 +668,7 @@ class App:
             self._log("=== Chrome 實際連線測試（claude -p --chrome）===")
             ok, msg = gm.chrome_live_test()
             self._log(f"{'✅ 可用' if ok else '❌ 不可用'}：{msg}")
-        self._run_bg(job, refresh_after=False)
+        self._run_bg(job, refresh_after=False, what="Chrome 實際連線測試")
 
     def do_export(self):
         inc = messagebox.askyesnocancel("匯出設定", "要把金鑰一起匯出嗎？\n\n是＝含金鑰明文（方便搬到新裝置，檔案要妥善保管、不可分享）\n否＝只匯出開關與數值\n取消＝不匯出\n\n（環境安裝如 ffmpeg、PowerShell 7 不在設定檔內，新裝置開視窗後按安裝鈕）")
@@ -735,7 +739,7 @@ class App:
                 return
             at, p = items[i[0]]
             if self.busy:
-                messagebox.showinfo("稍等", "有工作正在執行")
+                self._busy_msg()
                 return
             if messagebox.askyesno("還原", f"用 {at} 的備份覆蓋現在的 settings.json？（現在的會先另存一份 -before-restore 備份）"):
                 gm.restore_backup(self.lay, p)
@@ -754,7 +758,7 @@ class App:
             code, lines = commands.uninstall(self.lay)
             for ln in lines:
                 self._log(web.mask(ln, gm._local(self.lay)))
-        self._run_bg(job)
+        self._run_bg(job, what="解除安裝")
 
 
 def main(argv=None) -> int:
