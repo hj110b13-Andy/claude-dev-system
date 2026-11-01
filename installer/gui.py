@@ -489,13 +489,15 @@ class App:
                         self._close_after_apply = False
                         self.root.destroy()
                         return
+                    pending = getattr(self, "_pending_update", None)
+                    if pending:  # 「檢查更新」結束後才問要不要下載；在 busy 解除前問，按「是」會被「還在執行」擋掉（0.11.5 實測：只印有新版、從不下載）
+                        self._pending_update = None
+                        self._ask_update(pending)
                 elif kind == "keystatus":
                     n, text = payload
                     self.key_status[n].set(text)
                 elif kind == "usage":
                     self.usage_var.set(payload)
-                elif kind == "ask_update":
-                    self._ask_update(payload)
         except queue.Empty:
             pass
         self.root.after(100, self._pump)
@@ -599,7 +601,7 @@ class App:
                 self._log(f"自動檢查更新：{info['error']}（可稍後按「檢查更新」）")
             elif info["newer"]:
                 self._log(f"自動檢查更新：有新版 v{info['local']} → v{info['remote']}")
-                self.q.put(("ask_update", info))
+                self._pending_update = info
             else:
                 self._log(f"自動檢查更新：已是最新 v{info['local']}")
             rep = sorted((self.lay.home / "state" / "selftest-reports").glob("selftest-*.json")) if (self.lay.home / "state" / "selftest-reports").exists() else []
@@ -619,11 +621,12 @@ class App:
                 self._log(f"✅ 已是最新：v{info['local']}（GitHub v{info['remote']}）")
                 return
             self._log(f"有新版：v{info['local']} → v{info['remote']}")
-            self.q.put(("ask_update", info))
+            self._pending_update = info
         self._run_bg(job, refresh_after=False, what="檢查更新")
 
     def _ask_update(self, info):
         if not messagebox.askyesno("更新", f"GitHub 有新版 v{info['remote']}（目前 v{info['local']}）。\n\n要下載到 app/ 資料夾嗎？下載後按「套用」才會寫進 Claude Code。"):
+            self._log(f"已略過下載 v{info['remote']}（之後可再按「檢查更新」）")
             return
 
         def job():
@@ -633,6 +636,7 @@ class App:
                 self._log(f"❌ 下載失敗：{type(e).__name__}: {e}")
                 return
             self.repo = appdir.effective_repo(self.lay)
+            self._log(f"✅ 已下載到 {self.repo}；接著按「套用」寫進 Claude Code（將變更區會列出要改的項目）")
             if FROZEN and appdir.code_changed_since(REPO, self.repo):
                 self._log(f"⚠️ 新版改了安裝器程式碼：規則／工具可直接套用，但視窗功能要換新執行檔才會更新 → {appdir.RELEASES_URL}")
         self._run_bg(job, what="下載更新")
