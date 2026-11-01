@@ -95,9 +95,13 @@ class App:
         top.pack(fill="x")
         self.title_var = tk.StringVar()
         ttk.Label(top, textvariable=self.title_var, font=("", 12, "bold")).pack(side="left")
+        sub = ttk.Frame(r, padding=(8, 0, 8, 4))  # 第二列：設定目錄與提醒，不跟右邊的按鈕擠同一列（使用者截圖：按鈕被擠出畫面）
+        sub.pack(fill="x")
+        self.sub_var = tk.StringVar()
+        ttk.Label(sub, textvariable=self.sub_var, foreground="#8a4b00", wraplength=1400, justify="left").pack(side="left")
         ttk.Button(top, text="重新整理（重讀狀態）", command=self.refresh).pack(side="right")
         ttk.Button(top, text="檢查（verify）", command=self.do_verify).pack(side="right", padx=4)
-        ttk.Button(top, text="自我測試（快測 3 題／全部 10 題）", command=self.do_selftest).pack(side="right", padx=4)
+        ttk.Button(top, text="自我測試（快測 3 題／全部 11 題）", command=self.do_selftest).pack(side="right", padx=4)
         ttk.Button(top, text="檢查更新", command=self.do_check_update).pack(side="right", padx=4)
 
         body = ttk.Frame(r)
@@ -194,8 +198,9 @@ class App:
         s, f = self.state, self.form
         self.key_vars.clear(); self.key_dirty.clear(); self.key_status.clear(); self.mode_vars.clear(); self.mode_boxes.clear(); self.server_vars.clear(); self.env_vars.clear()
         src = "執行檔內建" if (FROZEN and self.repo == REPO) else ("已下載的 app/" if self.repo != REPO else "原始碼 repo")
-        warn = "　⚠️ 來源比已安裝舊，按「檢查更新」再套用" if gm.source_older(s) else ""
-        self.title_var.set(f"來源 v{s['repo_version']}（{src}）　已安裝：{('v' + s['version']) if s['installed'] else '尚未安裝'}{warn}　設定目錄：{self.lay.home}")
+        warn = "　⚠️ 來源比已安裝舊：按「檢查更新」下載後再套用（這台已安裝的仍是新的，功能不受影響）" if gm.source_older(s) else ""
+        self.title_var.set(f"來源 v{s['repo_version']}（{src}）　已安裝：{('v' + s['version']) if s['installed'] else '尚未安裝'}")
+        self.sub_var.set(f"設定目錄：{self.lay.home}{warn}")
 
         # 環境
         ev = list(s["env"].values())
@@ -636,17 +641,17 @@ class App:
         self._run_bg(job, refresh_after=False)
 
     def do_selftest(self):
-        msg = ("會用全新的無頭 Claude Code 對話重跑 10 道題（停車場 TDX、PowerShell 編碼、影片逐字稿、即時數值 API、"
-               "程式庫文件、影片數據與截圖、國外空品、影片動作 Gemini、Chrome 開頁、新專案自動立規矩），比對它實際用了哪些工具。"
+        msg = ("會用全新的無頭 Claude Code 對話重跑 11 道題（停車場 TDX、PowerShell 編碼、影片逐字稿、即時數值 API、"
+               "程式庫文件、影片數據與截圖、國外空品、影片動作 Gemini、Chrome 開頁、新專案自動立規矩、有交接紀錄時仍立規矩），比對它實際用了哪些工具。"
                + chr(10) * 2 + "通常 20～40 分鐘（每題上限 9 分鐘，最壞約 80 分鐘）、用掉約九場短對話的用量；Chrome 題需要瀏覽器開著。"
                + chr(10) + "注意：測試中 Claude 會自己執行指令、寫檔、讀網頁，沒有人逐步確認；它只在一個空的暫存資料夾工作，但讀到的網頁內容是不受信任的。結果會逐題印在下方紀錄。繼續？")
-        ans = messagebox.askyesnocancel("自我測試", msg + chr(10) * 2 + "是＝只跑快測 3 題（PowerShell 編碼、即時數值 API、影片逐字稿，約 10 分鐘）　否＝全部 10 題　取消＝不跑")
+        ans = messagebox.askyesnocancel("自我測試", msg + chr(10) * 2 + "是＝只跑快測 3 題（PowerShell 編碼、即時數值 API、影片逐字稿，約 10 分鐘）　否＝全部 11 題　取消＝不跑")
         if ans is None:
             return
         smoke = bool(ans)
 
         def job():
-            self._log(f"=== 自我測試開始（claude -p × {3 if smoke else 10}）===")
+            self._log(f"=== 自我測試開始（claude -p × {3 if smoke else 11}）===")
             code = selftest.run(log=self._log, report_dir=self.lay.home / "state" / "selftest-reports", smoke=smoke)
             self._log(f"=== 自我測試{'全部通過' if code == 0 else '有題目未通過（見 ❌）'} ===")
         self._run_bg(job, refresh_after=False)
