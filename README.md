@@ -54,7 +54,7 @@ python installer/install.py gui        # Windows：py -3 installer/install.py gu
 ## 執行檔（不用裝 Python 也能開設定視窗；Windows）
 
 從 [Releases](https://github.com/hj110b13-Andy/claude-dev-system/releases/latest) 下載 `claude-dev-system-settings.exe`，直接開。第一次 Windows SmartScreen 會擋（沒有程式碼簽章）：按「其他資訊」→「仍要執行」。
-- exe 內含一份規則／工具／skill 快照；頂端「檢查更新」會比對 GitHub 的版本，有新版就下載到 `~/.claude/claude-dev-system/app/`，之後按「套用」寫進 Claude Code，不用換 exe。只有安裝器程式碼本身有變（視窗功能）才需要到 Releases 抓新 exe，視窗會提示。
+- exe 內含一份規則／工具／skill 快照；頂端「檢查更新」比對 GitHub 的版本，按「是」就一次做完：下載規則／工具到 `~/.claude/claude-dev-system/app/` → 套用到 Claude Code → 視窗程式（exe 本身）有新版就自動下載（核對 Release 附的 sha256）、換掉並重開視窗。exe 只需要手動下載這一次。
 - hook 與影片工具仍需要系統有 Python ≥3.10（exe 內建的 Python 不能代替）；環境區會顯示找到的是哪個 Python，沒有就有「開下載頁」按鈕。
 - 自己打包：`py -3 -m pip install pyinstaller && py -3 installer/build_exe.py`，產物在 `dist/`。推 `v*` 標籤時 GitHub Actions 會自動打包並附在 Release。
 

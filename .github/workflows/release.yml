@@ -36,6 +36,12 @@ jobs:
           $p = Start-Process -FilePath $exe -ArgumentList @('--claude-home', $tmp, '--selfcheck', "$tmp/state.json") -Wait -PassThru
           Get-Content "$tmp/state.json" -ErrorAction SilentlyContinue
           if ($p.ExitCode -ne 0) { throw "selfcheck failed (exit $($p.ExitCode))" }
+      - name: sha256（視窗內自動換 exe 時核對用）
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash dist/claude-dev-system-settings.exe -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path dist/claude-dev-system-settings.exe.sha256 -Value "$h  claude-dev-system-settings.exe" -NoNewline -Encoding ascii
+          Get-Content dist/claude-dev-system-settings.exe.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: claude-dev-system-settings
@@ -44,5 +50,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/claude-dev-system-settings.exe
+          files: |
+            dist/claude-dev-system-settings.exe
+            dist/claude-dev-system-settings.exe.sha256
           generate_release_notes: true

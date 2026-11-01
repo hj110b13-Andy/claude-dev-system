@@ -2,15 +2,19 @@
 
 為什麼要這層：PyInstaller 打包的 exe 內含一份 repo 快照（sys._MEIPASS/repo），但使用者不該為了規則改一行就換 exe。
 所以 exe 啟動時先看 app/ 有沒有更新的版本（config/VERSION 比較大），有就用它當 repo 來源；「檢查更新」按鈕抓 GitHub master 的 VERSION，
-比本機新就下載整個 zip、只取需要的資料夾、原子換掉 app/。安裝器程式碼（installer/）也會一起下載，但 exe 本身執行的仍是打包時的程式碼：
-程式碼有變時（CHANGELOG 標「需換新 exe」）視窗會提示到 Releases 頁抓新 exe。
+比本機新就下載整個 zip、只取需要的資料夾、原子換掉 app/。安裝器程式碼（installer/）也會一起下載，但 exe 本身執行的仍是打包時的程式碼，所以視窗程式有變時要換 exe——
+這件事也在視窗內自動做（0.11.7 起）：查 GitHub 最新 Release 的 exe（tag 版本比內建新就下載），大小與 .sha256 都對才換；
+Windows 執行中的 exe 可以改名不能刪，所以目前的改成 .old.exe、新的改成原名，重開視窗，下次啟動把 .old 刪掉。
 只用標準庫；下載走 HTTPS 到使用者自己的公開 repo。
 """
 from __future__ import annotations
 
+import hashlib
 import io
+import json
 import shutil
 import tempfile
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -23,6 +27,8 @@ BRANCH = "master"
 RAW_VERSION_URL = f"https://raw.githubusercontent.com/{OWNER_REPO}/{BRANCH}/config/VERSION"
 ZIP_URL = f"https://github.com/{OWNER_REPO}/archive/refs/heads/{BRANCH}.zip"
 RELEASES_URL = f"https://github.com/{OWNER_REPO}/releases/latest"
+LATEST_API = f"https://api.github.com/repos/{OWNER_REPO}/releases/latest"
+EXE_NAME = "claude-dev-system-settings.exe"
 KEEP_DIRS = ("rules", "tools", "hooks", "skills", "config", "installer", "docs")
 KEEP_FILES = ("README.md", "CHANGELOG.md", "CLAUDE.md", "LICENSE")
 
@@ -117,3 +123,71 @@ def code_changed_since(bundled: Path, repo: Path) -> bool:
         return a != b
     except Exception:  # noqa: BLE001
         return False
+
+
+def check_exe_update(bundled_ver: str | None, http=_http_get) -> dict:
+    """GitHub 最新 Release 的 exe 是否比執行中的 exe（內建版本）新。回 {tag, url, size, sha_url, newer, error}。"""
+    none = {"tag": None, "url": None, "size": 0, "sha_url": None, "newer": False}
+    try:
+        data = json.loads(http(LATEST_API, 20).decode("utf-8"))
+    except Exception as e:  # noqa: BLE001
+        return {**none, "error": f"查不到 Releases：{type(e).__name__}: {e}"}
+    tag = str(data.get("tag_name") or "").lstrip("v").strip()
+    assets = {a.get("name"): a for a in data.get("assets", []) if isinstance(a, dict)}
+    exe = assets.get(EXE_NAME)
+    if not tag or not exe or not exe.get("browser_download_url"):
+        return {**none, "tag": tag or None, "error": "最新 Release 沒有附 exe"}
+    sha = assets.get(EXE_NAME + ".sha256")
+    return {"tag": tag, "url": exe["browser_download_url"], "size": int(exe.get("size") or 0),
+            "sha_url": sha.get("browser_download_url") if sha else None,
+            "newer": parse_ver(tag) > parse_ver(bundled_ver or "0"), "error": None}
+
+
+def download_exe(info: dict, exe_path: Path, log=print, http=_http_get) -> Path:
+    """下載新 exe 到 <exe>.new.exe；大小與 Release 附的 .sha256 都對才留下（沒有 .sha256 的舊 Release 至少要像個 exe）。"""
+    log(f"下載視窗程式 v{info['tag']}（{info['url']}）…")
+    data = http(info["url"], 300)
+    if info.get("size") and len(data) != int(info["size"]):
+        raise ValueError(f"下載大小 {len(data)} 與 Release 標的 {info['size']} 不符，不換")
+    if info.get("sha_url"):
+        want = http(info["sha_url"], 20).decode("utf-8").split()[0].lower()
+        got = hashlib.sha256(data).hexdigest()
+        if want != got:
+            raise ValueError("sha256 不符，不換 exe")
+    elif len(data) < 1_000_000 or data[:2] != b"MZ":
+        raise ValueError("下載內容不像 exe，不換")
+    new = exe_path.with_name(exe_path.stem + ".new.exe")
+    new.write_bytes(data)
+    log(f"下載完成 {len(data) / 1048576:.1f} MB，已驗證")
+    return new
+
+
+def swap_exe(exe_path: Path, new_path: Path) -> Path:
+    """執行中的 exe 在 Windows 可以改名、不能刪：目前的改成 .old.exe，新的改成原名。回 .old 路徑（下次啟動刪）。換不成就把原本的還原。"""
+    old = exe_path.with_name(exe_path.stem + ".old.exe")
+    if old.exists():
+        try:
+            old.unlink()
+        except OSError:  # 上一個舊檔還被鎖著（例如連續更新兩次）→ 換個名字
+            old = exe_path.with_name(f"{exe_path.stem}.old{int(time.time())}.exe")
+    exe_path.rename(old)
+    try:
+        new_path.rename(exe_path)
+    except Exception:
+        old.rename(exe_path)
+        raise
+    return old
+
+
+def cleanup_old_exe(exe_path: Path) -> int:
+    """啟動時刪掉上次更新留下的 .old*.exe；還被鎖著就下次再刪。回刪掉的數量。"""
+    n = 0
+    for old in exe_path.parent.glob(exe_path.stem + ".old*.exe"):
+        for _ in range(10):
+            try:
+                old.unlink()
+                n += 1
+                break
+            except OSError:
+                time.sleep(0.3)
+    return n

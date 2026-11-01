@@ -489,6 +489,12 @@ class App:
                         self._close_after_apply = False
                         self.root.destroy()
                         return
+                    if getattr(self, "_relaunch", False):
+                        self._relaunch = False
+                        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                        subprocess.Popen([sys.executable, "--after-update"], cwd=str(Path(sys.executable).parent), close_fds=True, creationflags=flags)
+                        self.root.destroy()
+                        return
                     pending = getattr(self, "_pending_update", None)
                     if pending:  # 「檢查更新」結束後才問要不要下載；在 busy 解除前問，按「是」會被「還在執行」擋掉（0.11.5 實測：只印有新版、從不下載）
                         self._pending_update = None
@@ -618,28 +624,77 @@ class App:
                 self._log(f"❌ {info['error']}")
                 return
             if not info["newer"]:
-                self._log(f"✅ 已是最新：v{info['local']}（GitHub v{info['remote']}）")
+                self._log(f"✅ 規則／工具已是最新：v{info['local']}（GitHub v{info['remote']}）")
+                ex = self._exe_update_info()
+                if ex and ex["newer"]:
+                    self._log(f"但視窗程式有新版：v{ex['tag']}（執行中的是 v{repo_version(REPO)}）")
+                    self._pending_update = {**info, "exe_only": True}
                 return
             self._log(f"有新版：v{info['local']} → v{info['remote']}")
             self._pending_update = info
         self._run_bg(job, refresh_after=False, what="檢查更新")
 
+    def _exe_update_info(self):
+        """exe 模式才查 Release；原始碼模式回 None。"""
+        if not FROZEN:
+            return None
+        ex = appdir.check_exe_update(repo_version(REPO))
+        if ex["error"]:
+            self._log(f"⚠️ 視窗程式：{ex['error']}")
+            return None
+        return ex
+
     def _ask_update(self, info):
-        if not messagebox.askyesno("更新", f"GitHub 有新版 v{info['remote']}（目前 v{info['local']}）。\n\n要下載到 app/ 資料夾嗎？下載後按「套用」才會寫進 Claude Code。"):
-            self._log(f"已略過下載 v{info['remote']}（之後可再按「檢查更新」）")
+        exe_only = bool(info.get("exe_only"))
+        if exe_only:
+            msg = "規則／工具已是最新，但視窗程式（這個 exe）有新版。\n\n按「是」會自動下載、換掉這個 exe 並重開視窗。要現在換嗎？"
+        else:
+            msg = (f"GitHub 有新版 v{info['remote']}（目前 v{info['local']}）。\n\n按「是」會自動完成全部更新："
+                   "下載規則／工具 → 套用到 Claude Code → 視窗程式（exe）有新版就換掉並重開視窗。要現在更新嗎？")
+        if not messagebox.askyesno("更新", msg):
+            self._log("已略過更新（之後可再按「檢查更新」）")
+            return
+        if not exe_only and not PY:
+            self._log("❌ 找不到系統的 Python ≥3.10，無法套用。請先在「環境」區安裝 Python，再按「檢查更新」")
             return
 
         def job():
-            try:
-                appdir.download_update(self.lay, self._log)
-            except Exception as e:  # noqa: BLE001
-                self._log(f"❌ 下載失敗：{type(e).__name__}: {e}")
+            if not exe_only:
+                # 1) 規則／工具
+                try:
+                    appdir.download_update(self.lay, self._log)
+                except Exception as e:  # noqa: BLE001
+                    self._log(f"❌ 下載失敗：{type(e).__name__}: {e}")
+                    return
+                self.repo = appdir.effective_repo(self.lay)
+                # 2) 套用到 Claude Code（只做「更新」這一項，使用者的勾選不變）
+                self._log("=== 套用新版到 Claude Code ===")
+                state = gm.read_state(self.lay, repo=self.repo, python=PY if FROZEN else None, importer=gm.system_importer(PY) if FROZEN else gm.video.default_importer)
+                code = gm.apply_form(self.lay, PY, state, gm.form_from_state(state), self._log, repo=self.repo)
+                self._log(f"=== 套用{'完成' if code == 0 else '完成但有項目失敗（見 ❌）'}；重開 Claude Code 對話後生效 ===")
+            # 3) exe 本身
+            if not FROZEN:
+                self._log("原始碼模式：視窗程式隨 git pull 更新，不用換 exe")
                 return
-            self.repo = appdir.effective_repo(self.lay)
-            self._log(f"✅ 已下載到 {self.repo}；接著按「套用」寫進 Claude Code（將變更區會列出要改的項目）")
-            if FROZEN and appdir.code_changed_since(REPO, self.repo):
-                self._log(f"⚠️ 新版改了安裝器程式碼：規則／工具可直接套用，但視窗功能要換新執行檔才會更新 → {appdir.RELEASES_URL}")
-        self._run_bg(job, what="下載更新")
+            ex = self._exe_update_info()
+            if not ex:
+                return
+            if not ex["newer"]:
+                if not exe_only and appdir.code_changed_since(REPO, self.repo):
+                    self._log(f"⚠️ 新版改了視窗程式，但 GitHub 的 exe（v{ex['tag']}）還沒建好（通常幾分鐘）；之後再按「檢查更新」會自動換")
+                else:
+                    self._log(f"視窗程式已是最新（v{ex['tag']}）")
+                return
+            try:
+                exe = Path(sys.executable)
+                new = appdir.download_exe(ex, exe, self._log)
+                appdir.swap_exe(exe, new)
+            except Exception as e:  # noqa: BLE001
+                self._log(f"❌ 換視窗程式失敗（這個 exe 仍可用）：{type(e).__name__}: {e}")
+                return
+            self._log(f"✅ 視窗程式已換成 v{ex['tag']}，正在重開視窗…")
+            self._relaunch = True
+        self._run_bg(job, what="更新")
 
     def do_usage(self):
         def job():
@@ -769,7 +824,10 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="claude-dev-system 設定視窗")
     ap.add_argument("--claude-home")
     ap.add_argument("--selfcheck", metavar="輸出檔", help="不開視窗：把狀態寫成 JSON 到指定檔後結束（執行檔冒煙測試用）")
+    ap.add_argument("--after-update", action="store_true", help="（內部用）視窗內換完 exe 後重開時帶的旗標")
     a = ap.parse_args(argv)
+    if FROZEN:
+        appdir.cleanup_old_exe(Path(sys.executable))  # 上次更新留下的 .old.exe
     if a.selfcheck:
         try:
             lay = Layout(claude_home(a.claude_home))
@@ -795,7 +853,9 @@ def main(argv=None) -> int:
         root.tk.call("tk", "scaling", max(1.0, root.winfo_fpixels("1i") / 72.0))
     except Exception:  # noqa: BLE001
         pass
-    App(root, Layout(claude_home(a.claude_home)))
+    app = App(root, Layout(claude_home(a.claude_home)))
+    if a.after_update:
+        app._log(f"✅ 視窗程式已更新為 v{repo_version(REPO)}（舊 exe 已清掉）")
     root.mainloop()
     return 0
 

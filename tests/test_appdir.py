@@ -91,6 +91,51 @@ class AppDir(unittest.TestCase):
         self.assertTrue(appdir.code_changed_since(self.bundled, appdir.app_dir(self.lay)))
         self.assertFalse(appdir.code_changed_since(self.bundled, self.bundled))
 
+    def test_exe_update_check_download_swap(self):
+        import json
+        exe_bytes = b"MZ" + bytes(1_200_000)
+        import hashlib
+        sha = hashlib.sha256(exe_bytes).hexdigest()
+        rel = {"tag_name": "v1.3.0", "assets": [
+            {"name": appdir.EXE_NAME, "browser_download_url": "https://x/exe", "size": len(exe_bytes)},
+            {"name": appdir.EXE_NAME + ".sha256", "browser_download_url": "https://x/sha"}]}
+
+        def http(url, t=20):
+            if url == appdir.LATEST_API:
+                return json.dumps(rel).encode()
+            if url == "https://x/exe":
+                return exe_bytes
+            if url == "https://x/sha":
+                return (sha + "  " + appdir.EXE_NAME).encode()
+            raise AssertionError(url)
+        info = appdir.check_exe_update("1.2.0", http=http)
+        self.assertTrue(info["newer"] and info["sha_url"], info)
+        self.assertFalse(appdir.check_exe_update("1.3.0", http=http)["newer"], "同版不換")
+        self.assertIn("查不到", appdir.check_exe_update("1.0", http=lambda u, t=20: (_ for _ in ()).throw(OSError("x")))["error"])
+        self.assertIn("沒有附 exe", appdir.check_exe_update("1.0", http=lambda u, t=20: b'{"tag_name":"v9","assets":[]}')["error"])
+        exe = self.tmp / "cds.exe"
+        exe.write_bytes(b"MZ-old")
+        logs = []
+        new = appdir.download_exe(info, exe, logs.append, http=http)
+        self.assertEqual(new.name, "cds.new.exe")
+        with self.assertRaises(ValueError):
+            appdir.download_exe({**info, "size": 5}, exe, logs.append, http=http)
+        bad = dict(http=lambda u, t=20: b"deadbeef  x" if u == "https://x/sha" else http(u, t))
+        with self.assertRaises(ValueError):
+            appdir.download_exe(info, exe, logs.append, **bad)
+        old = appdir.swap_exe(exe, new)
+        self.assertEqual(exe.read_bytes(), exe_bytes, "新的改成原名")
+        self.assertEqual(old.read_bytes(), b"MZ-old")
+        self.assertFalse(new.exists())
+        self.assertEqual(appdir.cleanup_old_exe(exe), 1)
+        self.assertFalse(old.exists())
+        # 換不成要還原
+        exe2 = self.tmp / "b.exe"
+        exe2.write_bytes(b"MZ-b")
+        with self.assertRaises(FileNotFoundError):
+            appdir.swap_exe(exe2, self.tmp / "nope.new.exe")
+        self.assertEqual(exe2.read_bytes(), b"MZ-b")
+
 
 if __name__ == "__main__":
     unittest.main()
