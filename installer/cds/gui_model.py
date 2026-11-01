@@ -44,7 +44,6 @@ KEY_INFO = {  # 名稱 → (顯示名, 類別, 說明, 註冊網址)。類別 se
 ENV_DESC = {
     "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION": "內建 WebSearch 每場對話上限（官方預設 200）",
     "CLAUDE_CODE_WEB_SEARCH_REFILLS_PER_HOUR": "內建 WebSearch 每小時補回次數（官方預設 100）",
-    "CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH": "MCP 伺服器說明與工具描述的字數上限（官方預設 4,096）；1024 時開場 context 少約 18,700 token，每次工具呼叫都省這麼多；不建議低於 1024，想看完整說明填 4096",
     "PYTHONUTF8": "叫 Python 一律用 UTF-8（Windows 碼頁 950 下中文才不亂碼；1＝開）",
     "PYTHONIOENCODING": "Python 輸入輸出編碼（配合上面，固定 utf-8）",
 }
