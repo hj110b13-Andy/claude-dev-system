@@ -31,6 +31,21 @@ MODE_VALUE = {v: k for k, v in MODE_LABEL.items()}
 
 def base_font_name() -> str:
     return "Microsoft JhengHei UI" if sys.platform == "win32" else ""
+def _hide_subprocess_consoles():
+    """Windows 視窗程式開 console 子程序（py、claude.cmd、pwsh、winget、pip…）會各閃一個黑色終端機；
+    把 CREATE_NO_WINDOW 加進所有 Popen（subprocess.run／check_output 都走它）。只影響本程式開的子程序，輸出仍照常擷取。"""
+    if sys.platform != "win32":
+        return
+    flag = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    orig = subprocess.Popen.__init__
+
+    def init(self, *args, **kw):
+        kw["creationflags"] = kw.get("creationflags", 0) | flag
+        orig(self, *args, **kw)
+    subprocess.Popen.__init__ = init  # type: ignore[method-assign]
+
+
+_hide_subprocess_consoles()  # 要在下面第一個子程序（找系統 Python）之前：0.11.11 放在 main() 裡，開啟瞬間仍閃一個黑窗（使用者實測）
 PY = gm.find_system_python()[0] if FROZEN else Path(sys.executable).as_posix()  # exe 模式：hook 與 pip 要用系統 Python，不是 exe
 
 
@@ -856,22 +871,7 @@ class App:
         self._run_bg(job, what="解除安裝")
 
 
-def _hide_subprocess_consoles():
-    """Windows 視窗程式開 console 子程序（py、claude.cmd、pwsh、winget、pip…）會各閃一個黑色終端機；
-    把 CREATE_NO_WINDOW 加進所有 Popen（subprocess.run／check_output 都走它）。只影響本程式開的子程序，輸出仍照常擷取。"""
-    if sys.platform != "win32":
-        return
-    flag = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    orig = subprocess.Popen.__init__
-
-    def init(self, *args, **kw):
-        kw["creationflags"] = kw.get("creationflags", 0) | flag
-        orig(self, *args, **kw)
-    subprocess.Popen.__init__ = init  # type: ignore[method-assign]
-
-
 def main(argv=None) -> int:
-    _hide_subprocess_consoles()
     ap = argparse.ArgumentParser(description="claude-dev-system 設定視窗")
     ap.add_argument("--claude-home")
     ap.add_argument("--selfcheck", metavar="輸出檔", help="不開視窗：把狀態寫成 JSON 到指定檔後結束（執行檔冒煙測試用）")
