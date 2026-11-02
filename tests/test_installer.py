@@ -69,7 +69,8 @@ class FullCycle(Base):
         for k, v in USER_SETTINGS.items():
             if k != "hooks":
                 self.assertEqual(s[k], v, f"使用者鍵 {k} 被改動")
-        self.assertEqual(s["hooks"]["Stop"], USER_SETTINGS["hooks"]["Stop"])
+        self.assertEqual(s["hooks"]["Stop"][0], USER_SETTINGS["hooks"]["Stop"][0], "使用者自己的 Stop hook 要保留在前面")
+        self.assertEqual(len(s["hooks"]["Stop"]), 2, "0.11.8 起本工具也掛 Stop（查證守門）")
         self.assertEqual(s["hooks"]["PostToolUse"][0], USER_SETTINGS["hooks"]["PostToolUse"][0])
         self.assertEqual(len(s["hooks"]["PostToolUse"]), 2)
         self.assertIn("UserPromptSubmit", s["hooks"])
@@ -173,6 +174,7 @@ class Preservation(Base):
         s = copy.deepcopy(USER_SETTINGS)
         s["hooks"]["UserPromptSubmit"] = [{"hooks": [{"type": "command", "command": "py -3 C:/x/usage_guard.py"}]}]
         s["hooks"]["PostToolUse"].append({"matcher": "Bash", "hooks": [{"type": "command", "command": "py -3 C:/x/usage_guard.py"}]})
+        s["hooks"]["Stop"] = [{"hooks": [{"type": "command", "command": "py -3 C:/x/usage_guard.py"}]}]
         raw = json.dumps(s, indent=2)
         self.write_settings(None, raw)
         self.install()

@@ -1,6 +1,6 @@
 """claude-dev-system 用量守門 hook（通用版；來源：Stock-web tools/claude-setup/usage_guard.py，2026-10-17 抽成跨專案版）。
 
-掛在 UserPromptSubmit 與 PostToolUse：
+掛在 UserPromptSubmit、PostToolUse 與 Stop（0.11.8 起；Stop 只做查證守門，見 source_guard）：
 1. 讀本機 Claude 登入憑證（<CLAUDE_HOME>/.credentials.json）的 OAuth access token，呼叫 Anthropic 用量端點
    （非公開文件、社群工具同做法）取得 5 小時／7 天用量 %。端點改版時本腳本安靜失效、不擋操作。
 2. 寫進 <CLAUDE_HOME>/state/usage.json（只有百分比與重置時間，不含權杖）。
@@ -250,6 +250,103 @@ def project_auto_msg(cwd, session_id=None):
         return None
 
 
+# ---------- 查證守門（Stop）----------
+# 另一台裝置的 Claude 2026-11-02 自評：規則只是指示，它判定「這題不算查證型」就整段跳過，寫了「2024 年 Google 披薩加膠水」
+# 卻沒附來源。這裡把規則變成機械檢查：問答題的最後一則回覆含年份／數字卻沒有「來源」段 → block 一次要它補；
+# 它補完再 Stop 時 stop_hook_active=true，不再擋。程式工作（回覆含程式碼區塊）、純概念（沒有數字）、非問句都不擋。
+SG_LOCAL = os.path.join(HOME, "claude-dev-system", "config", "local.json")
+SG_YEAR = re.compile(r"(?<![\d.])(?:19|20)\d{2}\s*年")
+SG_NUM = re.compile(r"\d[\d,.]*\s*(?:萬|億|兆|元|％|%|美元|日圓|歐元|人民幣|公里|公尺|公分|公斤|公噸|公頃|坪|人|戶|家|km|kg|GB|MB|TB|kWh|ppm|μg|µg)")
+SG_SOURCE = ("來源", "http://", "https://", "未附來源", "未能確認", "不含待查證事實")
+SG_QUESTION = ("嗎", "?", "？", "多少", "什麼", "甚麼", "如何", "怎麼", "為什麼", "為何", "哪", "是不是", "有沒有", "幾")
+SG_MIN_ANSWER = 200
+
+
+def sg_enabled():
+    try:
+        with open(SG_LOCAL, encoding="utf-8") as f:
+            return bool((json.load(f) or {}).get("sourceGuard", True))
+    except Exception:
+        return True
+
+
+def _sg_text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+            return None  # 工具結果不是使用者的話
+        return "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+    return None
+
+
+def sg_last_turn(transcript_path):
+    """回 (最後一則使用者提示, 之後所有助理文字合併)。讀不到回 (None, None)。"""
+    prompt, answer = None, []
+    try:
+        with open(transcript_path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if '"type":"user"' in line or '"type": "user"' in line:
+                    try:
+                        d = json.loads(line)
+                    except Exception:
+                        continue
+                    if d.get("type") != "user" or d.get("isSidechain"):
+                        continue
+                    t = _sg_text((d.get("message") or {}).get("content"))
+                    if t is not None and t.strip():
+                        prompt, answer = t, []
+                elif '"type":"assistant"' in line or '"type": "assistant"' in line:
+                    try:
+                        d = json.loads(line)
+                    except Exception:
+                        continue
+                    if d.get("type") != "assistant" or d.get("isSidechain"):
+                        continue
+                    for b in (d.get("message") or {}).get("content") or []:
+                        if isinstance(b, dict) and b.get("type") == "text" and b.get("text"):
+                            answer.append(b["text"])
+    except Exception:
+        return None, None
+    return prompt, "\n".join(answer)
+
+
+def sg_judge(prompt, answer):
+    """要不要退回。回 None（放行）或原因字串。"""
+    if not prompt or not answer or len(answer) < SG_MIN_ANSWER:
+        return None
+    if "```" in answer:  # 程式工作：回覆裡的數字多半是行數、測試數，不是事實宣稱
+        return None
+    if not any(q in prompt for q in SG_QUESTION):
+        return None
+    if any(m in answer for m in SG_SOURCE):
+        return None
+    years = SG_YEAR.findall(answer)
+    nums = SG_NUM.findall(answer)
+    if not years and not nums:
+        return None
+    return f"含 {len(years)} 個年份、{len(nums)} 個帶單位數字"
+
+
+def source_guard(payload):
+    if payload.get("stop_hook_active") or not sg_enabled():
+        return None
+    prompt, answer = sg_last_turn(payload.get("transcript_path") or "")
+    why = sg_judge(prompt, answer)
+    if not why:
+        return None
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(os.path.join(STATE_DIR, "source-guard.log"), "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} block {why}｜問：{(prompt or '')[:60]!r}" + chr(10))
+    except Exception:
+        pass
+    return {"decision": "block",
+            "reason": "【查證守門（hook）】這則回覆" + why + "，但沒有「來源」段。請補上：每個關鍵年份／數字旁附網址、資料日期、來源原句逐字短引；"
+                      "查不到的標〔未附來源〕或刪掉沒把握的數字；自己的推論另立「我的補充／推測」段；末尾固定「來源」與「查證過程」（最多 3 行）。"
+                      "若這些數字不是事實宣稱（例如純概念舉例、你自己算的），在回覆末尾加一行「〔不含待查證事實〕」即可，不必重寫。只補這一次，之後不會再退回。"}
+
+
 def main():
     printing = "--print" in sys.argv
     event = ""
@@ -260,6 +357,11 @@ def main():
             event = payload.get("hook_event_name", "")
         except Exception:
             event = ""
+    if event == "Stop":  # 查證守門：只看回覆，不查用量
+        out = source_guard(payload)
+        if out:
+            print(json.dumps(out, ensure_ascii=True))
+        return
     hook_cwd = None
     if not printing:
         try:

@@ -139,6 +139,21 @@ class ReadAndDiff(Base):
         self.apply(f, s)
         self.assertTrue(self.state()["hooks"]["usage_guard"])
 
+    def test_source_guard_toggle_writes_local(self):
+        s = self.state()
+        f = gm.form_from_state(s)
+        self.apply(f, s)
+        s = self.state()
+        self.assertTrue(s["hooks"]["source_guard_pref"], "預設開")
+        f = gm.form_from_state(s)
+        f.source_guard = False
+        self.assertTrue(any("關閉查證守門" in c.text for c in gm.diff(s, f)))
+        self.assertEqual(self.apply(f, s), 0, "\n".join(self.logs))
+        self.assertFalse(self.state()["hooks"]["source_guard_pref"])
+        self.assertIn("sourceGuard", json.dumps(gm.export_profile(self.state(), gm.form_from_state(self.state()))).replace("source_guard", "sourceGuard"))
+        st = json.loads(self.lay.settings.read_text(encoding="utf-8"))
+        self.assertIn("Stop", st["hooks"], "Stop hook 要註冊（開關只在 local.json）")
+
     def test_cancel_means_no_change(self):
         s = self.state()
         f = gm.form_from_state(s)

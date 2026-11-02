@@ -384,7 +384,8 @@ def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.de
         "chrome": {"extension": chrome_extension_installed(), "native_host": chrome_native_host_registered(),
                    "default_enabled": chrome_default_enabled(lay)},
         "hooks": {"usage_guard": bool(m and (m.get("settings") or {}).get("hooksAdded")),
-                  "usage_guard_pref": bool(local.get("usageGuard", True))},
+                  "usage_guard_pref": bool(local.get("usageGuard", True)),
+                  "source_guard_pref": bool(local.get("sourceGuard", True))},
     }
 
 
@@ -403,6 +404,7 @@ class Form:
     download_dir: str = ""
     chrome_default_enabled: bool | None = None
     usage_guard: bool = True
+    source_guard: bool = True                          # Stop hook：回覆含年份／數字卻沒「來源」段就退回補一次（local.json sourceGuard）
     task_check: dict = field(default_factory=lambda: dict(DEFAULT_TASK_CHECK))
     project_auto: dict = field(default_factory=lambda: dict(DEFAULT_PROJECT_AUTO))
 
@@ -410,6 +412,7 @@ class Form:
 def form_from_state(state: dict) -> Form:
     f = Form()
     f.usage_guard = state["hooks"]["usage_guard_pref"]
+    f.source_guard = state["hooks"].get("source_guard_pref", True)
     f.task_check = dict(state.get("task_check") or DEFAULT_TASK_CHECK)
     f.project_auto = dict(state.get("project_auto") or DEFAULT_PROJECT_AUTO)
     f.web_enabled = state["web"]["enabled"]
@@ -433,6 +436,7 @@ def preset(form: Form, state: dict, on: bool) -> Form:
     f.servers = {n: on for n in state["web"]["servers"]}
     f.video_enabled = on
     f.usage_guard = on
+    f.source_guard = on
     if on and state["chrome"]["default_enabled"] is not None:
         f.chrome_default_enabled = True
     if not on:
@@ -463,7 +467,9 @@ def diff(state: dict, form: Form) -> list[Change]:
     elif parse_ver(state["repo_version"]) != parse_ver(state["version"] or "0"):
         ch.append(Change("update", f"更新 {state['version']} → {state['repo_version']}"))
     if form.usage_guard != state["hooks"]["usage_guard_pref"]:
-        ch.append(Change("guard", "啟用用量守門 hook" if form.usage_guard else "關閉用量守門 hook（移除 settings.json 的兩條 hook；規則仍在）"))
+        ch.append(Change("guard", "啟用用量守門 hook" if form.usage_guard else "關閉用量守門 hook（移除 settings.json 的 hook；規則仍在）"))
+    if form.source_guard != state["hooks"].get("source_guard_pref", True):
+        ch.append(Change("source_guard", "啟用查證守門（回覆含年份／數字卻沒「來源」段就退回補一次）" if form.source_guard else "關閉查證守門（hook 仍掛著但不檢查）"))
     if form.web_enabled != state["web"]["enabled"]:
         ch.append(Change("web", "啟用聯網來源" if form.web_enabled else "關閉聯網來源（移除本工具註冊的 MCP 與 env）"))
     if form.web_enabled:
@@ -542,6 +548,11 @@ def apply_form(lay: Layout, python: str, state: dict, form: Form, log, repo: Pat
         local["usageGuard"] = bool(form.usage_guard)
         web.save_local(lay, local)
         log(f"用量守門 → {'開' if form.usage_guard else '關'}（local.json usageGuard）")
+    if form.source_guard != state["hooks"].get("source_guard_pref", True):
+        local = _local(lay)
+        local["sourceGuard"] = bool(form.source_guard)
+        web.save_local(lay, local)
+        log(f"查證守門 → {'開' if form.source_guard else '關'}（local.json sourceGuard；hook 每次回覆結束時讀它）")
     notes = {n: str(v).strip() for n, v in form.key_notes.items() if v is not None and n in state["keys"] and str(v).strip() != state["keys"][n].get("account", "")}
     if notes:
         local = _local(lay)
@@ -724,7 +735,9 @@ def test_key(name: str, value: str, all_keys: dict | None = None, http=_http) ->
 
 INSTALL_ACTIONS = {
     "ffmpeg": ["winget", "install", "--id", "Gyan.FFmpeg", "--source", "winget", "--accept-package-agreements", "--accept-source-agreements"],
-    "pwsh7": ["winget", "install", "--id", "Microsoft.PowerShell", "--source", "winget", "--installer-type", "wix", "--accept-package-agreements", "--accept-source-agreements"],
+    # --force：已裝 Store／MSIX 版時 winget 把 install 當 upgrade，回「找不到可用的升級」0x8A15002B 而不裝 MSI（2026-11-02 另一台實測）；
+    # 官方：--force = "Direct run the command and continue with non security related issues"（learn.microsoft.com/windows/package-manager/winget/install）
+    "pwsh7": ["winget", "install", "--id", "Microsoft.PowerShell", "--source", "winget", "--installer-type", "wix", "--force", "--accept-package-agreements", "--accept-source-agreements"],
 }
 DOWNLOAD_PAGES = {"python": "https://www.python.org/downloads/", "claude": "https://code.claude.com/docs/en/setup"}
 
@@ -751,9 +764,13 @@ def chrome_live_test(run=subprocess.run, timeout: int = 150, which=shutil.which)
     if not exe:
         return False, "找不到 claude 指令"
     # 不能用 about:blank：擴充功能會拒絕「browser-internal or unparseable URLs」（2026-11-01 使用者按視窗按鈕實測失敗），改開 example.com
+    # 帳號連著兩台以上的瀏覽器時，無頭模式沒有 AskUserQuestion 可問，模型會停下來「請你選」→ 測試失敗（2026-11-02 另一台實測）。
+    # list_connected_browsers 每台有 onThisComputer（正在或剛在這台電腦上跑）、isLocal（OS 相同，弱線索），叫它照這順序自己選本機那台
     prompt = ("用 Claude in Chrome 開一個新分頁到 https://example.com ，用 get_page_text 或 read_page 確認頁面標題含 Example Domain，然後關掉這個分頁。"
+              "如果回報有多台瀏覽器連線：這是自動化測試，我已授權你自己選——呼叫 list_connected_browsers，用 select_browser 選 onThisComputer 為 true 的那台；沒有就選 isLocal 為 true 的；再沒有就選第一台。不要問我、不要停下來。"
               "成功只回答「CHROME_OK」，失敗回答「CHROME_FAIL: 原因」。不要做其他事。")
-    allowed = ",".join(f"mcp__claude-in-chrome__{t}" for t in ("tabs_context_mcp", "tabs_create_mcp", "navigate", "get_page_text", "read_page", "find", "computer", "tabs_close_mcp"))
+    allowed = ",".join(f"mcp__claude-in-chrome__{t}" for t in ("tabs_context_mcp", "tabs_create_mcp", "navigate", "get_page_text", "read_page", "find", "computer", "tabs_close_mcp",
+                                                              "list_connected_browsers", "select_browser", "switch_browser"))
     try:
         r = run([exe, "-p", prompt, "--chrome", "--max-turns", "8", "--output-format", "json", "--no-session-persistence", "--allowedTools", allowed],
                 capture_output=True, timeout=timeout)
@@ -779,7 +796,7 @@ def export_profile(state: dict, form: Form, include_keys: bool = False, current_
     d = {"claude-dev-system-profile": 1, "web_enabled": form.web_enabled, "servers": dict(form.servers), "env": dict(form.env),
          "video_enabled": form.video_enabled, "key_modes": dict(form.key_modes), "thresholds": dict(form.thresholds),
          "download_dir": form.download_dir, "chrome_default_enabled": form.chrome_default_enabled, "usage_guard": form.usage_guard,
-         "task_check": dict(form.task_check), "project_auto": dict(form.project_auto),
+         "source_guard": form.source_guard, "task_check": dict(form.task_check), "project_auto": dict(form.project_auto),
          "key_notes": {n: (form.key_notes.get(n) if form.key_notes.get(n) is not None else k.get("account", "")) for n, k in state["keys"].items()
                        if (form.key_notes.get(n) if form.key_notes.get(n) is not None else k.get("account", ""))}}
     if include_keys:
@@ -804,12 +821,12 @@ def import_profile(form: Form, data: dict) -> Form:
     tc = data.get("task_check")
     if isinstance(tc, dict) and "minutes" in tc and not (isinstance(tc["minutes"], (int, float)) and tc["minutes"] >= 1):
         raise ValueError(f"設定檔的巡檢分鐘數不合法：{tc['minutes']!r}")
-    for k in ("web_enabled", "video_enabled", "usage_guard"):
+    for k in ("web_enabled", "video_enabled", "usage_guard", "source_guard"):
         if k in data and not isinstance(data[k], bool):
             raise ValueError(f"設定檔的 {k} 必須是 true／false")
     if "download_dir" in data and not isinstance(data["download_dir"], str):
         raise ValueError("設定檔的 download_dir 必須是字串")
-    for k in ("web_enabled", "video_enabled", "download_dir", "chrome_default_enabled", "usage_guard"):
+    for k in ("web_enabled", "video_enabled", "download_dir", "chrome_default_enabled", "usage_guard", "source_guard"):
         if k in data:
             setattr(f, k, data[k])
     for k in ("servers", "env", "key_modes", "thresholds", "task_check", "project_auto"):

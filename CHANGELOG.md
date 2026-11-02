@@ -2,6 +2,13 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.11.8（2026-11-02，視窗會自動換 exe）
+
+- **查證守門 hook（Stop 事件）**：另一台裝置的 Claude 自評全域規則時指出「規則只是指示，判定這題不算查證型就整段跳過」（實例：講幻覺原理順手寫「2024 年 Google 披薩加膠水」「OpenAI 2025 論文」卻沒附來源），並建議三件事——觸發改看內容不看題型、先查前提、加 Stop hook 做機械檢查。三件都做：`core.md`／`web-quick.md` 加「回答裡要寫到年份、數字、人名、事件、法條、版本號就是查證型」「問題隱含的前提先確認」；`usage_guard.py` 多掛 Stop：問句、回答 ≥200 字、含年份或帶單位數字、沒有來源字樣 → `block` 一次要它補（`stop_hook_active` 時不再擋；含程式碼區塊不擋；末尾寫「〔不含待查證事實〕」可放行）。視窗核心區多一個「查證守門 hook」勾選（local.json `sourceGuard`），匯出／匯入設定含它。
+- PowerShell 7 安裝鈕加 `--force`：另一台已有 Store／MSIX 版 pwsh 7.6.9，winget 把 install 當 upgrade 回「找不到可用的升級」（結束碼 2316632107＝0x8A15002B）不裝 MSI。官方文件：`--force`＝「Direct run the command and continue with non security related issues」。
+- Chrome 實際連線測試：帳號連著兩台瀏覽器時無頭模式沒有 AskUserQuestion，模型停下來「請你選」→ 測試失敗（另一台截圖）。提示改成「多台就自己用 select_browser 選第一台」，允許清單加 list_connected_browsers／select_browser／switch_browser；自我測試 chrome 題同。
+- Stock-web 11/2 對全域系統的調整已確認：用量門檻、並行、巡檢改讀全域 dispatch-config，專案副本已刪；全域這邊不用改。
+
 ## 0.11.7（2026-11-01，需換新 exe——最後一次手動換）
 
 - 視窗「檢查更新」改成一鍵全更新（使用者：「希望之後不用再下載新的 exe，檢查更新的同時就把所有更新包括 exe 本身都更新」）：按「是」→ 下載規則／工具 → 直接套用到 Claude Code（只做「更新」一項，勾選不動）→ 查 GitHub 最新 Release，exe tag 比執行中的新就下載、核對大小與 `.sha256`、把執行中的 exe 改名成 `.old.exe`、新檔改成原名、自動重開視窗（帶 `--after-update`），下次啟動刪 `.old`。規則版本一樣但 exe 舊也會問。Release 工作流程多附 `claude-dev-system-settings.exe.sha256`。

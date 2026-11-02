@@ -217,12 +217,15 @@ class App:
         env.columnconfigure(0, weight=1)
 
         # 核心
-        core = self._section("核心（規則、skill）——安裝後永遠啟用　共 3 項設定：用量守門、門檻、背景任務巡檢")
+        core = self._section("核心（規則、skill）——安裝後永遠啟用　共 4 項設定：用量守門、查證守門、門檻、背景任務巡檢")
         ttk.Label(core, text=f"{MARK[s['installed']]} {'已安裝' if s['installed'] else '尚未安裝（按套用會安裝）'}").pack(anchor="w")
         self.notes.append(ttk.Label(core, text=gm.TOOL_DESC["core"], foreground="#555", wraplength=900, justify="left")); self.notes[-1].pack(anchor="w")
         self.guard_var = tk.BooleanVar(value=f.usage_guard)
         ttk.Checkbutton(core, text=f"用量守門 hook（到門檻才提示收尾，沒到完全不動；目前 settings.json：{'已註冊' if s['hooks']['usage_guard'] else '未註冊'}）",
                         variable=self.guard_var, command=self.update_diff).pack(anchor="w")
+        self.sguard_var = tk.BooleanVar(value=f.source_guard)
+        ttk.Checkbutton(core, text="查證守門 hook（回覆結束時機械檢查：問答題的回覆含年份／數字卻沒「來源」段，就退回補來源一次；程式工作與純概念不擋）",
+                        variable=self.sguard_var, command=self.update_diff).pack(anchor="w")
         th = ttk.Frame(core); th.pack(anchor="w", pady=4)
         ttk.Label(th, text="門檻：5 小時 ≥").pack(side="left")
         self.five_var = tk.StringVar(value=str(f.thresholds["fiveHour"]))
@@ -387,6 +390,7 @@ class App:
         f.env = {k: v.get().strip() for k, v in self.env_vars.items()}
         f.video_enabled = self.video_var.get()
         f.usage_guard = self.guard_var.get()
+        f.source_guard = self.sguard_var.get()
         f.download_dir = self.dl_var.get().strip()
         for n, v in self.key_vars.items():
             if v.get().strip() != self.key_orig.get(n, ""):
@@ -458,6 +462,7 @@ class App:
             v.set(f.servers.get(n, False))
         self.video_var.set(f.video_enabled)
         self.guard_var.set(f.usage_guard)
+        self.sguard_var.set(f.source_guard)
         if self.state["chrome"]["default_enabled"] is not None and f.chrome_default_enabled is not None:
             self.chrome_var.set(f.chrome_default_enabled)
         self.update_diff()
@@ -757,6 +762,7 @@ class App:
             v.set(f.env.get(k, v.get()))
         self.video_var.set(f.video_enabled)
         self.guard_var.set(f.usage_guard)
+        self.sguard_var.set(f.source_guard)
         self.tc_var.set(bool(f.task_check.get("enabled")))
         self.tc_min_var.set(str(int(f.task_check.get("minutes", gm.DEFAULT_TASK_CHECK["minutes"]))))
         for k, v in self.pa_vars.items():
