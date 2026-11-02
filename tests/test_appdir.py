@@ -127,7 +127,7 @@ class AppDir(unittest.TestCase):
         self.assertEqual(exe.read_bytes(), exe_bytes, "新的改成原名")
         self.assertEqual(old.read_bytes(), b"MZ-old")
         self.assertFalse(new.exists())
-        self.assertEqual(appdir.cleanup_old_exe(exe), 1)
+        self.assertEqual(appdir.cleanup_old_exe(exe, tries=2, wait=0.01), 1)
         self.assertFalse(old.exists())
         # 換不成要還原
         exe2 = self.tmp / "b.exe"

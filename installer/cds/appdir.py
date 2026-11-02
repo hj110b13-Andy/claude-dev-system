@@ -179,15 +179,16 @@ def swap_exe(exe_path: Path, new_path: Path) -> Path:
     return old
 
 
-def cleanup_old_exe(exe_path: Path) -> int:
-    """啟動時刪掉上次更新留下的 .old*.exe；還被鎖著就下次再刪。回刪掉的數量。"""
+def cleanup_old_exe(exe_path: Path, tries: int = 10, wait: float = 0.3) -> int:
+    """刪掉上次更新留下的 .old*.exe。舊程序關閉要幾秒（Tk 收尾＋PyInstaller 刪自己的暫存夾），期間檔案鎖著刪不掉，
+    所以要重試；新視窗啟動時在背景執行緒跑（tries=90、wait=1），不擋開窗。回刪掉的數量。"""
     n = 0
     for old in exe_path.parent.glob(exe_path.stem + ".old*.exe"):
-        for _ in range(10):
+        for _ in range(tries):
             try:
                 old.unlink()
                 n += 1
                 break
             except OSError:
-                time.sleep(0.3)
+                time.sleep(wait)
     return n

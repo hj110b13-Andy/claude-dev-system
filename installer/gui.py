@@ -878,7 +878,9 @@ def main(argv=None) -> int:
     ap.add_argument("--after-update", action="store_true", help="（內部用）視窗內換完 exe 後重開時帶的旗標")
     a = ap.parse_args(argv)
     if FROZEN:
-        appdir.cleanup_old_exe(Path(sys.executable))  # 上次更新留下的 .old.exe
+        # 上次更新留下的 .old.exe：舊程序還要幾秒才完全結束，檔案鎖著；背景慢慢重試（最多 90 秒），不擋開窗。
+        # 0.11.12 使用者實測：開窗時只試 3 秒，刪不掉，要再手動重開一次才消失
+        threading.Thread(target=appdir.cleanup_old_exe, args=(Path(sys.executable), 90, 1.0), daemon=True).start()
     if a.selfcheck:
         try:
             lay = Layout(claude_home(a.claude_home))
@@ -906,7 +908,7 @@ def main(argv=None) -> int:
         pass
     app = App(root, Layout(claude_home(a.claude_home)))
     if a.after_update:
-        app._log(f"✅ 視窗程式已更新為 v{repo_version(REPO)}（舊 exe 已清掉）")
+        app._log(f"✅ 視窗程式已更新為 v{repo_version(REPO)}（舊的 .old.exe 會在它完全關閉後自動刪掉，最多等 90 秒）")
     root.mainloop()
     return 0
 
