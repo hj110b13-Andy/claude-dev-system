@@ -7,6 +7,8 @@
 - **查證守門 hook（Stop 事件）**：另一台裝置的 Claude 自評全域規則時指出「規則只是指示，判定這題不算查證型就整段跳過」（實例：講幻覺原理順手寫「2024 年 Google 披薩加膠水」「OpenAI 2025 論文」卻沒附來源），並建議三件事——觸發改看內容不看題型、先查前提、加 Stop hook 做機械檢查。三件都做：`core.md`／`web-quick.md` 加「回答裡要寫到年份、數字、人名、事件、法條、版本號就是查證型」「問題隱含的前提先確認」；`usage_guard.py` 多掛 Stop：問句、回答 ≥200 字、含年份或帶單位數字、沒有來源字樣 → `block` 一次要它補（`stop_hook_active` 時不再擋；含程式碼區塊不擋；末尾寫「〔不含待查證事實〕」可放行）。視窗核心區多一個「查證守門 hook」勾選（local.json `sourceGuard`），匯出／匯入設定含它。
 - PowerShell 7 安裝鈕加 `--force`：另一台已有 Store／MSIX 版 pwsh 7.6.9，winget 把 install 當 upgrade 回「找不到可用的升級」（結束碼 2316632107＝0x8A15002B）不裝 MSI。官方文件：`--force`＝「Direct run the command and continue with non security related issues」。
 - Chrome 實際連線測試：帳號連著兩台瀏覽器時無頭模式沒有 AskUserQuestion，模型停下來「請你選」→ 測試失敗（另一台截圖）。提示改成「多台就自己用 select_browser 選第一台」，允許清單加 list_connected_browsers／select_browser／switch_browser；自我測試 chrome 題同。
+- 實測（本機 `claude -p`，有 session 檔）：叫它「憑記憶答台北 101、不要寫來源段」→ hook 擋一次（state/source-guard.log：含 8 個年份、6 個帶單位數字），第二輪它說明使用者明確要求不附來源、也不誤標〔不含待查證事實〕，合理。注意 `--no-session-persistence` 沒有逐字稿檔，hook 看不到回覆就不擋（自我測試與 Chrome 實測都是這種模式，不受影響）。
+- 多瀏覽器改選本機：`list_connected_browsers` 每台有 `onThisComputer`（正在或剛在這台電腦上跑）與 `isLocal`（OS 相同，弱線索），提示改成照這順序自己選，不是第一台。
 - Stock-web 11/2 對全域系統的調整已確認：用量門檻、並行、巡檢改讀全域 dispatch-config，專案副本已刪；全域這邊不用改。
 
 ## 0.11.7（2026-11-01，需換新 exe——最後一次手動換）
