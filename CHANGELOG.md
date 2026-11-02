@@ -2,6 +2,11 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.11.9（2026-11-02，視窗會自動換 exe）
+
+- 多台 Chrome 自動選本機那台改成**全域規則**（`core.md` 教操作條、`web-quick.md` A 段），不只測試題：任何專案對話要開網頁時，帳號連著多台 Chrome 就自己選 `onThisComputer` 為 true 的那台（沒有就 `isLocal`），不問；只有兩台都在本機才問。使用者 11/2：「之後在任何 claude code 專案對話都會全域優先使用當前的裝置的 chrome，不會再詢問了嗎?」
+- PowerShell 環境列的提示改成可判定：非 MSI 路徑時先在 Claude Code 對話用 PowerShell 工具跑 `$PSVersionTable.PSVersion`，7.x 就不用裝、5.1 才按安裝 MSI 版。使用者 11/2：「PowerShell 已經有安裝過的，還要再安裝嗎?」——Store 版有時 Claude Code 偵測得到，不必一律重裝。
+
 ## 0.11.8（2026-11-02，視窗會自動換 exe）
 
 - **查證守門 hook（Stop 事件）**：另一台裝置的 Claude 自評全域規則時指出「規則只是指示，判定這題不算查證型就整段跳過」（實例：講幻覺原理順手寫「2024 年 Google 披薩加膠水」「OpenAI 2025 論文」卻沒附來源），並建議三件事——觸發改看內容不看題型、先查前提、加 Stop hook 做機械檢查。三件都做：`core.md`／`web-quick.md` 加「回答裡要寫到年份、數字、人名、事件、法條、版本號就是查證型」「問題隱含的前提先確認」；`usage_guard.py` 多掛 Stop：問句、回答 ≥200 字、含年份或帶單位數字、沒有來源字樣 → `block` 一次要它補（`stop_hook_active` 時不再擋；含程式碼區塊不擋；末尾寫「〔不含待查證事實〕」可放行）。視窗核心區多一個「查證守門 hook」勾選（local.json `sourceGuard`），匯出／匯入設定含它。

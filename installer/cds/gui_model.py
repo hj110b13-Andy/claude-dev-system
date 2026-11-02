@@ -91,7 +91,7 @@ def _pwsh_status(which=shutil.which, run=subprocess.run) -> EnvItem:
         ver = (r.stdout or "").strip() or "?"
     except Exception:  # noqa: BLE001
         ver = "?"
-    note = "" if (sys.platform != "win32" or msi.exists()) else "（非 MSI 路徑，Claude Code 可能偵測不到，建議改裝 MSI 版）"
+    note = "" if (sys.platform != "win32" or msi.exists()) else "（非 MSI 路徑：先在 Claude Code 對話用 PowerShell 工具跑 $PSVersionTable.PSVersion，顯示 7.x 就不用裝；顯示 5.1 才按右邊裝 MSI 版）"
     return EnvItem(True if (sys.platform != "win32" or msi.exists()) else None, f"PowerShell {ver}{note}", None if msi.exists() else "pwsh7")
 
 
