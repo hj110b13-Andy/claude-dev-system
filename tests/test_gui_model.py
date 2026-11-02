@@ -154,6 +154,26 @@ class ReadAndDiff(Base):
         st = json.loads(self.lay.settings.read_text(encoding="utf-8"))
         self.assertIn("Stop", st["hooks"], "Stop hook 要註冊（開關只在 local.json）")
 
+    def test_system_importer_batches_into_one_process(self):
+        calls = []
+
+        class R:
+            returncode = 0
+            stdout = b"some noise\n" + json.dumps({"faster_whisper": "1.2.1", "yt_dlp": "2026.10.01", "youtube_transcript_api": None}).encode()
+
+        def run(cmd, **kw):
+            calls.append(cmd)
+            return R()
+        imp = gm.system_importer("C:/py/python.exe", run=run)
+        self.assertEqual(imp("yt_dlp"), "2026.10.01")
+        self.assertEqual(imp("faster_whisper"), "1.2.1")
+        self.assertIsNone(imp("youtube_transcript_api"))
+        self.assertEqual(len(calls), 1, "三個套件只開一個程序")
+        self.assertEqual(set(calls[0][3:]), set(gm.BATCH_MODS))
+        imp("other_mod")
+        self.assertEqual(len(calls), 2, "清單外的套件另外查")
+        self.assertIsNone(gm.system_importer(None)("yt_dlp"))
+
     def test_cancel_means_no_change(self):
         s = self.state()
         f = gm.form_from_state(s)

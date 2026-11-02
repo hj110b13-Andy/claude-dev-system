@@ -14,9 +14,11 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -112,47 +114,72 @@ def find_system_python(which=shutil.which, run=subprocess.run) -> tuple[str | No
     return None, None
 
 
-def system_importer(python: str | None):
-    """exe 模式用的 importer：在系統 Python 裡 import 模組拿版本（exe 內建的 Python 沒裝 yt-dlp／faster-whisper，直接 import 會誤報未裝）。"""
+BATCH_MODS = ("faster_whisper",) + tuple(video.IMPORTS)  # 開窗要查的套件：一次開一個系統 Python 查完（原本每個套件一個程序，共 2.7 秒）
+_BATCH_CODE = ("import importlib,json,sys\n"
+               "out={}\n"
+               "for m in sys.argv[1:]:\n"
+               " try:\n  mod=importlib.import_module(m)\n except Exception:\n  out[m]=None\n  continue\n"
+               " v=getattr(mod,'__version__',None)\n"
+               " if v is None and m=='yt_dlp':\n  v=getattr(getattr(mod,'version',None),'__version__',None)\n"
+               " out[m]=v or ''\n"
+               "print(json.dumps(out))")
+
+
+def system_importer(python: str | None, run=subprocess.run):
+    """exe 模式用的 importer：在系統 Python 裡 import 模組拿版本（exe 內建的 Python 沒裝 yt-dlp／faster-whisper，直接 import 會誤報未裝）。
+    第一次呼叫就把 BATCH_MODS 一次查完快取起來；多執行緒同時叫也只跑一個程序。"""
     if not python:
         return lambda mod: None
+    cache: dict = {}
+    lock = threading.Lock()
+
+    def batch(mods):
+        try:
+            r = run([python, "-c", _BATCH_CODE, *mods], capture_output=True, timeout=90)
+            txt = (r.stdout or b"").decode("utf-8", "replace").strip()
+            if r.returncode != 0 or not txt:
+                return {m: None for m in mods}
+            got = json.loads(txt.splitlines()[-1])  # 套件 import 時可能先印東西，只取最後一行
+            return {m: got.get(m) for m in mods}
+        except Exception:  # noqa: BLE001
+            return {m: None for m in mods}
 
     def imp(mod: str):
-        code = ("import importlib,sys\n"
-                "try:\n m=importlib.import_module(sys.argv[1])\nexcept Exception:\n sys.exit(3)\n"
-                "v=getattr(m,'__version__',None)\n"
-                "if v is None and sys.argv[1]=='yt_dlp':\n"
-                " v=getattr(getattr(m,'version',None),'__version__',None)\n"
-                "print(v or '')")
-        try:
-            r = subprocess.run([python, "-c", code, mod], capture_output=True, timeout=60)
-        except Exception:  # noqa: BLE001
-            return None
-        return (r.stdout or b"").decode("utf-8", "replace").strip() if r.returncode == 0 else None
+        with lock:
+            if mod not in cache:
+                cache.update(batch(BATCH_MODS if mod in BATCH_MODS else (mod,)))
+            return cache.get(mod)
     return imp
 
 
 def env_status(repo: Path = REPO, which=shutil.which, importer=video.default_importer, ffmpeg=video.ffmpeg_path,
                claude_status=claude_code_status, run=subprocess.run, python: str | None = None) -> dict[str, EnvItem]:
     out: dict[str, EnvItem] = {}
-    if python and Path(python).resolve() != Path(sys.executable).resolve():  # exe 模式：顯示系統 Python，不是 exe 內建的
-        _, pv3 = find_system_python(which, run)
-        pv = pv3 or (0, 0, 0)
-        out["python"] = EnvItem(pv >= (3, 10), f"Python {'.'.join(map(str, pv))}（{python}）" if pv3 else f"Python（{python}）版本讀不到", None if pv >= (3, 10) else "python")
-    elif python is None and FROZEN:
-        out["python"] = EnvItem(False, "找不到系統的 Python ≥3.10（hook 與影片工具需要；執行檔本身不能代替）", "python")
-    else:
-        pv = sys.version_info
-        out["python"] = EnvItem(pv >= (3, 10), f"Python {pv.major}.{pv.minor}.{pv.micro}（{Path(sys.executable).as_posix()}）", None if pv >= (3, 10) else "python")
-    ok, msg = claude_status(repo)
-    out["claude"] = EnvItem(ok, msg, None if ok else "claude")
-    ff = ffmpeg()
+    # 會開子程序的檢查平行跑（2026-11-02 量測：依序 5.5 秒 → 平行約 1.5 秒，開窗等待的主因）
+    sys_py = python and Path(python).resolve() != Path(sys.executable).resolve()
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        f_py = ex.submit(find_system_python, which, run) if sys_py else None
+        f_claude = ex.submit(claude_status, repo)
+        f_pwsh = ex.submit(_pwsh_status, which, run)
+        f_fw = ex.submit(importer, "faster_whisper")
+        ff = ffmpeg()
+        if sys_py:  # exe 模式：顯示系統 Python，不是 exe 內建的
+            _, pv3 = f_py.result()
+            pv = pv3 or (0, 0, 0)
+            out["python"] = EnvItem(pv >= (3, 10), f"Python {'.'.join(map(str, pv))}（{python}）" if pv3 else f"Python（{python}）版本讀不到", None if pv >= (3, 10) else "python")
+        elif python is None and FROZEN:
+            out["python"] = EnvItem(False, "找不到系統的 Python ≥3.10（hook 與影片工具需要；執行檔本身不能代替）", "python")
+        else:
+            pv = sys.version_info
+            out["python"] = EnvItem(pv >= (3, 10), f"Python {pv.major}.{pv.minor}.{pv.micro}（{Path(sys.executable).as_posix()}）", None if pv >= (3, 10) else "python")
+        ok, msg = f_claude.result()
+        out["claude"] = EnvItem(ok, msg, None if ok else "claude")
     out["ffmpeg"] = EnvItem(bool(ff), (f"ffmpeg 可用（{Path(ff).parent.name}／{Path(ff).parent.parent.name}）" if ff else "未裝（影片截圖與語音辨識需要）"), None if ff else "ffmpeg")  # 全路徑太長會撐出視窗，只顯示最後兩層
-    out["pwsh"] = _pwsh_status(which, run)
+    out["pwsh"] = f_pwsh.result()
     out["winget"] = EnvItem(bool(which("winget")), "winget 可用" if which("winget") else "無 winget（安裝按鈕不可用，請手動裝）")
     out["git"] = EnvItem(True if which("git") else None, "git 可用" if which("git") else "無 git（exe 模式不需要）")
     out["node"] = EnvItem(True if which("node") else None, "node 可用（YouTube 解挑戰用）" if which("node") else "無 node／deno（YouTube 高畫質可能缺、下載較慢）")
-    fw = importer("faster_whisper")
+    fw = f_fw.result()
     out["faster_whisper"] = EnvItem(True if fw is not None else None, f"faster-whisper {fw}" if fw is not None else "未裝（沒字幕的影片無法轉逐字稿）", None if fw is not None else "faster_whisper")
     return out
 
@@ -364,17 +391,21 @@ def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.de
             vcfg = read_json(vp)
         except Exception:  # noqa: BLE001
             vcfg = {}
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f_env = ex.submit(lambda: env(repo, importer=importer, ffmpeg=ffmpeg, python=python) if python is not None or FROZEN else env(repo, importer=importer, ffmpeg=ffmpeg))
+        f_pkgs = ex.submit(lambda: {mod: importer(mod) for mod in video.IMPORTS})
+        env_items, pkgs = f_env.result(), f_pkgs.result()
     return {
         "installed": bool(m),
         "version": m.get("version") if m else None,
         "repo_version": repo_version(repo),
-        "env": env(repo, importer=importer, ffmpeg=ffmpeg, python=python) if python is not None or FROZEN else env(repo, importer=importer, ffmpeg=ffmpeg),
+        "env": env_items,
         "web": {"enabled": bool(m and (m.get("web") or {}).get("enabled")), "servers": servers, "desired_now": sorted(want),
                 "env": {k: str(env_vals.get(k)) if env_vals.get(k) is not None else None for k in (src.get("env") or {}) if not k.startswith("_")},
                 "env_defaults": {k: str(v) for k, v in (src.get("env") or {}).items() if not k.startswith("_")},
                 "env_override": {k: str(v) for k, v in (local.get("env") or {}).items()}},
         "video": {"enabled": bool(m and (m.get("video") or {}).get("enabled")),
-                  "packages": {mod: importer(mod) for mod in video.IMPORTS},
+                  "packages": pkgs,
                   "download_dir": ((local.get("video") or {}).get("downloadDir") or vcfg.get("downloadDir") or "")},
         "keys": keys,
         "usage": read_usage(lay),

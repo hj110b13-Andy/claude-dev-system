@@ -2,6 +2,12 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.11.11（2026-11-02，視窗會自動換 exe）
+
+- **開啟變快**（使用者：「exe 開啟時間能再更快嗎?」）。量測（本機）：exe 解壓＋啟動 Python 約 2.5 秒（最小 PyInstaller 視窗程式也要 1.6 秒，這段改不掉）；之後讀狀態 5.5 秒——系統 Python 查 faster-whisper、yt-dlp、youtube-transcript-api 各開一個程序（0.8／1.0／0.9 秒）、pwsh 0.5 秒、claude 等全部依序跑。改法：①視窗先出現（標題「讀取中…」、副標「偵測環境中…」），狀態在背景讀完再畫；②三個套件改一個系統 Python 程序一次查完並快取；③環境偵測（Python、Claude Code、pwsh、套件）與影片套件平行跑。實測本機建置的 exe：`--selfcheck`（同步讀完狀態）8.1～8.8 秒 → 3.6～4.3 秒；開視窗時畫面約 2.5 秒就出現，內容再過 1～1.5 秒填上。原始碼模式 read_state 2.3 秒 → 1.2～1.6 秒。
+- **不再閃終端機視窗**（使用者：「不要開 exe 時跳出一堆終端機畫面」）：視窗程式開 console 子程序（py、claude.cmd、pwsh、winget、pip）每個都會閃一個黑窗；現在所有子程序加 CREATE_NO_WINDOW，輸出照常擷取進紀錄。功能不變。
+- 狀態還在讀時：按鈕說「稍等（讀取狀態）」、關閉視窗可直接關、開窗自動檢查更新每秒重試最多 20 秒。
+
 ## 0.11.10（2026-11-02，視窗會自動換 exe；從 0.11.9 更新上來這一次重開會失敗，關掉錯誤視窗後自己再開一次 exe 即可）
 
 - 視窗內換完 exe 自動重開時跳「Failed to execute script 'gui'… Can't find a usable init.tcl in {…\_MEIxxxx…}」與「Failed to remove temporary directory」（使用者截圖）。根因：PyInstaller onefile 的子程序繼承父程序環境時被 bootloader 當成同一個應用的 worker，直接用父程序的 _MEI 暫存資料夾，父程序一關就把它刪了。修法照官方文件：重開時設 `PYINSTALLER_RESET_ENVIRONMENT=1`（並拿掉繼承的 TCL_LIBRARY／TK_LIBRARY），新程序自己解壓成獨立頂層程序。

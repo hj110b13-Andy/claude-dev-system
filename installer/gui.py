@@ -69,6 +69,9 @@ class App:
         root.after(1500, self._auto_check_update)  # 開窗後安靜檢查一次 GitHub 版本；有新版才問，連不上只記一行
 
     def on_close(self):
+        if self.busy and self.busy_what == "讀取狀態（偵測環境）":  # 只是在讀，關掉沒有副作用
+            self.root.destroy()
+            return
         if self.busy:  # 套用是多步驟（local.json → install → 門檻），中途砍掉會留半套狀態：做完才能關
             messagebox.showinfo("關閉", "有工作正在執行（套用／安裝／測試），請等它跑完再關閉。")
             return
@@ -510,6 +513,12 @@ class App:
                     if pending:  # 「檢查更新」結束後才問要不要下載；在 busy 解除前問，按「是」會被「還在執行」擋掉（0.11.5 實測：只印有新版、從不下載）
                         self._pending_update = None
                         self._ask_update(pending)
+                elif kind == "state":
+                    self.state = payload
+                    self.form = gm.form_from_state(self.state)
+                    self._rebuild()
+                elif kind == "state_error":
+                    messagebox.showerror("讀取狀態失敗", payload)
                 elif kind == "keystatus":
                     n, text = payload
                     self.key_status[n].set(text)
@@ -541,13 +550,26 @@ class App:
 
     # ---------- 動作 ----------
     def refresh(self):
-        try:
-            self.state = gm.read_state(self.lay, repo=self.repo, python=PY if FROZEN else None, importer=gm.system_importer(PY) if FROZEN else gm.video.default_importer)
-        except Exception as e:  # noqa: BLE001
-            messagebox.showerror("讀取狀態失敗", str(e))
+        """讀狀態（偵測環境）在背景跑，視窗先出現；讀完由 _pump 的 "state" 訊息畫內容。期間算 busy，按鈕會說「稍等」。"""
+        if self.busy:
+            self._busy_msg()
             return
-        self.form = gm.form_from_state(self.state)
-        self._rebuild()
+        self.busy = True
+        self.busy_what = "讀取狀態（偵測環境）"
+        self.apply_btn.configure(state="disabled")
+        if not self.state:
+            self.title_var.set("claude-dev-system 設定　讀取中…")
+        self.sub_var.set(f"設定目錄：{self.lay.home}　偵測環境中（Python、Claude Code、ffmpeg、PowerShell、影片套件）…")
+
+        def work():
+            try:
+                st = gm.read_state(self.lay, repo=self.repo, python=PY if FROZEN else None, importer=gm.system_importer(PY) if FROZEN else gm.video.default_importer)
+                self.q.put(("state", st))
+            except Exception as e:  # noqa: BLE001
+                self.q.put(("state_error", f"{type(e).__name__}: {e}"))
+            finally:
+                self.q.put(("done", False))
+        threading.Thread(target=work, daemon=True).start()
 
     def do_apply(self):
         form = self._collect()
@@ -608,8 +630,10 @@ class App:
             self._log(f"金鑰 {n}{'（帳號：' + acct + '）' if acct else '（帳號備註未填）'} 測試：{'✅' if ok else '❌'} {msg}")
         self._run_bg(job, refresh_after=False, what="測試金鑰")
 
-    def _auto_check_update(self):
+    def _auto_check_update(self, tries: int = 0):
         if self.busy:
+            if tries < 20:  # 狀態還在背景讀：每秒再看一次，最多 20 秒
+                self.root.after(1000, lambda: self._auto_check_update(tries + 1))
             return
 
         def job():
@@ -832,7 +856,22 @@ class App:
         self._run_bg(job, what="解除安裝")
 
 
+def _hide_subprocess_consoles():
+    """Windows 視窗程式開 console 子程序（py、claude.cmd、pwsh、winget、pip…）會各閃一個黑色終端機；
+    把 CREATE_NO_WINDOW 加進所有 Popen（subprocess.run／check_output 都走它）。只影響本程式開的子程序，輸出仍照常擷取。"""
+    if sys.platform != "win32":
+        return
+    flag = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    orig = subprocess.Popen.__init__
+
+    def init(self, *args, **kw):
+        kw["creationflags"] = kw.get("creationflags", 0) | flag
+        orig(self, *args, **kw)
+    subprocess.Popen.__init__ = init  # type: ignore[method-assign]
+
+
 def main(argv=None) -> int:
+    _hide_subprocess_consoles()
     ap = argparse.ArgumentParser(description="claude-dev-system 設定視窗")
     ap.add_argument("--claude-home")
     ap.add_argument("--selfcheck", metavar="輸出檔", help="不開視窗：把狀態寫成 JSON 到指定檔後結束（執行檔冒煙測試用）")
