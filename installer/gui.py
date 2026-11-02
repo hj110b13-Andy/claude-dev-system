@@ -14,6 +14,7 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 import webbrowser
 from pathlib import Path
@@ -83,9 +84,51 @@ class App:
         root.after(100, self._pump)
         root.after(1500, self._auto_check_update)  # 開窗後安靜檢查一次 GitHub 版本；有新版才問，連不上只記一行
 
+    def _finish_close(self):
+        """真的要關之前：舊的 .old.exe 還沒刪完就說明並問（是＝等刪完自動關；否＝直接關，下次開啟再刪；取消＝回視窗）。"""
+        pend = sorted(p.name for p in getattr(self, "_old_exe_pending", set()))
+        if pend and not getattr(self, "_old_exe_gave_up", False):
+            ans = messagebox.askyesnocancel("舊的視窗程式還沒刪掉",
+                                            f"{'、'.join(pend)} 還在（更新前的舊程式可能還在關閉中，檔案被鎖著）。" + chr(10) + chr(10)
+                                            + "是＝等它刪完再自動關閉（最多 90 秒）" + chr(10) + "否＝直接關閉（檔案留著，下次開啟會再刪）" + chr(10) + "取消＝回到視窗")
+            if ans is None:
+                return
+            if ans:
+                self._close_when_cleaned = True
+                self.sub_var.set(f"設定目錄：{self.lay.home}　等舊的視窗程式刪除完成後自動關閉…")
+                return
+        self.root.destroy()
+
+    def start_old_exe_cleanup(self):
+        """更新留下的 .old*.exe：舊程序要幾秒才完全結束（Tk 收尾＋PyInstaller 刪暫存夾），期間鎖著；背景每秒試一次、最多 90 秒，
+        進度印在紀錄。視窗關閉時這條執行緒跟著結束，不會留在背景。"""
+        exe = Path(sys.executable)
+        olds = list(exe.parent.glob(exe.stem + ".old*.exe"))
+        if not olds:
+            return
+        self._old_exe_pending = set(olds)
+        self._old_exe_gave_up = False
+        self._log(f"舊的視窗程式 {'、'.join(o.name for o in olds)} 等它完全關閉後自動刪除（最多 90 秒）…")
+
+        def work():
+            for _ in range(90):
+                for o in list(self._old_exe_pending):
+                    try:
+                        o.unlink()
+                    except OSError:
+                        continue
+                    self._old_exe_pending.discard(o)
+                    self.q.put(("oldexe", ("deleted", o.name)))
+                if not self._old_exe_pending:
+                    self.q.put(("oldexe", ("done", "")))
+                    return
+                time.sleep(1)
+            self.q.put(("oldexe", ("timeout", "、".join(o.name for o in self._old_exe_pending))))
+        threading.Thread(target=work, daemon=True).start()
+
     def on_close(self):
         if self.busy and self.busy_what == "讀取狀態（偵測環境）":  # 只是在讀，關掉沒有副作用
-            self.root.destroy()
+            self._finish_close()
             return
         if self.busy:  # 套用是多步驟（local.json → install → 門檻），中途砍掉會留半套狀態：做完才能關
             messagebox.showinfo("關閉", "有工作正在執行（套用／安裝／測試），請等它跑完再關閉。")
@@ -105,7 +148,7 @@ class App:
                 self._close_after_apply = True
                 self.do_apply()
                 return
-        self.root.destroy()
+        self._finish_close()
 
     # ---------- 版面 ----------
     def _build(self):
@@ -511,7 +554,7 @@ class App:
                         self.refresh()
                     if getattr(self, "_close_after_apply", False):
                         self._close_after_apply = False
-                        self.root.destroy()
+                        self._finish_close()
                         return
                     if getattr(self, "_relaunch", False):
                         self._relaunch = False
@@ -534,6 +577,22 @@ class App:
                     self._rebuild()
                 elif kind == "state_error":
                     messagebox.showerror("讀取狀態失敗", payload)
+                elif kind == "oldexe":
+                    what, name = payload
+                    if what == "deleted":
+                        self._log(f"✅ 已刪除舊的視窗程式 {name}")
+                    elif what == "done":
+                        self._log("✅ 舊的視窗程式已全部刪完")
+                        if getattr(self, "_close_when_cleaned", False):
+                            self.root.destroy()
+                            return
+                    else:
+                        self._old_exe_gave_up = True
+                        self._log(f"⚠️ 90 秒內刪不掉 {name}（還被鎖著或沒有權限）；下次開啟會再試，也可以自己刪")
+                        if getattr(self, "_close_when_cleaned", False):
+                            messagebox.showinfo("刪不掉", f"{name} 90 秒內刪不掉，先關閉視窗；下次開啟會再試，或你自己刪掉它。")
+                            self.root.destroy()
+                            return
                 elif kind == "keystatus":
                     n, text = payload
                     self.key_status[n].set(text)
@@ -877,10 +936,6 @@ def main(argv=None) -> int:
     ap.add_argument("--selfcheck", metavar="輸出檔", help="不開視窗：把狀態寫成 JSON 到指定檔後結束（執行檔冒煙測試用）")
     ap.add_argument("--after-update", action="store_true", help="（內部用）視窗內換完 exe 後重開時帶的旗標")
     a = ap.parse_args(argv)
-    if FROZEN:
-        # 上次更新留下的 .old.exe：舊程序還要幾秒才完全結束，檔案鎖著；背景慢慢重試（最多 90 秒），不擋開窗。
-        # 0.11.12 使用者實測：開窗時只試 3 秒，刪不掉，要再手動重開一次才消失
-        threading.Thread(target=appdir.cleanup_old_exe, args=(Path(sys.executable), 90, 1.0), daemon=True).start()
     if a.selfcheck:
         try:
             lay = Layout(claude_home(a.claude_home))
@@ -908,7 +963,9 @@ def main(argv=None) -> int:
         pass
     app = App(root, Layout(claude_home(a.claude_home)))
     if a.after_update:
-        app._log(f"✅ 視窗程式已更新為 v{repo_version(REPO)}（舊的 .old.exe 會在它完全關閉後自動刪掉，最多等 90 秒）")
+        app._log(f"✅ 視窗程式已更新為 v{repo_version(REPO)}")
+    if FROZEN:
+        app.start_old_exe_cleanup()  # 0.11.12 實測：開窗時只試 3 秒刪不掉；0.11.14 起背景重試並把進度印在紀錄，關閉時沒刪完會問
     root.mainloop()
     return 0
 
