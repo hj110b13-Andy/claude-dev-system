@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import queue
 import subprocess
 import sys
@@ -497,7 +498,12 @@ class App:
                     if getattr(self, "_relaunch", False):
                         self._relaunch = False
                         flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-                        subprocess.Popen([sys.executable, "--after-update"], cwd=str(Path(sys.executable).parent), close_fds=True, creationflags=flags)
+                        # PyInstaller onefile：子程序若繼承父程序的環境，bootloader 會把它當同一個應用的 worker，直接用父程序的 _MEI 暫存資料夾；
+                        # 父程序一關就刪掉那個資料夾，新視窗「Can't find a usable init.tcl」（0.11.9 使用者實測）。官方解法：PYINSTALLER_RESET_ENVIRONMENT=1
+                        # 讓它重新解壓成獨立的頂層程序（pyinstaller.org/en/stable/common-issues-and-pitfalls.html「Restarting an application as an independent process」）
+                        env = {k: v for k, v in os.environ.items() if k not in ("TCL_LIBRARY", "TK_LIBRARY")}
+                        env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+                        subprocess.Popen([sys.executable, "--after-update"], cwd=str(Path(sys.executable).parent), close_fds=True, creationflags=flags, env=env)
                         self.root.destroy()
                         return
                     pending = getattr(self, "_pending_update", None)

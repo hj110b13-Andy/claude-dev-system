@@ -2,6 +2,11 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.11.10（2026-11-02，視窗會自動換 exe；從 0.11.9 更新上來這一次重開會失敗，關掉錯誤視窗後自己再開一次 exe 即可）
+
+- 視窗內換完 exe 自動重開時跳「Failed to execute script 'gui'… Can't find a usable init.tcl in {…\_MEIxxxx…}」與「Failed to remove temporary directory」（使用者截圖）。根因：PyInstaller onefile 的子程序繼承父程序環境時被 bootloader 當成同一個應用的 worker，直接用父程序的 _MEI 暫存資料夾，父程序一關就把它刪了。修法照官方文件：重開時設 `PYINSTALLER_RESET_ENVIRONMENT=1`（並拿掉繼承的 TCL_LIBRARY／TK_LIBRARY），新程序自己解壓成獨立頂層程序。
+- 這個 bug 在「正在執行的舊 exe」裡，所以 0.11.9 → 0.11.10 這一次更新還是會在重開那步失敗一次（exe 本身已換好，雙擊重開就是新版）；之後的更新就正常。
+
 ## 0.11.9（2026-11-02，視窗會自動換 exe）
 
 - 多台 Chrome 自動選本機那台改成**全域規則**（`core.md` 教操作條、`web-quick.md` A 段），不只測試題：任何專案對話要開網頁時，帳號連著多台 Chrome 就自己選 `onThisComputer` 為 true 的那台（沒有就 `isLocal`），不問；只有兩台都在本機才問。使用者 11/2：「之後在任何 claude code 專案對話都會全域優先使用當前的裝置的 chrome，不會再詢問了嗎?」
