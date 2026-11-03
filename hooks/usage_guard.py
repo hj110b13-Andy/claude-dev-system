@@ -166,7 +166,7 @@ PA_INT_KEYS = ("minSourceFiles", "staleFiles", "claudeMdMaxLines", "claudeMdMaxK
 
 def _pa_config(cwd):
     """projectAutomation：專案 .claude/dispatch-config.json 優先，再全域，再預設。"""
-    cfg = {"autoInit": True, "autoAudit": True, "autoRefactor": False, "alignOnUpdate": True, "minSourceFiles": 10,
+    cfg = {"autoInit": True, "autoAudit": True, "autoRefactor": False, "alignOnUpdate": True, "verifySkill": True, "minSourceFiles": 10,
            # 0.12.0 專案健康檢查（doc-governance 的門檻：CLAUDE.md 180 行、交接紀錄 600 行；盤點改過 >20 檔要重跑）
            # 0.13.0 交接紀錄加 KB 上限（Stock-web PROGRESS.md 510 行卻 355 KB）
            "staleFiles": 20, "claudeMdMaxLines": 180, "claudeMdMaxKB": 20, "progressMaxLines": 600, "progressMaxKB": 100,
@@ -177,7 +177,7 @@ def _pa_config(cwd):
                 t = (json.load(f) or {}).get("projectAutomation") or {}
         except Exception:
             continue
-        for k in ("autoInit", "autoAudit", "autoRefactor", "alignOnUpdate"):
+        for k in ("autoInit", "autoAudit", "autoRefactor", "alignOnUpdate", "verifySkill"):
             if isinstance(t.get(k), bool):
                 cfg[k] = t[k]
         for k in PA_INT_KEYS:
@@ -260,6 +260,27 @@ def _lines(path):
 HANDOFF_FILES = ("PROGRESS.md", "HANDOFF.md", "TODO.md", os.path.join("docs", "progress.md"))
 
 
+def _needs_verify_skill(cwd):
+    """0.14.0：可判定的「有畫面或可啟動服務」＋專案 .claude/skills/ 底下沒有名稱含 verify 的 skill。"""
+    web = False
+    try:
+        with open(os.path.join(cwd, "package.json"), encoding="utf-8") as f:
+            scripts = (json.load(f) or {}).get("scripts") or {}
+        web = any(k in scripts for k in ("dev", "start", "serve", "preview"))
+    except Exception:
+        pass
+    if not web:
+        web = any(os.path.exists(os.path.join(cwd, n)) for n in ("manage.py", "index.html"))
+    if not web:
+        return False
+    sk = os.path.join(cwd, ".claude", "skills")
+    try:
+        names = os.listdir(sk)
+    except OSError:
+        names = []
+    return not any("verify" in n.lower() and os.path.exists(os.path.join(sk, n, "SKILL.md")) for n in names)
+
+
 def big_file_exceptions(cwd):
     """行數上限例外清單（唯一來源）：專案 .claude/dispatch-config.json 的 projectAutomation.bigFileExceptions {"相對路徑": "原因"}。
     原因空白不算例外（cds-modularize：例外逐檔寫原因）。專案的行數閘門測試也應讀這一份。"""
@@ -311,6 +332,9 @@ def project_health(cwd):
     big = _big_files(cwd, idx)
     if big:
         out.append(big)
+    if cfg["verifySkill"] and _needs_verify_skill(cwd):
+        out.append("這是有畫面或可啟動服務的專案（package.json 有 dev／start／serve／preview，或有 manage.py、index.html），但 `.claude/skills/` 沒有驗證 skill"
+                   " → 用 skill `cds-verify-app` 生成專案驗證 skill（怎麼啟動、功能↔檔案地圖），之後改動照地圖只驗相關功能")
     md = os.path.join(cwd, "CLAUDE.md")
     if os.path.exists(md):
         ln, kb = _lines(md), os.path.getsize(md) / 1024
@@ -496,6 +520,128 @@ def align_msg(cwd, session_id=None, mark_only=False):
         return None
 
 
+# ---------- 工具後提醒（0.14.0，PostToolUse）----------
+# 使用者 2026-11-04「這五項都做」：全域規則裡只靠 Claude 記得、實際漏過的四條，改成工具執行後由 hook 判定提醒。
+# 同一場對話同一件事只提醒一次（狀態存 project-auto.json 的 remind，只留最近 30 場對話）。
+REMIND_GIT = re.compile(r"\bgit\s+(?:add\s+(?:-A\b|--all\b|\.(?=\s|$|[;&|)]))|stash(?!\s+(?:list|show)\b)|reset\s+--hard\b"
+                        r"|clean\s+-[a-zA-Z]*f|checkout\s+--\s+\.(?=\s|$|[;&|)]))")
+REMIND_KEEP_SESSIONS = 30
+
+
+def _task_check(cwd):
+    """taskCheck（全域，專案優先）→ (enabled, minutes)。"""
+    en, mins = True, 15
+    for path in (CONFIG, find_project_config(cwd)):
+        if not path:
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                t = (json.load(f) or {}).get("taskCheck") or {}
+        except Exception:
+            continue
+        if isinstance(t.get("enabled"), bool):
+            en = t["enabled"]
+        if isinstance(t.get("minutes"), (int, float)) and not isinstance(t.get("minutes"), bool) and t["minutes"] > 0:
+            mins = int(t["minutes"])
+    return en, mins
+
+
+def _installed_copy(fp):
+    """fp 是 claude-dev-system 的安裝副本（rules／tools／hooks／CHANGELOG、本工具裝的 skills）→ 回顯示用相對路徑，否則 None。
+    config/ 不算：dispatch-config.json 本來就給使用者改，local.json 是金鑰。"""
+    ap = os.path.normcase(os.path.abspath(fp))
+    base = os.path.normcase(os.path.join(HOME, "claude-dev-system"))
+    sk = os.path.normcase(os.path.join(HOME, "skills"))
+    if ap.startswith(base + os.sep):
+        r = os.path.relpath(ap, base).replace(os.sep, "/")
+        if r.split("/")[0] in ("rules", "tools", "hooks") or r == "changelog.md":
+            return "claude-dev-system/" + r
+    elif ap.startswith(sk + os.sep):
+        parts = os.path.relpath(ap, sk).split(os.sep)
+        if len(parts) > 1 and os.path.exists(os.path.join(sk, parts[0], ".claude-dev-system")):
+            return "skills/" + "/".join(parts)
+    return None
+
+
+def _hot_modules(cwd, st):
+    """盤點索引的「被引用最多」{相對路徑: 引用數}；依索引修改時間快取在狀態檔，不每次解析大索引。"""
+    idx = os.path.join(cwd, ".claude", "project-scan.json")
+    try:
+        mt = os.path.getmtime(idx)
+    except OSError:
+        return {}
+    key = "hot|" + cwd.lower()
+    c = st.get(key)
+    if isinstance(c, dict) and c.get("mtime") == mt:
+        return c.get("hot") or {}
+    try:
+        with open(idx, encoding="utf-8") as f:
+            hot = {str(r): int(n) for r, n in (json.load(f) or {}).get("mostDepended") or []}
+    except Exception:
+        hot = {}
+    st[key] = {"mtime": mt, "hot": hot}
+    return hot
+
+
+def tool_reminders(payload):
+    """回要注入的提醒清單。四項：改安裝副本、派背景任務沒建巡檢、改被大量引用的模組、多人共用目錄的危險 git 指令。"""
+    try:
+        name = payload.get("tool_name") or ""
+        ti = payload.get("tool_input") or {}
+        if not isinstance(ti, dict):
+            return []
+        sid = str(payload.get("session_id") or "-")
+        cwd = payload.get("cwd")
+        st = _pa_load()
+        rem = st.get("remind") if isinstance(st.get("remind"), dict) else {}
+        sess = rem.pop(sid, {})  # pop 再放回＝移到最後，修剪時留最近的對話
+        rem[sid] = sess
+        out = []
+
+        def once(k):
+            if k in sess:
+                return False
+            sess[k] = 1
+            return True
+
+        fp = ti.get("file_path") or ti.get("notebook_path") or ""
+        if name in ("Edit", "Write", "NotebookEdit") and fp:
+            inst = _installed_copy(fp)
+            if inst and once("inst|" + inst):
+                out.append(f"【改到安裝副本（hook）】剛改的 `{fp}` 是 claude-dev-system 的安裝副本：update 會把改過的檔當使用者改動保留、新版只存 .new，"
+                           "之後這個檔的更新全部裝不上（Stock-web 2026-11-03 就這樣卡住 usage_guard.py 與 doc-governance.md）。"
+                           "→ 把同樣的改動做在 claude-dev-system repo（常見 ~/Documents/Claude/claude-dev-system，或 `~/.claude/claude-dev-system/app/`），"
+                           "跑測試、`install.py update`、`verify`；安裝副本改回 repo 版。沒有 repo 可改就告訴使用者，不要只改副本。")
+            c = _pa_skip(cwd)
+            if c and not inst:
+                try:
+                    rel = os.path.relpath(os.path.abspath(fp), c).replace(os.sep, "/")
+                except ValueError:
+                    rel = ""
+                n = _hot_modules(c, st).get(rel, 0) if rel and not rel.startswith("..") else 0
+                if n >= 3 and once("blast|" + rel):
+                    out.append(f"【波及範圍（hook）】剛改的 `{rel}` 被 {n} 個檔引用（盤點索引）→ 收尾前用 skill `cds-blast-radius` 列出 diff 之外會受影響的呼叫端，"
+                               "逐條判定並實跑最關鍵的一條證明安全；這場對話已對它做過就忽略。")
+        bg = name in ("Agent", "Task", "Workflow") or (name in ("Bash", "PowerShell") and ti.get("run_in_background") is True)
+        if bg:
+            en, mins = _task_check(cwd)
+            if en and once("taskcheck"):
+                out.append(f"【背景任務巡檢（hook）】剛派出背景任務，taskCheck.enabled=true → 先 `CronList`，這場對話還沒有巡檢排程就用 `CronCreate` 建每 {mins} 分鐘一次，"
+                           "prompt 用 core.md「背景任務巡檢」那句固定文字；全部結束就 `CronDelete`。子 agent 忽略此則。")
+        if name in ("Bash", "PowerShell"):
+            m = REMIND_GIT.search(str(ti.get("command") or ""))
+            if m and once("git|" + m.group(0)):
+                out.append(f"【共用工作目錄（hook）】剛執行 `{m.group(0)}`：多個 agent／對話共用這個工作目錄時不可用（會一起加入、藏起或丟掉別人的未提交變更）"
+                           "→ 用 `git status` 確認沒動到別人的檔，之後改用 `git add <自己改的檔>`、`git commit -- <路徑>`。確定只有你在這個目錄工作就忽略。")
+        while len(rem) > REMIND_KEEP_SESSIONS:
+            rem.pop(next(iter(rem)))
+        st["remind"] = rem
+        _pa_save(st)
+        return out
+    except Exception:
+        return []
+
+
 # ---------- 查證守門（Stop）----------
 # 另一台裝置的 Claude 2026-11-02 自評：規則只是指示，它判定「這題不算查證型」就整段跳過，寫了「2024 年 Google 披薩加膠水」
 # 卻沒附來源。這裡把規則變成機械檢查：問答題的最後一則回覆含年份／數字卻沒有「來源」段 → block 一次要它補；
@@ -636,11 +782,13 @@ def main():
             save_state(s)
             if printing:
                 print("讀不到用量（沒有登入憑證、離線或端點改版）；下次 hook 會在 TTL 後再試")
-            return
-        s.update(got)
-        s["fetched_at"] = now
-        s["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-        save_state(s)
+                return
+            # 0.14.0：不再 return——原本讀不到用量就整個結束，專案自動化、健康檢查、全域對照、工具後提醒全被跳過；改用上次的用量數字繼續
+        else:
+            s.update(got)
+            s["fetched_at"] = now
+            s["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+            save_state(s)
     five, seven = s.get("five_hour_pct"), s.get("seven_day_pct")
     if printing:
         print(f"5 小時 {five}%（重置 {s.get('five_hour_resets_at')}）；7 天 {seven}%（重置 {s.get('seven_day_resets_at')}）"
@@ -667,6 +815,8 @@ def main():
         hm = health_msg(hook_cwd, session_id=payload.get("session_id"))  # 盤點過期、CLAUDE.md／交接紀錄過大：同資料夾同對話每天一次
         if hm:
             msgs.append(hm)
+    if event == "PostToolUse":  # 0.14.0：改安裝副本、背景任務巡檢、波及範圍、共用目錄 git
+        msgs.extend(tool_reminders(payload))
     stale = stale_agents()
     key = "|".join(sorted(stale))
     if stale and (key != s.get("stale_key") or now - s.get("stale_alerted_at", 0) >= STALE_REPEAT):

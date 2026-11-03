@@ -2,6 +2,18 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.14.0（2026-11-04）
+
+使用者：「還有沒有甚麼可能會遺漏的要改進程自動化?」→ 逐條對照全域規則，列出五條只靠 Claude 記得的 → 「這五項都做」。全部做在既有的 usage_guard hook（PostToolUse 本來就掛在 Bash／PowerShell／Agent／Task／Edit／Write／NotebookEdit／Workflow），不改 settings.json；同一場對話同一件事只提醒一次。
+
+- **改到安裝副本**（Edit／Write／NotebookEdit 的路徑在 `~/.claude/claude-dev-system/` 的 rules、tools、hooks、CHANGELOG，或本工具裝的 skills）：提醒改 repo 再 update、副本改回。起因：Stock-web 11/3 直接改副本，update 之後都裝不上。config/ 不算（dispatch-config.json 本來就給使用者改）。
+- **背景任務巡檢**（派 Agent／Task／Workflow，或 Bash／PowerShell run_in_background）：taskCheck.enabled 時提醒先 CronList、沒有就 CronCreate。起因：這場對話（claude-dev-system 0.13.0 發布時）我自己派了背景指令也沒建。
+- **波及範圍**（改到盤點索引 mostDepended 裡被 ≥3 個檔引用的檔）：提醒 cds-blast-radius。索引依修改時間快取，不每次解析大檔。
+- **共用工作目錄 git**（git add -A／--all／.、git stash（list／show 除外）、reset --hard、clean -f、checkout -- .）：提醒改用 `git add <自己的檔>`、`git commit -- <路徑>`。
+- **驗證 skill**（健康檢查）：有畫面或可啟動服務、但 `.claude/skills/` 沒有 *verify* skill → 提醒 cds-verify-app。`projectAutomation.verifySkill` 可關。
+- **讀不到用量時其他提醒全被跳過**（端對端測試發現）：usage_guard 讀用量失敗（離線、憑證過期）原本直接 return，同一次的專案自動化、健康檢查、全域對照、工具後提醒全部沒注入；改成沿用上次用量繼續。
+- core.md 加一條：看到這些 hook 提醒照做。測試：test_hooks ToolReminders 5 個（觸發、不觸發、只一次、可關）。
+
 ## 0.13.1（2026-11-04）
 
 - **project-scan 大檔檢查漏掉腳本**（使用者：「Stock-web 跑重整時，有把 exitStrategy.ts 這類大檔照重整流程拆開了嗎?」）。查證：沒有拆，scripts/backtest/exitStrategy.ts 仍 6,588 行；但 Stock-web 盤點寫「超過 800 行的原始碼 0 個」。根因：project-scan 把 scripts/、tools/ 底下歸成「腳本」，「最大的檔」與 big-file 問題只算「原始碼」，0.12.0 在 cds-modularize 寫的「行數閘門預設涵蓋研究／回測腳本」因此從盤點端就看不到。改成腳本也算（標「（腳本）」），測試檔仍不算。用新版掃 Stock-web：5 個超過 800 行，全是腳本（exitStrategy.ts 6,588、register.tsx 866、weeklyGoliveCore.ts 839、histRetest.ts 832、simRulesSnapshot.ts 812）。既有專案下次重跑盤點才會出現。

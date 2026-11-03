@@ -179,5 +179,86 @@ class Health(unittest.TestCase):
         self.assertIn("壓縮後重新開工", ug.compact_msg(None, None), "沒有 cwd 也給開工清單")
 
 
+class ToolReminders(unittest.TestCase):
+    """0.14.0：使用者「這五項都做」——改安裝副本、背景任務巡檢、波及範圍、共用目錄 git、驗證 skill。"""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="cds-remind-"))
+        self._saved = (ug.HOME, ug.STATE_DIR, ug.PA_STATE, ug.CONFIG)
+        ug.HOME = str(self.tmp / "home")
+        ug.STATE_DIR = str(self.tmp / "state")
+        ug.PA_STATE = str(self.tmp / "state" / "project-auto.json")
+        ug.CONFIG = str(self.tmp / "no-global.json")
+        self.proj = self.tmp / "proj"
+        (self.proj / ".claude").mkdir(parents=True)
+        (self.proj / ".git").mkdir()
+
+    def tearDown(self):
+        ug.HOME, ug.STATE_DIR, ug.PA_STATE, ug.CONFIG = self._saved
+
+    def r(self, name, sid="s1", **ti):
+        return ug.tool_reminders({"tool_name": name, "tool_input": ti, "session_id": sid, "cwd": str(self.proj)})
+
+    def test_installed_copy(self):
+        hook = Path(ug.HOME) / "claude-dev-system" / "hooks" / "usage_guard.py"
+        m = self.r("Edit", file_path=str(hook))
+        self.assertTrue(any("改到安裝副本" in x for x in m), m)
+        self.assertEqual(self.r("Edit", file_path=str(hook)), [], "同一場對話同一檔只一次")
+        cfg = Path(ug.HOME) / "claude-dev-system" / "config" / "dispatch-config.json"
+        self.assertEqual(self.r("Edit", file_path=str(cfg)), [], "設定檔本來就給使用者改")
+        sk = Path(ug.HOME) / "skills" / "cds-x"
+        sk.mkdir(parents=True)
+        self.assertEqual(self.r("Write", file_path=str(sk / "SKILL.md")), [], "不是本工具裝的 skill 不管")
+        (sk / ".claude-dev-system").write_text("x", encoding="utf-8")
+        self.assertTrue(any("安裝副本" in x for x in self.r("Write", file_path=str(sk / "SKILL.md"))))
+
+    def test_background_task_check(self):
+        self.assertEqual(self.r("Bash", command="ls"), [], "前景指令不提醒")
+        m = self.r("Bash", command="npm test", run_in_background=True)
+        self.assertTrue(any("CronCreate" in x and "15 分鐘" in x for x in m), m)
+        self.assertEqual(self.r("Agent", prompt="x"), [], "同一場對話只一次")
+        self.assertTrue(self.r("Agent", sid="s2", prompt="x"), "別場對話照提醒")
+        (self.proj / ".claude" / "dispatch-config.json").write_text(json.dumps({"taskCheck": {"enabled": False}}), encoding="utf-8")
+        self.assertEqual(self.r("Agent", sid="s3", prompt="x"), [], "taskCheck 關掉不提醒")
+
+    def test_blast_radius_from_index(self):
+        (self.proj / ".claude" / "project-scan.json").write_text(json.dumps({"version": 2, "mostDepended": [["src/lib/cache.ts", 72], ["src/a.ts", 2]]}), encoding="utf-8")
+        m = self.r("Edit", file_path=str(self.proj / "src" / "lib" / "cache.ts"))
+        self.assertTrue(any("cds-blast-radius" in x and "72" in x for x in m), m)
+        self.assertEqual(self.r("Edit", file_path=str(self.proj / "src" / "lib" / "cache.ts")), [])
+        self.assertEqual(self.r("Edit", file_path=str(self.proj / "src" / "a.ts")), [], "引用 < 3 不提醒")
+
+    def test_shared_dir_git(self):
+        for cmd in ("git add -A", "git add .", "git stash", "git reset --hard HEAD", "git clean -fd", "cd x && git add --all && git commit -m y"):
+            self.assertTrue(any("共用工作目錄" in x for x in self.r("Bash", sid=cmd, command=cmd)), cmd)
+        for cmd in ("git add src/a.ts", "git stash list", "git status", "git add ./src/a.ts", "git commit -- a.py"):
+            self.assertEqual(self.r("Bash", sid=cmd, command=cmd), [], cmd)
+
+    def test_main_still_reminds_when_usage_fetch_fails(self):
+        import io
+        import contextlib
+        saved = (ug.fetch, ug.USAGE, ug.BOARD_FILE, sys.stdin)
+        ug.fetch = lambda: None  # 離線／憑證過期
+        ug.USAGE = str(self.tmp / "state" / "usage.json")
+        ug.BOARD_FILE = str(self.tmp / "state" / "board.md")
+        sys.stdin = io.StringIO(json.dumps({"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "git add -A"},
+                                            "session_id": "m1", "cwd": str(self.proj)}))
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                ug.main()
+        finally:
+            ug.fetch, ug.USAGE, ug.BOARD_FILE, sys.stdin = saved
+        self.assertIn("hookSpecificOutput", buf.getvalue(), "讀不到用量也要照常注入其他提醒")
+
+    def test_verify_skill_health(self):
+        self.assertFalse(ug._needs_verify_skill(str(self.proj)), "沒有畫面不提醒")
+        (self.proj / "package.json").write_text(json.dumps({"scripts": {"dev": "next dev"}}), encoding="utf-8")
+        self.assertTrue(any("cds-verify-app" in p for p in ug.project_health(str(self.proj))))
+        (self.proj / ".claude" / "skills" / "verify-proj").mkdir(parents=True)
+        (self.proj / ".claude" / "skills" / "verify-proj" / "SKILL.md").write_text("x", encoding="utf-8")
+        self.assertFalse(ug._needs_verify_skill(str(self.proj)))
+
+
 if __name__ == "__main__":
     unittest.main()
