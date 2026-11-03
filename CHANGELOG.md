@@ -2,6 +2,12 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.13.1（2026-11-04）
+
+- **project-scan 大檔檢查漏掉腳本**（使用者：「Stock-web 跑重整時，有把 exitStrategy.ts 這類大檔照重整流程拆開了嗎?」）。查證：沒有拆，scripts/backtest/exitStrategy.ts 仍 6,588 行；但 Stock-web 盤點寫「超過 800 行的原始碼 0 個」。根因：project-scan 把 scripts/、tools/ 底下歸成「腳本」，「最大的檔」與 big-file 問題只算「原始碼」，0.12.0 在 cds-modularize 寫的「行數閘門預設涵蓋研究／回測腳本」因此從盤點端就看不到。改成腳本也算（標「（腳本）」），測試檔仍不算。用新版掃 Stock-web：5 個超過 800 行，全是腳本（exitStrategy.ts 6,588、register.tsx 866、weeklyGoliveCore.ts 839、histRetest.ts 832、simRulesSnapshot.ts 812）。既有專案下次重跑盤點才會出現。
+- **行數上限自動提醒**（使用者：「行數閘門範圍…這個功能現在有了嗎?開新對話或壓縮對話會自動跑嗎?」——查證：沒有，0.12.0 只是 cds-modularize 裡的文字，只有跑重整時才讀到）：健康檢查 hook（新對話每天一次、壓縮後每次）讀盤點索引，超過上限又不在例外清單的檔提醒排進待辦拆檔（拆檔本身要使用者同意）；索引是舊版（version < 2，沒算腳本）就要求重跑盤點。例外清單唯一來源：專案 `.claude/dispatch-config.json` 的 `projectAutomation.bigFileExceptions`（檔案→原因，原因空白不算）；cds-modularize 同步寫明。project-scan 索引 version 1→2。
+- 測試：test_tools 的 ProjectScan 加 scripts/backtest/exitStrategy.ts 1,000 行必須列為 big-file。；test_hooks 加舊版索引／例外清單情境。
+
 ## 0.13.0（2026-11-04）
 
 使用者：「我在 Stock-web 開新對話並叫他根據全域規則去做優化，只是第一次對話時他沒有像你說的會主動提出，要我詢問後才會，為什麼?」。查證（Stock-web 對話 e29ffd20）：新對話 2026-11-03 23:30 開始，0.12.0 hook 23:47 才裝上，當時健康檢查還不存在；而且 Stock-web 已有 CLAUDE.md 與盤點索引，走「③已有索引」分支，hook 本來就什麼都不注入，只靠 Claude 記得規則——它只回答了使用者問的進度，使用者再問「你看看全域規則與設定，有沒有這個專案要做的優化?」才列出 7 項。

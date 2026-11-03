@@ -217,6 +217,8 @@ class ProjectScan(unittest.TestCase):
         (tmp / "pkg" / "a.py").write_text("from pkg import b" + chr(10), encoding="utf-8")
         (tmp / "pkg" / "b.py").write_text("from pkg import a" + chr(10), encoding="utf-8")
         (tmp / "pkg" / "big.py").write_text(("x = 1" + chr(10)) * 900, encoding="utf-8")
+        (tmp / "scripts" / "backtest").mkdir(parents=True)  # Stock-web exitStrategy.ts 6,588 行被漏掉
+        (tmp / "scripts" / "backtest" / "exitStrategy.ts").write_text(("const x = 1;" + chr(10)) * 1000, encoding="utf-8")
         (tmp / "tests").mkdir()
         (tmp / "tests" / "test_a.py").write_text("def test(): pass" + chr(10), encoding="utf-8")
         (tmp / "package.json").write_text('{"scripts": {"dev": "next dev"}}', encoding="utf-8")
@@ -237,6 +239,8 @@ class ProjectScan(unittest.TestCase):
         self.assertEqual(idx["counts"]["asset"], 30, "但要計數")
         self.assertEqual(len(idx["cycles"]), 1)
         self.assertIn("pkg/big.py", md)
+        self.assertIn("scripts/backtest/exitStrategy.ts", md, "腳本大檔也要列")
+        self.assertTrue(any(p.get("file") == "scripts/backtest/exitStrategy.ts" and "（腳本）" in p["detail"] for p in idx["problems"]))
         kinds = {p["kind"] for p in idx["problems"]}
         self.assertEqual(kinds, {"cycle", "big-file"})
         self.assertTrue(any("npm run dev" in e for e in idx["entryPoints"]))

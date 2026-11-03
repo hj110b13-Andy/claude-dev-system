@@ -100,7 +100,7 @@ class Health(unittest.TestCase):
         import os
         import time
         idx = self.proj / ".claude" / "project-scan.json"
-        idx.write_text("{}", encoding="utf-8")
+        idx.write_text(json.dumps({"version": 2, "problems": []}), encoding="utf-8")
         old = time.time() - 3600
         os.utime(idx, (old, old))
         for i in range(25):
@@ -116,6 +116,24 @@ class Health(unittest.TestCase):
         self.assertIn("專案健康檢查", ug.health_msg(str(self.proj), force=True), "壓縮後每次都看")
         (self.proj / ".claude" / "dispatch-config.json").write_text(json.dumps({"projectAutomation": {"claudeMdMaxLines": 0, "staleFiles": 0, "progressMaxLines": 0}}), encoding="utf-8")
         self.assertEqual(ug.project_health(str(self.proj)), [], "專案可改門檻或設 0 關閉；剩 KB 檢查，200 行 < 20 KB")
+
+    def test_big_files_from_index_with_exceptions(self):
+        idx = self.proj / ".claude" / "project-scan.json"
+        idx.write_text(json.dumps({"version": 1, "problems": []}), encoding="utf-8")
+        probs = ug.project_health(str(self.proj))
+        self.assertTrue(any("舊版掃描" in p for p in probs), probs)
+        idx.write_text(json.dumps({"version": 2, "maxLines": 800, "problems": [
+            {"kind": "big-file", "file": "scripts/backtest/exitStrategy.ts", "detail": "6588 行 > 800（腳本）"},
+            {"kind": "big-file", "file": "scripts/once.ts", "detail": "900 行 > 800（腳本）"},
+            {"kind": "cycle", "files": ["a", "b"], "detail": "x"}]}), encoding="utf-8")
+        (self.proj / ".claude" / "dispatch-config.json").write_text(json.dumps({"projectAutomation": {"bigFileExceptions": {
+            "scripts/once.ts": "一次性回填，不再修改", "scripts/backtest/exitStrategy.ts": " "}}}), encoding="utf-8")
+        probs = ug.project_health(str(self.proj))
+        big = [p for p in probs if "行數上限" in p]
+        self.assertEqual(len(big), 1, probs)
+        self.assertIn("exitStrategy.ts", big[0], "原因空白不算例外")
+        self.assertNotIn("once.ts", big[0], "有寫原因的例外不提醒")
+        self.assertIn("cds-modularize", big[0])
 
     def test_progress_kb_limit_and_per_session(self):
         # Stock-web 2026-11-03：PROGRESS.md 510 行卻 355 KB，只看行數抓不到

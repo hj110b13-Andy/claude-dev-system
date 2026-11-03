@@ -213,11 +213,14 @@ def scan(root: Path, max_lines: int, ignore: set | None = None) -> dict:
     for a, deps in g.items():
         for b in deps:
             dependents[b] = dependents.get(b, 0) + 1
-    big = sorted(((f["lines"], r) for r, f in files.items() if f["kind"] == "source" and f["lines"]), reverse=True)
+    # 0.13.1：腳本（scripts/、tools/）也算——Stock-web 重整後盤點寫「超過 800 行 0 個」，scripts/backtest/exitStrategy.ts 卻有 6,588 行
+    #（研究／回測腳本每天加分支，長得比產品碼快）。測試檔不算。
+    big = sorted(((f["lines"], r) for r, f in files.items() if f["kind"] in ("source", "script") and f["lines"]), reverse=True)
     problems = []
     for n, r in big:
         if n > max_lines:
-            problems.append({"kind": "big-file", "file": r, "detail": f"{n} 行 > {max_lines}"})
+            tag = "（腳本）" if files[r]["kind"] == "script" else ""
+            problems.append({"kind": "big-file", "file": r, "detail": f"{n} 行 > {max_lines}{tag}"})
     for cyc in cycles:
         problems.append({"kind": "cycle", "files": cyc, "detail": f"{len(cyc)} 個檔互相依賴"})
     hot = sorted(dependents.items(), key=lambda kv: -kv[1])[:10]
@@ -225,7 +228,7 @@ def scan(root: Path, max_lines: int, ignore: set | None = None) -> dict:
     n_test = sum(1 for f in files.values() if f["kind"] == "test")
     if n_src >= 10 and n_test == 0:
         problems.append({"kind": "no-tests", "detail": f"{n_src} 個原始碼檔、0 個測試檔"})
-    return {"version": 1, "root": str(root), "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%S"), "maxLines": max_lines,
+    return {"version": 2, "root": str(root), "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%S"), "maxLines": max_lines,
             "counts": {**{k: sum(1 for f in files.values() if f["kind"] == k) for k in ("source", "test", "script", "config", "doc", "other")}, "asset": assets},
             "languages": _lang_counts(files), "entryPoints": entry_points(root), "files": files, "graphEdges": sum(len(v) for v in g.values()),
             "cycles": cycles, "mostDepended": hot, "biggest": [(r, n) for n, r in big[:10]], "problems": problems, "unreadable": unreadable,

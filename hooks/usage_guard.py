@@ -260,6 +260,41 @@ def _lines(path):
 HANDOFF_FILES = ("PROGRESS.md", "HANDOFF.md", "TODO.md", os.path.join("docs", "progress.md"))
 
 
+def big_file_exceptions(cwd):
+    """行數上限例外清單（唯一來源）：專案 .claude/dispatch-config.json 的 projectAutomation.bigFileExceptions {"相對路徑": "原因"}。
+    原因空白不算例外（cds-modularize：例外逐檔寫原因）。專案的行數閘門測試也應讀這一份。"""
+    try:
+        with open(os.path.join(cwd, ".claude", "dispatch-config.json"), encoding="utf-8") as f:
+            ex = ((json.load(f) or {}).get("projectAutomation") or {}).get("bigFileExceptions") or {}
+        return {k.replace(chr(92), "/"): v for k, v in ex.items() if isinstance(v, str) and v.strip()}
+    except Exception:
+        return {}
+
+
+def _big_files(cwd, idx):
+    """0.13.1：讀盤點索引的 big-file 問題，扣掉例外清單；舊版索引（version < 2，不算 scripts/、tools/）要求重跑盤點。
+    Stock-web 重整後閘門只管 src/，scripts/backtest/exitStrategy.ts 6,588 行沒有任何機制提醒。"""
+    if not os.path.exists(idx) or os.path.getsize(idx) > 50_000_000:
+        return None
+    try:
+        with open(idx, encoding="utf-8") as f:
+            d = json.load(f) or {}
+    except Exception:
+        return None
+    if int(d.get("version") or 1) < 2:
+        return ("盤點索引是舊版掃描（大檔檢查沒算 scripts/、tools/ 底下的研究／回測腳本）→ 重跑 "
+                "`py -3 ~/.claude/claude-dev-system/tools/project-scan.py .` 更新索引與 docs/PROJECT-INVENTORY.md，再看有沒有超過行數上限的檔")
+    ex = big_file_exceptions(cwd)
+    big = [p for p in d.get("problems") or [] if p.get("kind") == "big-file" and p.get("file") not in ex]
+    if not big:
+        return None
+    shown = "、".join(f"{p['file']}（{p.get('detail', '')}）" for p in big[:5]) + (f" 等 {len(big)} 個" if len(big) > 5 else "")
+    return (f"超過行數上限 {d.get('maxLines', 800)} 行、且不在例外清單的檔：{shown} → 照 skill `cds-modularize`（C 逐模組＋保護網）排進待辦拆檔，"
+            "並把行數閘門測試的範圍擴到這些目錄；確定是一次性不再修改的才寫進 `.claude/dispatch-config.json` 的 "
+            "`projectAutomation.bigFileExceptions`（檔案→原因）。這一項現在要做的是：列進交接紀錄待辦、告訴使用者並提出拆檔時程；"
+            "拆檔本身屬大工程，使用者同意後才開拆")
+
+
 def project_health(cwd):
     """可判定的健康檢查（0.12.0；Stock-web 一場對話開 19 天、盤點改過 205 檔沒重跑、CLAUDE.md 25 KB 超過上限才加）。回問題字串清單。"""
     cwd = _pa_skip(cwd)
@@ -273,6 +308,9 @@ def project_health(cwd):
         if n > cfg["staleFiles"]:
             out.append(f"盤點索引之後改過 {n}{'+' if trunc else ''} 個檔（門檻 {cfg['staleFiles']}）→ 先跑 `py -3 ~/.claude/claude-dev-system/tools/project-scan.py . --check` 看改了什麼，"
                        "再照 skill `cds-project-audit` 重跑盤點更新 docs/PROJECT-INVENTORY.md 與問題清單（不用再問要不要重整）")
+    big = _big_files(cwd, idx)
+    if big:
+        out.append(big)
     md = os.path.join(cwd, "CLAUDE.md")
     if os.path.exists(md):
         ln, kb = _lines(md), os.path.getsize(md) / 1024
