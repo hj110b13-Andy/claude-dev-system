@@ -33,6 +33,8 @@ def entries(repo: Path, version: str) -> dict[str, bytes]:
     out[f"{PAYLOAD_ROOT}/hooks/usage_guard.py"] = _text(repo / "hooks" / "usage_guard.py")
     for name in ("VERSION", "compat.json", "dispatch-config.json", "web-sources.json", "video.json", "selftest.json"):
         out[f"{PAYLOAD_ROOT}/config/{name}"] = _text(repo / "config" / name)
+    if (repo / "CHANGELOG.md").is_file():  # 0.13.0：hook「全域系統對照」要 Claude 讀上次對照之後的變更
+        out[f"{PAYLOAD_ROOT}/CHANGELOG.md"] = _text(repo / "CHANGELOG.md")
     for sk in skill_names(repo):
         for p in _files_under(repo / "skills" / sk):
             out[f"skills/{sk}/{p.relative_to(repo / 'skills' / sk).as_posix()}"] = _text(p)

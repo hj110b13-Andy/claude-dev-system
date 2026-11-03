@@ -82,11 +82,14 @@
     "autoAudit": true,
     "autoRefactor": false,
     "minSourceFiles": 10,
-    "$健康檢查": "0.12.0：hook 每天（壓縮後每次）檢查——盤點索引之後改過 > staleFiles 個檔要重跑盤點；CLAUDE.md 超過 claudeMdMaxLines 行或 claudeMdMaxKB KB（任一）、交接紀錄超過 progressMaxLines 行要瘦身；同一場對話壓縮滿 newSessionAfterCompactions 次建議開新對話。設 0＝不檢查。",
+    "$全域對照": "0.13.0：alignOnUpdate＝已有 CLAUDE.md 的專案，全域系統主.次版號跟上次對照不同（或從沒對照過）時，第一則提示注入一次，要 Claude 在回答末尾主動列出這個專案要配合的優化。",
+    "alignOnUpdate": true,
+    "$健康檢查": "0.12.0：hook 每場對話每天（壓縮後每次）檢查——盤點索引之後改過 > staleFiles 個檔要重跑盤點；CLAUDE.md 超過 claudeMdMaxLines 行或 claudeMdMaxKB KB（任一）、交接紀錄超過 progressMaxLines 行或 progressMaxKB KB（任一，0.13.0）要瘦身；同一場對話壓縮滿 newSessionAfterCompactions 次建議開新對話。設 0＝不檢查。",
     "staleFiles": 20,
     "claudeMdMaxLines": 180,
     "claudeMdMaxKB": 20,
     "progressMaxLines": 600,
+    "progressMaxKB": 100,
     "newSessionAfterCompactions": 3
   }
 }

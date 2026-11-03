@@ -161,21 +161,23 @@ PA_SOURCE_EXT = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".cs", ".g
                  ".ps1", ".cmd", ".bat", ".sh"}
 
 
-PA_INT_KEYS = ("minSourceFiles", "staleFiles", "claudeMdMaxLines", "claudeMdMaxKB", "progressMaxLines", "newSessionAfterCompactions")
+PA_INT_KEYS = ("minSourceFiles", "staleFiles", "claudeMdMaxLines", "claudeMdMaxKB", "progressMaxLines", "progressMaxKB", "newSessionAfterCompactions")
 
 
 def _pa_config(cwd):
     """projectAutomation：專案 .claude/dispatch-config.json 優先，再全域，再預設。"""
-    cfg = {"autoInit": True, "autoAudit": True, "autoRefactor": False, "minSourceFiles": 10,
+    cfg = {"autoInit": True, "autoAudit": True, "autoRefactor": False, "alignOnUpdate": True, "minSourceFiles": 10,
            # 0.12.0 專案健康檢查（doc-governance 的門檻：CLAUDE.md 180 行、交接紀錄 600 行；盤點改過 >20 檔要重跑）
-           "staleFiles": 20, "claudeMdMaxLines": 180, "claudeMdMaxKB": 20, "progressMaxLines": 600, "newSessionAfterCompactions": 3}
+           # 0.13.0 交接紀錄加 KB 上限（Stock-web PROGRESS.md 510 行卻 355 KB）
+           "staleFiles": 20, "claudeMdMaxLines": 180, "claudeMdMaxKB": 20, "progressMaxLines": 600, "progressMaxKB": 100,
+           "newSessionAfterCompactions": 3}
     for path in (CONFIG, os.path.join(cwd, ".claude", "dispatch-config.json")):
         try:
             with open(path, encoding="utf-8") as f:
                 t = (json.load(f) or {}).get("projectAutomation") or {}
         except Exception:
             continue
-        for k in ("autoInit", "autoAudit", "autoRefactor"):
+        for k in ("autoInit", "autoAudit", "autoRefactor", "alignOnUpdate"):
             if isinstance(t.get(k), bool):
                 cfg[k] = t[k]
         for k in PA_INT_KEYS:
@@ -284,27 +286,34 @@ def project_health(cwd):
             out.append(f"專案 CLAUDE.md {'、'.join(over)} → 在收尾或空檔用 skill `cds-doc-governance` 瘦身（內容搬到分層檔，數字、原話、日期只能移不能刪；專案若自訂其他上限以專案為準）")
     for h in HANDOFF_FILES:
         p = os.path.join(cwd, h)
-        if os.path.exists(p) and cfg["progressMaxLines"]:
-            ln = _lines(p)
-            if ln > cfg["progressMaxLines"]:
-                out.append(f"{h} {ln} 行（上限 {cfg['progressMaxLines']} 行）→ 用 skill `cds-doc-governance` 把舊日誌搬到封存檔")
+        if os.path.exists(p) and (cfg["progressMaxLines"] or cfg["progressMaxKB"]):
+            ln, kb = _lines(p), os.path.getsize(p) / 1024
+            over = []
+            # 行數或大小任一超過都算：Stock-web PROGRESS.md 510 行卻有 355 KB（每行很長），只看行數抓不到（2026-11-03）
+            if cfg["progressMaxLines"] and ln > cfg["progressMaxLines"]:
+                over.append(f"{ln} 行（上限 {cfg['progressMaxLines']} 行）")
+            if cfg["progressMaxKB"] and kb > cfg["progressMaxKB"]:
+                over.append(f"{kb:.0f} KB（上限 {cfg['progressMaxKB']} KB）")
+            if over:
+                out.append(f"{h} {'、'.join(over)} → 用 skill `cds-doc-governance` 把舊日誌搬到封存檔")
             break
     return out
 
 
-def health_msg(cwd, force=False):
-    """UserPromptSubmit：同一資料夾每天最多提醒一次；SessionStart（壓縮後）force=True 每次都看。"""
+def health_msg(cwd, force=False, session_id=None):
+    """UserPromptSubmit：同一資料夾、同一場對話每天最多提醒一次；SessionStart（壓縮後）force=True 每次都看。
+    0.13.0 加對話：原本只看資料夾＋日期，舊對話當天先用掉，同一天新開的對話就收不到（Stock-web 2026-11-03）。"""
     try:
         c = _pa_skip(cwd)
         if not c:
             return None
         st = _pa_load()
         key = "health|" + c.lower()
-        today = time.strftime("%Y-%m-%d")
-        if not force and st.get(key) == today:
+        mark = time.strftime("%Y-%m-%d") + ("|" + session_id if session_id else "")
+        if not force and st.get(key) == mark:
             return None
         probs = project_health(c)
-        st[key] = today
+        st[key] = mark
         _pa_save(st)
         if not probs:
             return None
@@ -385,6 +394,66 @@ def project_auto_msg(cwd, session_id=None):
         return ("【專案自動化（hook）】這個資料夾" + facts + f"，autoAudit=true → 回答使用者之前先執行 skill `{skill}`"
                 "（project-scan.py 盤點、docs/ARCHITECTURE.md、docs/PROJECT-ISSUES.md），達門檻只問一次要不要分階段重整"
                 + ("（autoRefactor=true：不問，直接 cds-modularize）" if cfg["autoRefactor"] else "") + "，然後回答原本的問題。")
+    except Exception:
+        return None
+
+
+# ---------- 全域系統對照（0.13.0）----------
+# Stock-web 2026-11-03：已有 CLAUDE.md 與盤點索引的專案走「③已有索引」分支，hook 什麼都不注入；新對話只回答了使用者問的進度，
+# 使用者要再問「看看全域規則有沒有這個專案要做的優化」才列出 7 項（規則矛盾、CLAUDE.md／PROGRESS 超標、盤點過期…）。
+# 改成：全域系統主.次版號跟這個專案上次對照時不同（或從沒對照過）→ 注入一次，要它在回答末尾主動列出並做可逆的部分。
+SYS_VERSION = os.path.join(HOME, "claude-dev-system", "config", "VERSION")
+
+
+def _minor(v):
+    """'0.12.3' → (0, 12)；讀不懂回 None。修訂號只是修正，不觸發對照。"""
+    try:
+        a, b = (v or "").strip().split(".")[:2]
+        return int(a), int(b)
+    except Exception:
+        return None
+
+
+def align_msg(cwd, session_id=None, mark_only=False):
+    """回要注入的字串或 None。條件：算專案、有 CLAUDE.md、alignOnUpdate、已安裝版本的主.次版號 ≠ 這個資料夾上次記錄的。
+    mark_only=True：只記錄版本不注入（同一則已經在跑 init／audit，那兩個本來就照最新規則做）。"""
+    try:
+        c = _pa_skip(cwd)
+        if not c or not os.path.exists(os.path.join(c, "CLAUDE.md")):
+            return None
+        cfg = _pa_config(c)
+        if not cfg["alignOnUpdate"]:
+            return None
+        try:
+            with open(SYS_VERSION, encoding="utf-8") as f:
+                ver = f.read().strip()
+        except Exception:
+            return None
+        if _minor(ver) is None:
+            return None
+        st = _pa_load()
+        key = "align|" + c.lower()
+        old = st.get(key)
+        if _minor(old) == _minor(ver):
+            return None
+        if not mark_only:
+            is_git = os.path.exists(os.path.join(c, ".git"))
+            if not is_git and _pa_count_sources(c)[0] < cfg["minSourceFiles"]:
+                return None
+        st[key] = ver
+        _pa_save(st)
+        if mark_only:
+            return None
+        since = f"{old} 之後的各版" if old else "最近 3 個次版號"
+        head = f"全域優化系統從 {old} 更新到 {ver}" if old else f"這個專案還沒對照過全域優化系統 {ver}"
+        return ("【全域系統對照（hook）】" + head + "。先回答使用者這則，回答末尾主動附一段「全域規則對照」（使用者不必再問）："
+                f"讀 `~/.claude/claude-dev-system/CHANGELOG.md` {since}與 `rules/core.md`，逐條對這個專案的 CLAUDE.md、`.claude/skills/`、"
+                "交接紀錄、專案 hook／開工腳本，找出 ①專案規則和全域規則矛盾或已過時的條文（例如已停用功能還在叫你做）；"
+                "②全域門檻本專案超標（CLAUDE.md、交接紀錄大小、盤點過期）；③全域新能力本專案還沒接上（verify skill、閘門、排程）。"
+                "每項寫根據哪條規則、證據、要改的檔與預估成本。只改文件／設定且可逆的，答完原問題後直接做完再交代；"
+                "動到程式行為、系統排程或要花大額度的先問一次。都不用改就一句話「已對照 " + ver + "，無須調整」。"
+                "要改全域系統本身時改 claude-dev-system repo 再 update，不要直接改 `~/.claude/claude-dev-system/` 底下的安裝副本"
+                "（改過的檔 update 會保留不覆蓋，之後新版都裝不上）。")
     except Exception:
         return None
 
@@ -554,7 +623,10 @@ def main():
         pa = project_auto_msg(hook_cwd, payload.get("session_id"))
         if pa:
             msgs.append(pa)
-        hm = health_msg(hook_cwd)  # 盤點過期、CLAUDE.md／交接紀錄過大：同資料夾每天一次
+        am = align_msg(hook_cwd, payload.get("session_id"), mark_only=bool(pa))  # 全域系統升次版號：每資料夾每版一次
+        if am:
+            msgs.append(am)
+        hm = health_msg(hook_cwd, session_id=payload.get("session_id"))  # 盤點過期、CLAUDE.md／交接紀錄過大：同資料夾同對話每天一次
         if hm:
             msgs.append(hm)
     stale = stale_agents()

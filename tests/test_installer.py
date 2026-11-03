@@ -137,6 +137,8 @@ class PayloadLineEndings(Base):
         self.addCleanup(shutil.rmtree, crlf, ignore_errors=True)
         for sub in ("rules", "tools", "hooks", "config", "skills"):
             shutil.copytree(REPO / sub, crlf / sub)
+        shutil.copy2(REPO / "CHANGELOG.md", crlf / "CHANGELOG.md")  # 0.13.0 起 CHANGELOG 也安裝
+        self.assertIn("claude-dev-system/CHANGELOG.md", ents)
         for p in crlf.rglob("*"):
             if p.is_file() and p.suffix in (".md", ".py", ".json", "") and "__pycache__" not in p.parts:
                 p.write_bytes(p.read_bytes().replace(bytes([13, 10]), bytes([10])).replace(bytes([10]), bytes([13, 10])))

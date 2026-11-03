@@ -2,6 +2,17 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.13.0（2026-11-04）
+
+使用者：「我在 Stock-web 開新對話並叫他根據全域規則去做優化，只是第一次對話時他沒有像你說的會主動提出，要我詢問後才會，為什麼?」。查證（Stock-web 對話 e29ffd20）：新對話 2026-11-03 23:30 開始，0.12.0 hook 23:47 才裝上，當時健康檢查還不存在；而且 Stock-web 已有 CLAUDE.md 與盤點索引，走「③已有索引」分支，hook 本來就什麼都不注入，只靠 Claude 記得規則——它只回答了使用者問的進度，使用者再問「你看看全域規則與設定，有沒有這個專案要做的優化?」才列出 7 項。
+
+- **全域系統對照（UserPromptSubmit，新）**：已有 CLAUDE.md 的專案，全域系統主.次版號跟這個資料夾上次對照不同（或從沒對照過）→ 第一則提示注入【全域系統對照（hook）】，要 Claude 答完原問題後主動列出專案要配合的優化（規則矛盾、門檻超標、新能力未接），只改文件／設定的直接做。修訂號不觸發；同一則已在跑 init／audit 就只記錄。`projectAutomation.alignOnUpdate` 可關。CHANGELOG 改為安裝到 `~/.claude/claude-dev-system/CHANGELOG.md` 供對照。
+- **交接紀錄加 KB 上限 `progressMaxKB`（預設 100）**：Stock-web PROGRESS.md 510 行卻 355 KB，只看 600 行抓不到。這條是 Stock-web 那場直接改在安裝副本 `~/.claude/claude-dev-system/hooks/usage_guard.py`，沒進 repo——update 會把改過的檔當使用者改動保留、新版只存 .new，之後 hook 更新全部裝不上；本版移進 repo 並加測試。
+- **core.md**：要改全域系統本身改 repo 再 update，不直接改安裝副本（同上原因）。
+- **健康檢查改成每場對話每天一次**（原本每資料夾每天一次）：舊的長對話當天先用掉，同一天新開的對話就收不到。
+- **跨對話的定期工作不放 CronCreate**（core.md 巡檢條＋web-sources 第 11 節）：Stock-web 換新對話後上一場排的 11/4 檢查與評測全部消失；CronCreate 工具說明「Jobs live only in this Claude session」「Recurring tasks auto-expire after 7 days」。不需 AI 判斷的改用作業系統排程器跑腳本、結果寫檔、開工讀檔（Stock-web scripts/scheduled/daily-verify.ps1 的做法）。
+- 測試：test_hooks 新增 progress KB／分對話、全域對照 7 個情境；test_installer 的 CRLF 模擬 checkout 補 CHANGELOG。
+
 ## 0.12.0（2026-11-03）
 
 使用者：「在 Stock-web 專案執行時，發現好像會有遺漏一些全域優化設定的規則」。查證：Stock-web 同一場對話從 2026-10-15 開到 11-03（紀錄 157 MB、壓縮 20 次）；開工檢查只在新對話做，之後 11/1 盤點後改過 205 檔、新增 193 檔沒重跑盤點，CLAUDE.md 25 KB 超過專案自訂 20 KB 上限，當天全域 skill 0 次、上網 6 次沒讀速查檔。使用者：「1~7 項全部都照你建議的改」。

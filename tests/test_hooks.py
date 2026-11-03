@@ -117,6 +117,42 @@ class Health(unittest.TestCase):
         (self.proj / ".claude" / "dispatch-config.json").write_text(json.dumps({"projectAutomation": {"claudeMdMaxLines": 0, "staleFiles": 0, "progressMaxLines": 0}}), encoding="utf-8")
         self.assertEqual(ug.project_health(str(self.proj)), [], "專案可改門檻或設 0 關閉；剩 KB 檢查，200 行 < 20 KB")
 
+    def test_progress_kb_limit_and_per_session(self):
+        # Stock-web 2026-11-03：PROGRESS.md 510 行卻 355 KB，只看行數抓不到
+        (self.proj / "PROGRESS.md").write_text(("長" * 900 + chr(10)) * 50, encoding="utf-8")
+        probs = ug.project_health(str(self.proj))
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("KB（上限 100 KB）", probs[0])
+        self.assertIn("專案健康檢查", ug.health_msg(str(self.proj), session_id="old"))
+        self.assertIsNone(ug.health_msg(str(self.proj), session_id="old"), "同一場對話當天只一次")
+        self.assertIn("專案健康檢查", ug.health_msg(str(self.proj), session_id="new"), "同一天新開的對話也要收到")
+
+    def test_align_on_minor_version_change(self):
+        ver = self.tmp / "VERSION"
+        saved = ug.SYS_VERSION
+        ug.SYS_VERSION = str(ver)
+        try:
+            ver.write_text("0.13.0", encoding="utf-8")
+            self.assertIsNone(ug.align_msg(str(self.proj), "s1"), "沒有 CLAUDE.md 不對照（交給 init）")
+            (self.proj / "CLAUDE.md").write_text("規則", encoding="utf-8")
+            m = ug.align_msg(str(self.proj), "s1")
+            self.assertIn("全域系統對照", m)
+            self.assertIn("還沒對照過", m)
+            self.assertIsNone(ug.align_msg(str(self.proj), "s2"), "同一版只一次")
+            ver.write_text("0.13.4", encoding="utf-8")
+            self.assertIsNone(ug.align_msg(str(self.proj), "s3"), "修訂號不觸發")
+            ver.write_text("0.14.0", encoding="utf-8")
+            m = ug.align_msg(str(self.proj), "s4")
+            self.assertIn("從 0.13.0 更新到 0.14.0", m)
+            ver.write_text("0.15.0", encoding="utf-8")
+            self.assertIsNone(ug.align_msg(str(self.proj), "s5", mark_only=True), "init／audit 那則只記錄")
+            self.assertIsNone(ug.align_msg(str(self.proj), "s6"))
+            (self.proj / ".claude" / "dispatch-config.json").write_text(json.dumps({"projectAutomation": {"alignOnUpdate": False}}), encoding="utf-8")
+            ver.write_text("0.16.0", encoding="utf-8")
+            self.assertIsNone(ug.align_msg(str(self.proj), "s7"), "專案可關閉")
+        finally:
+            ug.SYS_VERSION = saved
+
     def test_compact_reinjects_and_suggests_new_session(self):
         msgs = [ug.compact_msg(str(self.proj), "sess-1") for _ in range(3)]
         self.assertTrue(all("壓縮後重新開工" in m for m in msgs))
