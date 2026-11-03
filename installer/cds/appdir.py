@@ -53,10 +53,37 @@ def effective_repo(lay: Layout, bundled: Path = REPO) -> Path:
     return bundled
 
 
+def _is_cert_error(e: Exception) -> bool:
+    import ssl
+    r = getattr(e, "reason", e)
+    return isinstance(r, ssl.SSLError) or "CERTIFICATE_VERIFY_FAILED" in str(e)
+
+
+def _curl_get(url: str, timeout: int, run=None) -> bytes:
+    """Windows 10 起內建 curl.exe（Schannel）。2026-11-03 另一台：Python 連 api.github.com 回 CERTIFICATE_VERIFY_FAILED
+    「unable to get issuer certificate」（缺中繼憑證或防毒／公司網路攔截），同一台的 raw.githubusercontent.com 卻正常。
+    Schannel 會照 Windows 的方式補抓中繼憑證並信任系統裝的根憑證，所以改用它重試；憑證仍會驗證，不是關掉檢查。"""
+    import shutil
+    import subprocess
+    exe = shutil.which("curl.exe") or shutil.which("curl")
+    if not exe:
+        raise OSError("沒有 curl.exe 可重試")
+    r = (run or subprocess.run)([exe, "-fsSL", "--ssl-revoke-best-effort", "--max-time", str(int(timeout)), "-A", "claude-dev-system-updater", url],
+                                capture_output=True, timeout=timeout + 10)
+    if r.returncode != 0:
+        raise OSError(f"curl.exe 也失敗（結束碼 {r.returncode}）：{(r.stderr or b'').decode('utf-8', 'replace').strip()[:200]}")
+    return r.stdout
+
+
 def _http_get(url: str, timeout: int = 60) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": "claude-dev-system-updater"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read()
+    except Exception as e:  # noqa: BLE001
+        if not _is_cert_error(e):
+            raise
+        return _curl_get(url, timeout)
 
 
 def check_update(lay: Layout, bundled: Path = REPO, http=_http_get) -> dict:

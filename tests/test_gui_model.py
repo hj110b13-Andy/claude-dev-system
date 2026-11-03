@@ -174,6 +174,20 @@ class ReadAndDiff(Base):
         self.assertEqual(len(calls), 2, "清單外的套件另外查")
         self.assertIsNone(gm.system_importer(None)("yt_dlp"))
 
+    def test_pwsh_status_any_drive_and_store(self):
+        class R:
+            stdout = "7.6.9"
+        run = lambda *a, **k: R()  # noqa: E731
+        it = gm._pwsh_status(which=lambda n: r"D:\Apps\PowerShell\7\pwsh.exe", run=run, msi_location=lambda: r"D:\Apps\PowerShell\7")
+        self.assertTrue(it.ok, "裝在 D 槽的 MSI 版要算 ✅，不可引導重裝")
+        self.assertIsNone(it.action)
+        it = gm._pwsh_status(which=lambda n: r"C:\Users\x\AppData\Local\Microsoft\WindowsApps\pwsh.exe", run=run, msi_location=lambda: None)
+        if __import__("sys").platform == "win32" and not (__import__("pathlib").Path(__import__("os").environ.get("ProgramFiles", "")) / "PowerShell" / "7" / "pwsh.exe").exists():
+            self.assertIsNone(it.ok, "Store 版才提示")
+            self.assertEqual(it.action, "pwsh7")
+        self.assertIn("MSI 1603", gm.install_hint(2316632070, "安裝程式失敗，結束代碼為: 1603"))
+        self.assertIsNone(gm.install_hint(5, "x"))
+
     def test_cancel_means_no_change(self):
         s = self.state()
         f = gm.form_from_state(s)

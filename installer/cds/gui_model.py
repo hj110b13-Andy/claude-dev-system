@@ -81,11 +81,49 @@ class EnvItem:
     action: str | None = None  # 可執行的安裝動作代號（gui 顯示按鈕）：ffmpeg、pwsh7、python、claude、faster_whisper
 
 
-def _pwsh_status(which=shutil.which, run=subprocess.run) -> EnvItem:
+def _pwsh_msi_location() -> str | None:
+    """登錄檔解除安裝清單裡的 PowerShell 7 MSI 安裝位置（任何磁碟都認；2026-11-03 另一台裝在 D 槽被誤判成非 MSI，引導重裝同版 → MSI 1603）。"""
+    if sys.platform != "win32":
+        return None
+    try:
+        import winreg
+    except ImportError:
+        return None
+    roots = [(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+             (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall")]
+    for hive, base in roots:
+        try:
+            k = winreg.OpenKey(hive, base)
+        except OSError:
+            continue
+        with k:
+            for i in range(winreg.QueryInfoKey(k)[0]):
+                try:
+                    with winreg.OpenKey(k, winreg.EnumKey(k, i)) as sk:
+                        name = str(winreg.QueryValueEx(sk, "DisplayName")[0])
+                        if not name.startswith("PowerShell 7"):
+                            continue
+                        try:
+                            loc = str(winreg.QueryValueEx(sk, "InstallLocation")[0])
+                        except OSError:
+                            loc = ""
+                        return loc or name
+                except OSError:
+                    continue
+    return None
+
+
+def _pwsh_status(which=shutil.which, run=subprocess.run, msi_location=_pwsh_msi_location) -> EnvItem:
     exe = which("pwsh")
     msi = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "PowerShell" / "7" / "pwsh.exe"
     if not exe and msi.exists():
         exe = str(msi)
+    reg = msi_location()
+    if not exe and reg:
+        cand = Path(reg) / "pwsh.exe"
+        if cand.exists():
+            exe = str(cand)
     if not exe:
         return EnvItem(None if sys.platform != "win32" else False, "未裝 PowerShell 7（Windows 建議裝 MSI 版，Claude Code 會自動改用）", "pwsh7")
     try:
@@ -93,8 +131,15 @@ def _pwsh_status(which=shutil.which, run=subprocess.run) -> EnvItem:
         ver = (r.stdout or "").strip() or "?"
     except Exception:  # noqa: BLE001
         ver = "?"
-    note = "" if (sys.platform != "win32" or msi.exists()) else "（非 MSI 路徑：先在 Claude Code 對話用 PowerShell 工具跑 $PSVersionTable.PSVersion，顯示 7.x 就不用裝；顯示 5.1 才按右邊裝 MSI 版）"
-    return EnvItem(True if (sys.platform != "win32" or msi.exists()) else None, f"PowerShell {ver}{note}", None if msi.exists() else "pwsh7")
+    # Claude Code 偵測不到的是 Store／MSIX 版（路徑在 WindowsApps 底下的別名，issue #55041）；MSI 版裝在哪個磁碟都可以
+    store = "windowsapps" in str(exe).lower()
+    good = sys.platform != "win32" or msi.exists() or (bool(reg) and not store) or not store
+    if good:
+        where = "" if msi.exists() else f"（{Path(exe).parent}）"
+        return EnvItem(True, f"PowerShell {ver}{where}", None)
+    note = ("（Store 版，Claude Code 可能偵測不到：先在 Claude Code 對話用 PowerShell 工具跑 $PSVersionTable.PSVersion，"
+            "顯示 7.x 就不用裝；顯示 5.1 才按右邊裝 MSI 版）")
+    return EnvItem(None, f"PowerShell {ver}{note}", "pwsh7")
 
 
 def find_system_python(which=shutil.which, run=subprocess.run) -> tuple[str | None, tuple[int, ...] | None]:
@@ -771,6 +816,29 @@ INSTALL_ACTIONS = {
     "pwsh7": ["winget", "install", "--id", "Microsoft.PowerShell", "--source", "winget", "--installer-type", "wix", "--force", "--accept-package-agreements", "--accept-source-agreements"],
 }
 DOWNLOAD_PAGES = {"python": "https://www.python.org/downloads/", "claude": "https://code.claude.com/docs/en/setup"}
+
+# winget／MSI 失敗代碼的白話說明（官方：learn.microsoft.com/troubleshoot/windows-server/application-management/msi-installation-error-1603、
+# learn.microsoft.com/intune/configmgr/tenant-attach/app-install-error-reference）
+INSTALL_HINTS = {
+    "1603": "MSI 1603（安裝時發生嚴重錯誤）。微軟列的常見原因：①同一個程式已經裝了（最常見：PowerShell 7 已裝在別的磁碟或位置）"
+            "②目標資料夾加密 ③磁碟是 subst 替代磁碟 ④SYSTEM 帳號對目標資料夾沒有完整控制權限。先按「重新整理」看環境列是否已經 ✅；"
+            "已有 7.x 就不用再裝。",
+    "1602": "使用者取消了安裝（UAC 按了否或關掉）。",
+    "1618": "另一個安裝正在進行，等它結束再試。",
+    "1638": "已經裝了另一個版本，先到「設定 → 應用程式」移除舊版再裝。",
+    "0x8A15002B": "winget：找不到可用的升級（已經裝了同一版）。",
+    "2316632107": "winget：找不到可用的升級（已經裝了同一版）。",
+}
+
+
+def install_hint(code: int, out: str) -> str | None:
+    """依結束碼與輸出找白話說明；找不到回 None。"""
+    text = f"{out} {code}"
+    for k, v in INSTALL_HINTS.items():
+        if (k.isdigit() and len(k) == 4 and f"結束代碼為: {k}" in out) or (k.isdigit() and len(k) == 4 and f"exit code: {k}" in out.lower()) \
+                or (k == str(code)) or (k.startswith("0x") and k.lower() in text.lower()):
+            return v
+    return None
 
 
 def install_action(action: str, python: str, gpu: bool = False, run=subprocess.run) -> tuple[int, str]:

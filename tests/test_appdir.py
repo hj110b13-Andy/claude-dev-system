@@ -136,6 +136,22 @@ class AppDir(unittest.TestCase):
             appdir.swap_exe(exe2, self.tmp / "nope.new.exe")
         self.assertEqual(exe2.read_bytes(), b"MZ-b")
 
+    def test_cert_error_falls_back_to_curl(self):
+        import ssl
+        import urllib.error
+        self.assertTrue(appdir._is_cert_error(urllib.error.URLError(ssl.SSLCertVerificationError("CERTIFICATE_VERIFY_FAILED"))))
+        self.assertFalse(appdir._is_cert_error(urllib.error.URLError(OSError("timed out"))))
+
+        class R:
+            returncode = 0
+            stdout = b"1.2.3"
+            stderr = b""
+        seen = []
+        out = appdir._curl_get("https://api.github.com/x", 20, run=lambda cmd, **kw: (seen.append(cmd), R())[1])
+        self.assertEqual(out, b"1.2.3")
+        self.assertIn("-fsSL", seen[0])
+        self.assertNotIn("-k", seen[0], "不可關掉憑證檢查")
+
 
 if __name__ == "__main__":
     unittest.main()

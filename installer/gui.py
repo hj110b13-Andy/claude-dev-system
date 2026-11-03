@@ -684,6 +684,10 @@ class App:
             code, out = gm.install_action(action, PY, gpu=gpu)
             self._log(out.strip()[-1200:] or "(無輸出)")
             self._log(f"{'✅' if code == 0 else '❌'} 結束碼 {code}")
+            if code != 0:
+                hint = gm.install_hint(code, out or "")
+                if hint:
+                    self._log("說明：" + hint)
         self._run_bg(job, what="安裝環境元件")
 
     def do_test_key(self, n: str):

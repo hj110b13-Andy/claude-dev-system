@@ -2,6 +2,12 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.11.15（2026-11-03，視窗會自動換 exe）
+
+- **PowerShell 裝在 D 槽被誤判、重裝失敗 MSI 1603**（另一台截圖；使用者：「有可能是因為我那台電腦安裝在 D 槽」）。根因：環境偵測只認 `C:\Program Files\PowerShell\7\pwsh.exe`，其他位置一律標「非 MSI」並引導重裝；重裝同一版 7.6.9 時 MSI 回 1603。微軟官方列的 1603 第一個原因就是「Windows Installer is attempting to install an app that is already installed」。修法：改看登錄檔解除安裝清單（任何磁碟）＋路徑是否在 WindowsApps（Claude Code 偵測不到的只有 Store／MSIX 版）；非 Store 路徑一律 ✅ 並顯示所在資料夾。
+- 安裝失敗時紀錄多一行白話說明（1603、1602、1618、1638、找不到可用的升級）。
+- **檢查更新「查不到 Releases：CERTIFICATE_VERIFY_FAILED unable to get issuer certificate」**（另一台截圖；同一台 raw.githubusercontent.com 正常）：Python 不會自己補抓中繼憑證，Windows 的 Schannel 會。憑證錯誤時改用 Windows 內建 curl.exe 重試（仍驗證憑證，只是改用系統的驗證方式），下載 exe 與 sha256 也走同一條。
+
 ## 0.11.14（2026-11-02，視窗會自動換 exe）
 
 - 舊 .old.exe 的刪除進度印在紀錄（使用者：「可以顯示說刪完了沒嗎?」）：開窗印「等它完全關閉後自動刪除」、刪掉印「✅ 已刪除舊的視窗程式 …」、90 秒刪不掉印 ⚠️。
