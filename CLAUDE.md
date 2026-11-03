@@ -13,5 +13,6 @@
 ## 改這個 repo 時
 
 - 規則在 `rules/`（`core.md` 會合併進使用者的全域 CLAUDE.md，要短；細則放 `web-sources.md` 等）；安裝器在 `installer/`（只用標準庫）；工具在 `tools/`。
-- 改完：`python -m unittest discover -s tests`、更新 `config/VERSION` 與 `CHANGELOG.md`（每條寫觸發的使用者原話或測試）、本機 `update` 後 `verify`，再 commit／push。manifest 結構有變要 +1 `MANIFEST_SCHEMA` 並加遷移。
+- 改完：`python -m unittest discover -s tests`、更新 `config/VERSION` 與 `CHANGELOG.md`（每條寫觸發的使用者原話或測試）、本機 `update` 後 `verify`，再 commit／push。
+- **每次改 `config/VERSION` 都要發 Release**：push master 後立刻 `git tag v<版本>` 並 push tag，等 GitHub Actions 建好 exe 與 `.sha256` 再回報（`gh release view v<版本>` 確認兩個附件都在）。不可因為「只改規則、沒改視窗」就省略：exe 會比對內建版本與已安裝版本，沒有對應 Release 會一直顯示「來源比已安裝舊」或「exe 還沒建好」。（2026-11-03 使用者：「之後也都要記得，這次就有這個問題」——0.12.0 只推程式碼漏發 Release。）manifest 結構有變要 +1 `MANIFEST_SCHEMA` 並加遷移。
 - 金鑰、`local.json`、`~/.claude.json` 永遠不進 repo。
