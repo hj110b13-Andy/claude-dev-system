@@ -2,6 +2,11 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.11.16（2026-11-03，最後一次可能需要手動換 exe）
+
+- **exe 更新備援**（使用者：「為什麼這次不能直接從 exe 更新?」→「要」）：exe 正在執行的更新程式碼是打包時固定的，它本身有 bug（0.11.14 在另一台遇到 GitHub 憑證錯誤）就換不掉自己。新增 `installer/selfupdate_exe.py`：「檢查更新」下載到 app/ 的這一份永遠是最新程式碼；exe 自己查 Release 或下載／換檔失敗時，改用系統 Python 執行它來查與換，成功就照常重開視窗。之後更新程式本身的 bug 修好後，舊 exe 也能自己換成新版。
+- 限制：備援要有 app/（按過「檢查更新」）與系統 Python；這個機制要先在 exe 裡才會生效，所以 0.11.14 以前的 exe 還要手動換這一次。
+
 ## 0.11.15（2026-11-03，視窗會自動換 exe）
 
 - **PowerShell 裝在 D 槽被誤判、重裝失敗 MSI 1603**（另一台截圖；使用者：「有可能是因為我那台電腦安裝在 D 槽」）。根因：環境偵測只認 `C:\Program Files\PowerShell\7\pwsh.exe`，其他位置一律標「非 MSI」並引導重裝；重裝同一版 7.6.9 時 MSI 回 1603。微軟官方列的 1603 第一個原因就是「Windows Installer is attempting to install an app that is already installed」。修法：改看登錄檔解除安裝清單（任何磁碟）＋路徑是否在 WindowsApps（Claude Code 偵測不到的只有 Store／MSIX 版）；非 Store 路徑一律 ✅ 並顯示所在資料夾。

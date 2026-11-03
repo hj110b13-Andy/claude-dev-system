@@ -748,14 +748,35 @@ class App:
         self._run_bg(job, refresh_after=False, what="檢查更新")
 
     def _exe_update_info(self):
-        """exe 模式才查 Release；原始碼模式回 None。"""
+        """exe 模式才查 Release；原始碼模式回 None。自己查失敗就改用 app/ 的新版更新程式查（備援）。"""
         if not FROZEN:
             return None
         ex = appdir.check_exe_update(repo_version(REPO))
         if ex["error"]:
             self._log(f"⚠️ 視窗程式：{ex['error']}")
+            fb = self._exe_fallback(check_only=True)
+            if fb and not fb.get("error"):
+                return {"tag": fb["tag"], "newer": fb["newer"], "fallback": True, "error": None}
             return None
         return ex
+
+    def _exe_fallback(self, check_only: bool = False):
+        """備援：用「檢查更新」下載到 app/ 的新版更新程式（selfupdate_exe.py），交給系統 Python 查／換 exe。
+        exe 內建的更新程式碼有 bug 時（0.11.14 憑證錯誤那次），靠它不用手動下載新 exe。回結果 dict；沒有 app/ 或系統 Python 回 None。"""
+        script = self.repo / "installer" / "selfupdate_exe.py"
+        if self.repo == REPO or not script.exists() or not PY:
+            return None
+        self._log("改用已下載的新版更新程式再試（備援）…")
+        try:
+            r = subprocess.run([PY, str(script), "--exe", sys.executable, "--current", repo_version(REPO)] + (["--check-only"] if check_only else []),
+                               capture_output=True, timeout=600)
+            lines = (r.stdout or b"").decode("utf-8", "replace").strip().splitlines()
+            res = json.loads(lines[-1]) if lines else {"error": (r.stderr or b"").decode("utf-8", "replace")[-300:] or "沒有輸出"}
+        except Exception as e:  # noqa: BLE001
+            res = {"error": f"{type(e).__name__}: {e}"}
+        if res.get("error"):
+            self._log(f"❌ 備援也失敗：{res['error']}")
+        return res
 
     def _ask_update(self, info):
         exe_only = bool(info.get("exe_only"))
@@ -792,6 +813,12 @@ class App:
             ex = self._exe_update_info()
             if not ex:
                 return
+            if ex.get("fallback") and ex["newer"]:  # 自己查不到、備援查得到 → 直接用備援換
+                res = self._exe_fallback()
+                if res and res.get("swapped"):
+                    self._log(f"✅ 視窗程式已換成 v{res['tag']}（備援），正在重開視窗…")
+                    self._relaunch = True
+                return
             if not ex["newer"]:
                 if not exe_only and appdir.code_changed_since(REPO, self.repo):
                     self._log(f"⚠️ 新版改了視窗程式，但 GitHub 的 exe（v{ex['tag']}）還沒建好（通常幾分鐘）；之後再按「檢查更新」會自動換")
@@ -803,7 +830,13 @@ class App:
                 new = appdir.download_exe(ex, exe, self._log)
                 appdir.swap_exe(exe, new)
             except Exception as e:  # noqa: BLE001
-                self._log(f"❌ 換視窗程式失敗（這個 exe 仍可用）：{type(e).__name__}: {e}")
+                self._log(f"⚠️ 換視窗程式失敗：{type(e).__name__}: {e}")
+                res = self._exe_fallback()
+                if res and res.get("swapped"):
+                    self._log(f"✅ 視窗程式已換成 v{res['tag']}（備援），正在重開視窗…")
+                    self._relaunch = True
+                else:
+                    self._log("❌ 這個 exe 仍可用，但沒換成新版；可到 Releases 手動下載：" + appdir.RELEASES_URL)
                 return
             self._log(f"✅ 視窗程式已換成 v{ex['tag']}，正在重開視窗…")
             self._relaunch = True
