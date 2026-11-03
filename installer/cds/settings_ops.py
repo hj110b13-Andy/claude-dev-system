@@ -9,7 +9,8 @@ from . import HOOK_MARK
 # PostToolUse 只掛在「會推進工作」的工具：每次觸發都要啟動一個 Python 程序（2026-11-01 實測每次約 120 ms），
 # Read／Grep／Glob 這類一場對話幾十上百次的工具不掛，用量檢查本來就有 5 分鐘 TTL，不會漏
 # Stop（0.11.8）：查證守門——回覆結束時看最後一則回答，問答題含年份／數字卻沒「來源」段就 block 一次讓它補（stop_hook_active 時不再擋，不會無限迴圈）
-HOOK_SPECS = [("UserPromptSubmit", None), ("PostToolUse", "Bash|PowerShell|Agent|Task|Edit|Write|NotebookEdit|Workflow"), ("Stop", None)]
+# SessionStart（0.12.0）：壓縮／接續後重新注入開工檢查（Stock-web 一場對話開 19 天、壓縮 20 次，開工檢查只在第一天做過）
+HOOK_SPECS = [("UserPromptSubmit", None), ("PostToolUse", "Bash|PowerShell|Agent|Task|Edit|Write|NotebookEdit|Workflow"), ("Stop", None), ("SessionStart", None)]
 HOOK_SCRIPT = "usage_guard.py"
 
 

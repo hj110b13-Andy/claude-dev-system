@@ -81,6 +81,12 @@
     "autoInit": true,
     "autoAudit": true,
     "autoRefactor": false,
-    "minSourceFiles": 10
+    "minSourceFiles": 10,
+    "$健康檢查": "0.12.0：hook 每天（壓縮後每次）檢查——盤點索引之後改過 > staleFiles 個檔要重跑盤點；CLAUDE.md 超過 claudeMdMaxLines 行或 claudeMdMaxKB KB（任一）、交接紀錄超過 progressMaxLines 行要瘦身；同一場對話壓縮滿 newSessionAfterCompactions 次建議開新對話。設 0＝不檢查。",
+    "staleFiles": 20,
+    "claudeMdMaxLines": 180,
+    "claudeMdMaxKB": 20,
+    "progressMaxLines": 600,
+    "newSessionAfterCompactions": 3
   }
 }

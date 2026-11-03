@@ -1,6 +1,6 @@
 """claude-dev-system 用量守門 hook（通用版；來源：Stock-web tools/claude-setup/usage_guard.py，2026-10-17 抽成跨專案版）。
 
-掛在 UserPromptSubmit、PostToolUse 與 Stop（0.11.8 起；Stop 只做查證守門，見 source_guard）：
+掛在 UserPromptSubmit、PostToolUse、Stop（0.11.8 起，只做查證守門，見 source_guard）與 SessionStart（0.12.0 起，壓縮／接續後重新開工，見 compact_msg）：
 1. 讀本機 Claude 登入憑證（<CLAUDE_HOME>/.credentials.json）的 OAuth access token，呼叫 Anthropic 用量端點
    （非公開文件、社群工具同做法）取得 5 小時／7 天用量 %。端點改版時本腳本安靜失效、不擋操作。
 2. 寫進 <CLAUDE_HOME>/state/usage.json（只有百分比與重置時間，不含權杖）。
@@ -161,9 +161,14 @@ PA_SOURCE_EXT = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".cs", ".g
                  ".ps1", ".cmd", ".bat", ".sh"}
 
 
+PA_INT_KEYS = ("minSourceFiles", "staleFiles", "claudeMdMaxLines", "claudeMdMaxKB", "progressMaxLines", "newSessionAfterCompactions")
+
+
 def _pa_config(cwd):
     """projectAutomation：專案 .claude/dispatch-config.json 優先，再全域，再預設。"""
-    cfg = {"autoInit": True, "autoAudit": True, "autoRefactor": False, "minSourceFiles": 10}
+    cfg = {"autoInit": True, "autoAudit": True, "autoRefactor": False, "minSourceFiles": 10,
+           # 0.12.0 專案健康檢查（doc-governance 的門檻：CLAUDE.md 180 行、交接紀錄 600 行；盤點改過 >20 檔要重跑）
+           "staleFiles": 20, "claudeMdMaxLines": 180, "claudeMdMaxKB": 20, "progressMaxLines": 600, "newSessionAfterCompactions": 3}
     for path in (CONFIG, os.path.join(cwd, ".claude", "dispatch-config.json")):
         try:
             with open(path, encoding="utf-8") as f:
@@ -173,8 +178,9 @@ def _pa_config(cwd):
         for k in ("autoInit", "autoAudit", "autoRefactor"):
             if isinstance(t.get(k), bool):
                 cfg[k] = t[k]
-        if isinstance(t.get("minSourceFiles"), (int, float)) and t["minSourceFiles"] >= 1:
-            cfg["minSourceFiles"] = int(t["minSourceFiles"])
+        for k in PA_INT_KEYS:
+            if isinstance(t.get(k), (int, float)) and not isinstance(t.get(k), bool) and t[k] >= 0:
+                cfg[k] = int(t[k])
     return cfg
 
 
@@ -193,20 +199,163 @@ def _pa_count_sources(cwd, limit=3000, budget=0.5):
     return n, False
 
 
+def _pa_skip(cwd):
+    """家目錄、磁碟根目錄、claude-dev-system 本身不做。回正規化的 cwd 或 None。"""
+    if not cwd or not os.path.isdir(cwd):
+        return None
+    cwd = os.path.abspath(cwd)
+    home = os.path.expanduser("~")
+    if cwd in (home, os.path.dirname(cwd)) or os.path.dirname(cwd) == cwd:
+        return None
+    if os.path.exists(os.path.join(cwd, "installer", "cds", "paths.py")) and os.path.exists(os.path.join(cwd, "rules", "core.md")):
+        return None
+    return cwd
+
+
+def _pa_load():
+    try:
+        with open(PA_STATE, encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def _pa_save(st):
+    try:
+        os.makedirs(os.path.dirname(PA_STATE), exist_ok=True)
+        with open(PA_STATE, "w", encoding="utf-8") as f:
+            json.dump(st, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _count_newer(cwd, since, limit=20000, budget=0.8):
+    """比 since（時間戳）新的檔案數，排除 PA_EXCLUDE 與點開頭的資料夾。回 (數量, 是否被截斷)。"""
+    n = seen = 0
+    t0 = time.time()
+    for dp, dns, fns in os.walk(cwd):
+        dns[:] = [d for d in dns if d not in PA_EXCLUDE and not d.startswith(".")]
+        for fn in fns:
+            seen += 1
+            try:
+                if os.path.getmtime(os.path.join(dp, fn)) > since:
+                    n += 1
+            except OSError:
+                pass
+            if seen >= limit or time.time() - t0 > budget:
+                return n, True
+    return n, False
+
+
+def _lines(path):
+    try:
+        with open(path, "rb") as f:
+            return sum(1 for _ in f)
+    except Exception:
+        return 0
+
+
+HANDOFF_FILES = ("PROGRESS.md", "HANDOFF.md", "TODO.md", os.path.join("docs", "progress.md"))
+
+
+def project_health(cwd):
+    """可判定的健康檢查（0.12.0；Stock-web 一場對話開 19 天、盤點改過 205 檔沒重跑、CLAUDE.md 25 KB 超過上限才加）。回問題字串清單。"""
+    cwd = _pa_skip(cwd)
+    if not cwd:
+        return []
+    cfg = _pa_config(cwd)
+    out = []
+    idx = os.path.join(cwd, ".claude", "project-scan.json")
+    if os.path.exists(idx) and cfg["staleFiles"]:
+        n, trunc = _count_newer(cwd, os.path.getmtime(idx))
+        if n > cfg["staleFiles"]:
+            out.append(f"盤點索引之後改過 {n}{'+' if trunc else ''} 個檔（門檻 {cfg['staleFiles']}）→ 先跑 `py -3 ~/.claude/claude-dev-system/tools/project-scan.py . --check` 看改了什麼，"
+                       "再照 skill `cds-project-audit` 重跑盤點更新 docs/PROJECT-INVENTORY.md 與問題清單（不用再問要不要重整）")
+    md = os.path.join(cwd, "CLAUDE.md")
+    if os.path.exists(md):
+        ln, kb = _lines(md), os.path.getsize(md) / 1024
+        over = []
+        # 行數或大小任一超過都算：Stock-web 的 CLAUDE.md 不到 180 行但每行很長，25 KB 超過它自訂的 20 KB
+        if cfg["claudeMdMaxKB"] and kb > cfg["claudeMdMaxKB"]:
+            over.append(f"{kb:.0f} KB（上限 {cfg['claudeMdMaxKB']} KB）")
+        if cfg["claudeMdMaxLines"] and ln > cfg["claudeMdMaxLines"]:
+            over.append(f"{ln} 行（上限 {cfg['claudeMdMaxLines']} 行）")
+        if over:
+            out.append(f"專案 CLAUDE.md {'、'.join(over)} → 在收尾或空檔用 skill `cds-doc-governance` 瘦身（內容搬到分層檔，數字、原話、日期只能移不能刪；專案若自訂其他上限以專案為準）")
+    for h in HANDOFF_FILES:
+        p = os.path.join(cwd, h)
+        if os.path.exists(p) and cfg["progressMaxLines"]:
+            ln = _lines(p)
+            if ln > cfg["progressMaxLines"]:
+                out.append(f"{h} {ln} 行（上限 {cfg['progressMaxLines']} 行）→ 用 skill `cds-doc-governance` 把舊日誌搬到封存檔")
+            break
+    return out
+
+
+def health_msg(cwd, force=False):
+    """UserPromptSubmit：同一資料夾每天最多提醒一次；SessionStart（壓縮後）force=True 每次都看。"""
+    try:
+        c = _pa_skip(cwd)
+        if not c:
+            return None
+        st = _pa_load()
+        key = "health|" + c.lower()
+        today = time.strftime("%Y-%m-%d")
+        if not force and st.get(key) == today:
+            return None
+        probs = project_health(c)
+        st[key] = today
+        _pa_save(st)
+        if not probs:
+            return None
+        return "【專案健康檢查（hook）】" + "；".join(f"{i}. {p}" for i, p in enumerate(probs, 1)) + "。在回答使用者這則之前或收尾時做，不要問要不要做。"
+    except Exception:
+        return None
+
+
+def compact_msg(cwd, session_id):
+    """SessionStart（compact／resume）：壓縮會把前面讀過的 skill、規則細節與開工檢查摘要掉；重新注入開工清單＋健康檢查＋專案自動化。
+    同一場對話壓縮滿 newSessionAfterCompactions 次（及其倍數）建議開新對話。"""
+    try:
+        c = _pa_skip(cwd)
+        parts = ["【壓縮後重新開工（hook）】對話剛被壓縮或接續，前面讀過的 skill 與規則細節可能只剩摘要。繼續工作前："
+                 "①讀這個專案交接紀錄（PROGRESS.md、HANDOFF.md、TODO.md、docs/progress.md 任一）最後一節與專案 CLAUDE.md 的關鍵規則；"
+                 "②有盤點索引就跑 `project-scan.py . --check`；③要上網查資料先重讀 `~/.claude/claude-dev-system/rules/web-quick.md`；"
+                 "④改到被 3 處以上引用的函式／資料層前用 skill `cds-blast-radius`，派 agent 前用 `cds-agent-dispatch`。"]
+        if c:
+            h = health_msg(c, force=True)
+            if h:
+                parts.append(h)
+            pa = project_auto_msg(c, None)
+            if pa:
+                parts.append(pa)
+        if session_id:
+            st = _pa_load()
+            k = "compactions|" + session_id
+            n = int(st.get(k, 0)) + 1
+            st[k] = n
+            _pa_save(st)
+            lim = _pa_config(c)["newSessionAfterCompactions"] if c else 3
+            if lim and n >= lim and n % lim == 0:
+                parts.append(f"【建議開新對話（hook）】這場對話已被壓縮 {n} 次，早期內容只剩層層摘要，容易漏規則、記錯狀況。"
+                             "在這則回答末尾用一句話建議使用者：先讓你更新交接紀錄（做了什麼、沒做完什麼、下一步），再開新對話接手。只建議，不要自己停工。")
+        return LF_JOIN.join(parts)
+    except Exception:
+        return None
+
+
+LF_JOIN = chr(10)
+
+
 def project_auto_msg(cwd, session_id=None):
     """回要注入的提示字串，或 None。可判定條件（與 core.md「專案自動化」同一套）：
     init  ＝ 沒有 CLAUDE.md、算專案（git 或原始碼 ≥ minSourceFiles）、autoInit；
     audit ＝ 有 CLAUDE.md、沒有 .claude/project-scan.json、原始碼 ≥ minSourceFiles、autoAudit。
     同一個資料夾同一場對話只注入一次；claude-dev-system 自己、家目錄、磁碟根目錄不做。"""
     try:
-        if not cwd or not os.path.isdir(cwd):
+        cwd = _pa_skip(cwd)
+        if not cwd:
             return None
-        cwd = os.path.abspath(cwd)
-        home = os.path.expanduser("~")
-        if cwd in (home, os.path.dirname(cwd)) or os.path.dirname(cwd) == cwd:
-            return None
-        if os.path.exists(os.path.join(cwd, "installer", "cds", "paths.py")) and os.path.exists(os.path.join(cwd, "rules", "core.md")):
-            return None  # claude-dev-system 本身
         cfg = _pa_config(cwd)
         has_md = os.path.exists(os.path.join(cwd, "CLAUDE.md"))
         has_idx = os.path.exists(os.path.join(cwd, ".claude", "project-scan.json"))
@@ -223,21 +372,11 @@ def project_auto_msg(cwd, session_id=None):
             return None
         # 同一場對話同一資料夾只提醒一次
         key = cwd.lower()
-        st = {}
-        try:
-            with open(PA_STATE, encoding="utf-8") as f:
-                st = json.load(f) or {}
-        except Exception:
-            st = {}
-        if session_id and st.get(key, {}).get("session") == session_id:
+        st = _pa_load()
+        if session_id and isinstance(st.get(key), dict) and st[key].get("session") == session_id:
             return None
         st[key] = {"session": session_id, "what": what, "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
-        try:
-            os.makedirs(STATE_DIR, exist_ok=True)
-            with open(PA_STATE, "w", encoding="utf-8") as f:
-                json.dump(st, f, ensure_ascii=False)
-        except Exception:
-            pass
+        _pa_save(st)
         facts = f"沒有 CLAUDE.md、" if not has_md else "有 CLAUDE.md 但沒有盤點索引、"
         facts += f"原始碼約 {n}{'+' if truncated else ''} 檔、{'git 專案' if is_git else '非 git'}"
         if what == "init":
@@ -362,6 +501,12 @@ def main():
         if out:
             print(json.dumps(out, ensure_ascii=True))
         return
+    if event == "SessionStart":  # 0.12.0：壓縮或接續後重新開工；新對話（startup）由 UserPromptSubmit 的專案自動化處理
+        if payload.get("source") in ("compact", "resume"):
+            msg = compact_msg(payload.get("cwd"), payload.get("session_id"))
+            if msg:
+                print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": msg}}, ensure_ascii=True))
+        return
     hook_cwd = None
     if not printing:
         try:
@@ -409,6 +554,9 @@ def main():
         pa = project_auto_msg(hook_cwd, payload.get("session_id"))
         if pa:
             msgs.append(pa)
+        hm = health_msg(hook_cwd)  # 盤點過期、CLAUDE.md／交接紀錄過大：同資料夾每天一次
+        if hm:
+            msgs.append(hm)
     stale = stale_agents()
     key = "|".join(sorted(stale))
     if stale and (key != s.get("stale_key") or now - s.get("stale_alerted_at", 0) >= STALE_REPEAT):

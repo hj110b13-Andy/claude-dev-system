@@ -2,6 +2,17 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.12.0（2026-11-03）
+
+使用者：「在 Stock-web 專案執行時，發現好像會有遺漏一些全域優化設定的規則」。查證：Stock-web 同一場對話從 2026-10-15 開到 11-03（紀錄 157 MB、壓縮 20 次）；開工檢查只在新對話做，之後 11/1 盤點後改過 205 檔、新增 193 檔沒重跑盤點，CLAUDE.md 25 KB 超過專案自訂 20 KB 上限，當天全域 skill 0 次、上網 6 次沒讀速查檔。使用者：「1~7 項全部都照你建議的改」。
+
+- **壓縮後重新開工（SessionStart hook，compact／resume）**：官方 hooks 文件「Use a SessionStart hook with a compact matcher to re-inject critical context after every compaction」。注入開工清單（讀交接紀錄最後一節與專案關鍵規則、`--check`、上網先重讀 web-quick、波及範圍與派工 skill）＋健康檢查＋專案自動化。
+- **專案健康檢查（UserPromptSubmit 每資料夾每天一次；壓縮後每次）**：盤點索引之後改過 > 20 檔 → 重跑盤點；CLAUDE.md > 180 行或 > 20 KB（任一；Stock-web 不到 180 行但 25 KB）、交接紀錄 > 600 行 → `cds-doc-governance` 瘦身。門檻在 dispatch-config `projectAutomation`，專案可覆寫、設 0 關閉。
+- **壓縮滿 3 次（及倍數）建議開新對話**：先更新交接紀錄再換；只建議不停工。
+- **core.md 新增兩條（Stock-web 11/3 核心決策原則 9、10 升全域）**：對話是討論不是命令；不確定就查證。另加「長對話」一條說明上面兩個 hook。
+- **cds-modularize**：行數閘門範圍要明確決定，預設涵蓋研究／回測腳本，例外逐檔寫原因（Stock-web scripts/backtest/exitStrategy.ts 6,588 行）。
+- **測試不再寫入真實 `~/.claude/state`**：0.11.8 起 test_hooks 把測試問句寫進使用者的 source-guard.log（8 筆「AI 幻覺的原因是什麼？」），改指到暫存資料夾。
+
 ## 0.11.16（2026-11-03，最後一次可能需要手動換 exe）
 
 - **exe 更新備援**（使用者：「為什麼這次不能直接從 exe 更新?」→「要」）：exe 正在執行的更新程式碼是打包時固定的，它本身有 bug（0.11.14 在另一台遇到 GitHub 憑證錯誤）就換不掉自己。新增 `installer/selfupdate_exe.py`：「檢查更新」下載到 app/ 的這一份永遠是最新程式碼；exe 自己查 Release 或下載／換檔失敗時，改用系統 Python 執行它來查與換，成功就照常重開視窗。之後更新程式本身的 bug 修好後，舊 exe 也能自己換成新版。
