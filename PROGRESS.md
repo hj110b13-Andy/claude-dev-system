@@ -24,6 +24,7 @@
   - Python：winget 每個次版本一個 ID（`Python.Python.3.x`）。這次 `winget search` 輸出被 tail 截斷，**最新 ID 沒看到，動工前要重查**；新裝置實測 Python 3.14.10＋faster-whisper 1.2.1 可用，3.14 是有實測的候選。
 - 做法：`INSTALL_ACTIONS` 加 python、git；Claude Code 用原生安裝腳本（`INSTALL_ACTIONS` 是 argv 清單，要確認怎麼呼叫 PowerShell）；`installer/gui.py` 按鈕文字表加項；`DOWNLOAD_PAGES` 留作沒有 winget 時的備案。裝完靠 0.14.2 的 `_ensure_python`／`refresh_path` 不用重開視窗。
 - Deno 與 Node 兩個都給按鈕（使用者 2026-11-04：「我覺得Deno與Node兩個都裝可以嗎?」，已答不衝突）：Node 用 winget `OpenJS.NodeJS.LTS`（當日 26.13.0），不用 Current 版；環境列要分開顯示兩列或各自有按鈕（現在 `js_runtime` 找到 Deno 就算通過，Node 不會出現按鈕）。`tools/video.py` 的 `ydl_opts` 有 Deno 就用 Deno，不用改。
+- 順手修：`tools/video.py` 的 `ydl_opts` 只看有沒有 node，沒查版本；node 低於 22（yt-dlp 最低要求）時仍會指定它，應與 `installer/cds/video.py` 的 `JS_MIN` 同一套門檻（小問題，環境列已會顯示未通過）。
 - 裝不了、只能開頁的：Chrome 擴充（商店要使用者按）；登入 Claude 由使用者自己做。
 - 驗收：測試涵蓋按鈕動作與沒有 winget 的備案；更新 CHANGELOG、VERSION（次版號），發 Release；最終要在全新裝置實測。
 
@@ -32,11 +33,12 @@
 - Deno 按鈕裝完環境列是否變 ✅（winget 實裝沒跑過）。
 - 不經 `/chrome` 勾選後開對話，② 是否自動變 ✅、重開 Chrome 後能否連上（照官方文件寫的，沒實跑）。
 - 視窗開著裝 Python 後按「重新整理」是否可用（只做過 PATH 模擬）。
+- 先勾「Enabled by default」、之後才裝擴充的流程有沒有正常（使用者 11/4 問過；只驗過設定會保留，官方說偵測不到擴充時會跳安裝提示，都沒實跑）。
 - 0.14.2 的 exe 沒有下載來跑過（只跑過原始碼的 --selfcheck）。
 
 ### 待辦 3：Stock-web（使用者要自己在那場對話交代）
 
-- 5 個腳本超過 800 行還沒拆（exitStrategy.ts 6,588、register.tsx 866、weeklyGoliveCore.ts 839、histRetest.ts 832、simRulesSnapshot.ts 812），行數閘門只管 src/。拆檔要先估用量給使用者同意。
+- 5 個腳本超過 800 行還沒拆（exitStrategy.ts 6,588、register.tsx 866、weeklyGoliveCore.ts 839、histRetest.ts 832、simRulesSnapshot.ts 812），行數閘門只管 src/。拆檔要先估用量給使用者同意。閘門要擴到 scripts/；確定一次性不再修改的才寫進專案 `.claude/dispatch-config.json` 的 `projectAutomation.bigFileExceptions`（逐檔寫原因）。這項不是在這個 repo 做。
 
 ### 已知小問題
 
