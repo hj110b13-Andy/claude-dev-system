@@ -583,6 +583,18 @@ def _hot_modules(cwd, st):
     return hot
 
 
+def _background_task_id(payload):
+    """工具結果裡的背景任務 ID（0.14.1）：Bash／PowerShell 明確派的、或逾時被自動移到背景的（tool_input 沒有 run_in_background，只有結果看得出來）。沒有回空字串。"""
+    r = payload.get("tool_response")
+    if isinstance(r, dict):
+        for k in ("backgroundTaskId", "agentId", "task_id"):
+            if r.get(k):
+                return str(r[k])
+        r = r.get("stdout") or ""
+    m = re.search(r"moved to the background \(ID: ([\w-]+)\)", r) if isinstance(r, str) else None
+    return m.group(1) if m else ""
+
+
 def tool_reminders(payload):
     """回要注入的提醒清單。四項：改安裝副本、派背景任務沒建巡檢、改被大量引用的模組、多人共用目錄的危險 git 指令。"""
     try:
@@ -622,10 +634,13 @@ def tool_reminders(payload):
                 if n >= 3 and once("blast|" + rel):
                     out.append(f"【波及範圍（hook）】剛改的 `{rel}` 被 {n} 個檔引用（盤點索引）→ 收尾前用 skill `cds-blast-radius` 列出 diff 之外會受影響的呼叫端，"
                                "逐條判定並實跑最關鍵的一條證明安全；這場對話已對它做過就忽略。")
-        bg = name in ("Agent", "Task", "Workflow") or (name in ("Bash", "PowerShell") and ti.get("run_in_background") is True)
+        # 0.14.1：逾時被自動移到背景的也算；有任務 ID 就每個任務各提醒一次（巡檢排程全部結束會刪，之後再派要重建；Stock-web 2026-11-04 只提醒一次，
+        # 排程刪掉後再派的任務沒有巡檢，指令卡 34 分鐘要使用者問才發現）。提醒句本來就是「先 CronList，沒有才建」，重複提醒不會重複建。
+        tid = _background_task_id(payload)
+        bg = name in ("Agent", "Task", "Workflow") or (name in ("Bash", "PowerShell") and (ti.get("run_in_background") is True or bool(tid)))
         if bg:
             en, mins = _task_check(cwd)
-            if en and once("taskcheck"):
+            if en and once("taskcheck|" + tid if tid else "taskcheck"):
                 out.append(f"【背景任務巡檢（hook）】剛派出背景任務，taskCheck.enabled=true → 先 `CronList`，這場對話還沒有巡檢排程就用 `CronCreate` 建每 {mins} 分鐘一次，"
                            "prompt 用 core.md「背景任務巡檢」那句固定文字；全部結束就 `CronDelete`。子 agent 忽略此則。")
         if name in ("Bash", "PowerShell"):

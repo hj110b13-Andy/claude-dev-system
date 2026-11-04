@@ -221,6 +221,18 @@ class ToolReminders(unittest.TestCase):
         (self.proj / ".claude" / "dispatch-config.json").write_text(json.dumps({"taskCheck": {"enabled": False}}), encoding="utf-8")
         self.assertEqual(self.r("Agent", sid="s3", prompt="x"), [], "taskCheck 關掉不提醒")
 
+    def test_background_task_auto_moved_and_each_task(self):
+        """0.14.1：逾時自動移到背景也提醒；每個任務各一次（使用者「全域15分鐘的巡查呢？」）"""
+        def bash(sid, resp, **ti):
+            return ug.tool_reminders({"tool_name": "Bash", "tool_input": {"command": "npm test", **ti}, "tool_response": resp, "session_id": sid, "cwd": str(self.proj)})
+        moved = {"stdout": "", "stderr": "", "backgroundTaskId": "abc123", "timedOutAfterMs": 120000}
+        self.assertTrue(any("CronCreate" in x for x in bash("t1", moved)), "沒有 run_in_background，只有結果顯示移到背景")
+        self.assertEqual(bash("t1", moved), [], "同一任務只一次")
+        self.assertTrue(any("CronCreate" in x for x in bash("t1", {"backgroundTaskId": "def456"}, run_in_background=True)), "排程可能已刪：新任務要再提醒")
+        self.assertTrue(any("CronCreate" in x for x in bash("t2", "Command was moved to the background (ID: xyz789). Output is being written")), "文字格式也認得")
+        self.assertEqual(bash("t3", {"stdout": "ok"}), [], "一般前景指令不提醒")
+        self.assertEqual(bash("t3", "ok"), [], "文字結果也不誤判")
+
     def test_blast_radius_from_index(self):
         (self.proj / ".claude" / "project-scan.json").write_text(json.dumps({"version": 2, "mostDepended": [["src/lib/cache.ts", 72], ["src/a.ts", 2]]}), encoding="utf-8")
         m = self.r("Edit", file_path=str(self.proj / "src" / "lib" / "cache.ts"))

@@ -2,6 +2,10 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.14.1（2026-11-04）
+
+- **背景任務巡檢提醒漏兩種情況**（使用者：「全域15分鐘的巡查呢？」——Stock-web 指令裡多餘的 `cat` 卡 34 分鐘，要使用者問「還在跑嗎？」才發現）。根因兩個：①指令逾時被自動移到背景時 tool_input 沒有 run_in_background，只看輸入抓不到，改連工具結果的 backgroundTaskId／「moved to the background (ID: …)」一起看；②提醒一場對話只一次，巡檢排程全部結束刪掉後再派任務就沒提醒，改成有任務 ID 就每個任務各一次（提醒句是「先 CronList，沒有才建」，不會重複建）。測試：ToolReminders 加 test_background_task_auto_moved_and_each_task。
+
 ## 0.14.0（2026-11-04）
 
 使用者：「還有沒有甚麼可能會遺漏的要改進程自動化?」→ 逐條對照全域規則，列出五條只靠 Claude 記得的 → 「這五項都做」。全部做在既有的 usage_guard hook（PostToolUse 本來就掛在 Bash／PowerShell／Agent／Task／Edit／Write／NotebookEdit／Workflow），不改 settings.json；同一場對話同一件事只提醒一次。
