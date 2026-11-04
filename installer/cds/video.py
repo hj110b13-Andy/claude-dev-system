@@ -11,11 +11,31 @@ import shutil
 import subprocess
 import sys
 
+from .checks import parse_ver
 from .fsio import read_json
 from .paths import Layout
 
 CONFIG_REL = "config/video.json"
 OK, BAD, WARN = "✅", "❌", "⚠️"
+
+
+JS_MIN = {"deno": (2, 3, 0), "node": (22, 0, 0)}  # yt-dlp wiki/EJS：Deno recommended、Enabled by default；node 要另外啟用（tools/video.py 沒有 deno 時才用）
+
+
+def js_runtime(which=shutil.which, run=subprocess.run) -> tuple[str, tuple[int, ...]] | None:
+    """YouTube 解挑戰用的 JS runtime（唯一來源）：回 (名稱, 版本)；沒有或版本低於 yt-dlp 的最低要求回 None。deno 優先。"""
+    for name, low in JS_MIN.items():
+        exe = which(name)
+        if not exe:
+            continue
+        try:
+            r = run([exe, "--version"], capture_output=True, timeout=15)
+            v = parse_ver((r.stdout or b"").decode("utf-8", "replace"))
+        except Exception:  # noqa: BLE001
+            continue
+        if r.returncode == 0 and v and v >= low:
+            return name, v
+    return None
 
 
 def empty_record() -> dict:
@@ -92,6 +112,9 @@ def verify_rows(lay: Layout, rec: dict, importer=default_importer, local_keys: d
         rows.append((OK if v is not None else BAD, f"影片套件 {name}" + (f" {v}" if v else "") + ("" if v is not None else " 未安裝（重跑 `install.py video`）")))
     ff = ffmpeg()
     rows.append((OK if ff else BAD, f"ffmpeg：{ff}" if ff else "ffmpeg 找不到（winget install Gyan.FFmpeg，或加進 PATH）"))
+    js = js_runtime()
+    rows.append((OK, f"YouTube 解挑戰：{js[0]} {'.'.join(map(str, js[1]))}") if js else
+                (WARN, "沒有可用的 Deno（≥2.3）或 node（≥22）：YouTube 高畫質可能缺、下載較慢（選用：`winget install --id DenoLand.Deno`）"))
     fw = importer("faster_whisper")
     rows.append((OK if fw is not None else WARN, f"faster-whisper {fw}（沒字幕的影片可轉逐字稿）" if fw is not None
                  else "faster-whisper 未裝：沒字幕的影片無法轉逐字稿（選用：`pip install faster-whisper`）"))

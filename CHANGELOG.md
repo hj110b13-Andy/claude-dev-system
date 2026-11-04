@@ -2,6 +2,16 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.14.2（2026-11-04，視窗會自動換 exe）
+
+使用者在全新裝置實測：「node沒有給下載按鈕，claude in chrome要我自己在/chrome開啟才能勾選，faster-whisper第一次安裝失敗，後面關掉重開才成功。」
+
+- **faster-whisper 第一次失敗（expected str, bytes or os.PathLike object, not NoneType）**：系統 Python 路徑 `PY` 只在開窗時找一次，程序的 PATH 也是啟動時那份；視窗開著才裝的 Python 在關掉重開前都是 None，直接傳給 subprocess（`install_action('faster_whisper', None)` 重現同一句錯誤）。同一根因也影響視窗開著才裝的 Claude Code、ffmpeg。改成重新整理、安裝、套用、更新前都從登錄檔補回 PATH（`refresh_path`，原有順序不動）並重找 Python（`_ensure_python`）；真的沒有 Python 時顯示白話說明。
+- **Claude in Chrome 要先 /chrome 才能勾**：`chrome_default_enabled` 在 ~/.claude.json 存在但還沒有 `claudeInChromeDefaultEnabled` 時也回 None，勾選框被鎖住，還顯示「找不到 ~/.claude.json」。改成沒有鍵或還沒有檔都算「還沒開」可以勾；只有檔案壞掉才鎖。只含這個鍵的新檔，Claude Code 啟動後會保留（CLAUDE_CONFIG_DIR 暫存目錄實測）。原本的測試把這個行為寫成預期，一併更正。
+- **② native host 查錯機碼（從 0.8.0 就錯）**：查的是 Claude Desktop 的 `com.anthropic.claude_browser_extension`，官方文件寫 Claude Code 是 `com.anthropic.claude_code_browser_extension`；裝了 Desktop 的機器會誤判通過，只裝 Claude Code 的永遠 ❌。改查正確機碼並確認設定檔存在。❌ 時視窗說明不用手動處理：官方「The first time you enable Chrome integration, Claude Code installs a native messaging host configuration file」，登記後重開 Chrome。
+- **JS runtime 沒有安裝按鈕、也認不得 Deno**：環境列文字寫「node／deno」但只檢查 node。加 `video.js_runtime`（唯一來源，檢查 yt-dlp 最低版本 Deno ≥2.3、node ≥22），環境列與 verify 共用；按鈕裝 Deno 不裝 Node：yt-dlp wiki/EJS「Deno (recommended) | Enabled by default」，Node 要另外啟用。
+- README 第 6、8 步同步。測試：test_gui_model NewDeviceFlow 6 個。尚未在全新裝置端對端驗證（要等使用者下一次新裝置測試）。
+
 ## 0.14.1（2026-11-04）
 
 - **背景任務巡檢提醒漏兩種情況**（使用者：「全域15分鐘的巡查呢？」——Stock-web 指令裡多餘的 `cat` 卡 34 分鐘，要使用者問「還在跑嗎？」才發現）。根因兩個：①指令逾時被自動移到背景時 tool_input 沒有 run_in_background，只看輸入抓不到，改連工具結果的 backgroundTaskId／「moved to the background (ID: …)」一起看；②提醒一場對話只一次，巡檢排程全部結束刪掉後再派任務就沒提醒，改成有任務 ID 就每個任務各一次（提醒句是「先 CronList，沒有才建」，不會重複建）。測試：ToolReminders 加 test_background_task_auto_moved_and_each_task。

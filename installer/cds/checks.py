@@ -53,7 +53,7 @@ def env_report(home: Path, repo: Path = REPO) -> list[tuple[str, bool | None, st
     pmin = parse_ver(c["python"]["min"])
     rows.append(("Python", pv[:2] >= pmin[:2], f"{sys.version.split()[0]}（需 ≥{c['python']['min']}）；執行檔 {sys.executable}"))
     node = run_version(["node", "--version"])
-    rows.append(("Node.js", True if node else None, (node or "未安裝") + "（本工具不需要；看板 mod 由 Claude Code 自己執行）"))
+    rows.append(("Node.js", True if node else None, (node or "未安裝") + "（本工具不需要；看板 mod 由 Claude Code 自己執行；YouTube 解挑戰建議裝 Deno）"))
     git = run_version(["git", "--version"])
     rows.append(("git", True if git else None, (git or "未安裝") + "（跨裝置取得本工具需要）"))
     ok, msg = claude_code_status(repo)

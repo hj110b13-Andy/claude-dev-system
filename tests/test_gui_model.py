@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -395,7 +396,7 @@ class ReadAndDiff(Base):
         p = web.user_config_path(self.lay)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps({"mcpServers": {}, "other": 1}), encoding="utf-8")
-        self.assertIsNone(gm.chrome_default_enabled(self.lay))
+        self.assertIs(gm.chrome_default_enabled(self.lay), False, "檔案在、還沒有這個鍵＝還沒開，要能勾（新裝置實測被鎖住）")
         gm.set_chrome_default_enabled(self.lay, True)
         d = json.loads(p.read_text(encoding="utf-8"))
         self.assertTrue(d["claudeInChromeDefaultEnabled"] and d["other"] == 1)
@@ -404,6 +405,61 @@ class ReadAndDiff(Base):
             (self.lay.backups / f"claude-json-2020010{i % 10}-00000{i}.json").write_text("{}", encoding="utf-8")
         gm.set_chrome_default_enabled(self.lay, False)
         self.assertLessEqual(len(list(self.lay.backups.glob("claude-json-*.json"))), 10, "~/.claude.json 備份只留 10 份")
+
+
+class NewDeviceFlow(unittest.TestCase):
+    """0.14.2 全新裝置實測三個問題：node 沒按鈕、Chrome 要先 /chrome 才能勾、faster-whisper 第一次失敗。"""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="cds-newdev-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.lay = Layout(self.tmp / "home")
+        self.lay.home.mkdir(parents=True)
+
+    def test_chrome_default_states(self):
+        p = web.user_config_path(self.lay)
+        p.unlink(missing_ok=True)
+        self.assertIs(gm.chrome_default_enabled(self.lay), False, "檔案還沒建立也能勾")
+        gm.set_chrome_default_enabled(self.lay, True)
+        self.assertIs(gm.chrome_default_enabled(self.lay), True)
+        p.write_text("{壞掉", encoding="utf-8")
+        self.assertIsNone(gm.chrome_default_enabled(self.lay), "壞檔不可寫")
+
+    def test_native_host_key_is_claude_code_not_desktop(self):
+        self.assertTrue(gm.NATIVE_HOST_KEY.endswith(chr(92) + "com.anthropic.claude_code_browser_extension"))
+
+    def test_install_without_python_gives_plain_message(self):
+        code, msg = gm.install_action("faster_whisper", None)
+        self.assertEqual(code, 1)
+        self.assertIn("找不到系統的 Python", msg)
+        self.assertNotIn("NoneType", msg)
+
+    def test_refresh_path_adds_new_dirs_only(self):
+        env = {"PATH": os.pathsep.join(["C:/a", "C:/b"])}
+        self.assertEqual(gm.refresh_path(env, lambda: ["C:/b", "", "C:/new", "C:/new"]), ["C:/new"])
+        self.assertEqual(env["PATH"], os.pathsep.join(["C:/a", "C:/b", "C:/new"]), "原有順序不動")
+        self.assertEqual(gm.refresh_path(env, lambda: ["C:/new"]), [], "第二次沒有新的")
+
+    def test_js_runtime_prefers_deno_and_checks_minimum(self):
+        class R:
+            def __init__(self, out):
+                self.stdout, self.returncode = out, 0
+
+        def run_for(table):
+            return lambda cmd, **kw: R(table[cmd[0]])
+        both = {"deno": b"deno 2.9.8 (stable)", "node": b"v26.13.0"}
+        which_all = lambda n: n
+        self.assertEqual(gm.video.js_runtime(which_all, run_for(both)), ("deno", (2, 9, 8)))
+        self.assertEqual(gm.video.js_runtime(lambda n: n if n == "node" else None, run_for(both)), ("node", (26, 13, 0)))
+        self.assertIsNone(gm.video.js_runtime(lambda n: n if n == "node" else None, run_for({"node": b"v20.1.0"})), "node 低於 22 不算")
+        self.assertIsNone(gm.video.js_runtime(lambda n: None, run_for({})))
+
+    def test_env_row_offers_deno_button(self):
+        class R:
+            stdout, returncode = b"", 1
+        it = gm.env_status(which=lambda n: None, importer=lambda m: None, ffmpeg=lambda: None, claude_status=lambda r: (False, "x"), run=lambda *a, **k: R())["node"]
+        self.assertEqual(it.action, "deno")
+        self.assertIn("deno", gm.INSTALL_ACTIONS)
 
 
 class KeyTests(unittest.TestCase):

@@ -68,7 +68,9 @@ TOOL_DESC = {  # 其他功能說明
     "chrome": "Claude in Chrome：實際開網頁看、操作需登入網站、測自己的網站、教你操作前先核對畫面",
 }
 CHROME_EXT_ID = "fcoeoabgfenejglbffodgkkbkcdhcgfn"
-NATIVE_HOST_KEY = r"Software\Google\Chrome\NativeMessagingHosts\com.anthropic.claude_browser_extension"
+# 0.14.2 更正：原本查 com.anthropic.claude_browser_extension，那是 Claude Desktop 的（這台的值指向 Claude_pzs8sxrjxfjjc\…\Claude-NativeHost）；
+# Claude Code 的名稱見 code.claude.com/docs/en/chrome「com.anthropic.claude_code_browser_extension」
+NATIVE_HOST_KEY = r"Software\Google\Chrome\NativeMessagingHosts\com.anthropic.claude_code_browser_extension"
 DEFAULT_THRESHOLDS = {"fiveHour": 85, "sevenDay": 97}
 
 
@@ -197,6 +199,37 @@ def system_importer(python: str | None, run=subprocess.run):
     return imp
 
 
+def _registry_path_dirs() -> list[str]:
+    """登錄檔裡現在的系統＋使用者 PATH（已展開 %VAR%）。非 Windows 回空。"""
+    if sys.platform != "win32":
+        return []
+    import winreg
+    out: list[str] = []
+    for hive, key in ((winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"), (winreg.HKEY_CURRENT_USER, "Environment")):
+        try:
+            with winreg.OpenKey(hive, key) as k:
+                out += winreg.ExpandEnvironmentStrings(str(winreg.QueryValueEx(k, "Path")[0])).split(os.pathsep)
+        except OSError:
+            continue
+    return out
+
+
+def refresh_path(environ=os.environ, reg_dirs=_registry_path_dirs) -> list[str]:
+    """把登錄檔 PATH 新增的資料夾補進這個程序（原有順序不動），回補了哪些。
+    程序的 PATH 是啟動時那份：視窗開著才裝的 Python、Claude Code、Deno 在關掉重開前都找不到（新裝置實測：faster-whisper 第一次失敗）。"""
+    cur = [d for d in environ.get("PATH", "").split(os.pathsep) if d]
+    have = {os.path.normcase(os.path.normpath(d)) for d in cur}
+    added = []
+    for d in reg_dirs():
+        n = os.path.normcase(os.path.normpath(d)) if d else ""
+        if n and n not in have:
+            have.add(n)
+            added.append(d)
+    if added:
+        environ["PATH"] = os.pathsep.join(cur + added)
+    return added
+
+
 def env_status(repo: Path = REPO, which=shutil.which, importer=video.default_importer, ffmpeg=video.ffmpeg_path,
                claude_status=claude_code_status, run=subprocess.run, python: str | None = None) -> dict[str, EnvItem]:
     out: dict[str, EnvItem] = {}
@@ -223,7 +256,9 @@ def env_status(repo: Path = REPO, which=shutil.which, importer=video.default_imp
     out["pwsh"] = f_pwsh.result()
     out["winget"] = EnvItem(bool(which("winget")), "winget 可用" if which("winget") else "無 winget（安裝按鈕不可用，請手動裝）")
     out["git"] = EnvItem(True if which("git") else None, "git 可用" if which("git") else "無 git（exe 模式不需要）")
-    out["node"] = EnvItem(True if which("node") else None, "node 可用（YouTube 解挑戰用）" if which("node") else "無 node／deno（YouTube 高畫質可能缺、下載較慢）")
+    js = video.js_runtime(which, run)  # 原本只看 node：裝了 Deno（yt-dlp 官方推薦）仍顯示「無」，也沒有安裝按鈕
+    out["node"] = (EnvItem(True, f"{js[0]} {'.'.join(map(str, js[1]))} 可用（YouTube 解挑戰用）") if js
+                   else EnvItem(None, "無可用的 Deno（≥2.3）或 node（≥22）（YouTube 高畫質可能缺、下載較慢）", "deno"))
     fw = f_fw.result()
     out["faster_whisper"] = EnvItem(True if fw is not None else None, f"faster-whisper {fw}" if fw is not None else "未裝（沒字幕的影片無法轉逐字稿）", None if fw is not None else "faster_whisper")
     return out
@@ -241,19 +276,20 @@ def chrome_native_host_registered() -> bool | None:
         return None
     try:
         import winreg
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, NATIVE_HOST_KEY):
-            return True
+        return Path(winreg.QueryValue(winreg.HKEY_CURRENT_USER, NATIVE_HOST_KEY)).is_file()  # 機碼的值是設定檔路徑：檔案要真的在
     except OSError:
         return False
 
 
 def chrome_default_enabled(lay: Layout) -> bool | None:
+    """True／False＝可以勾；None＝檔案壞掉讀不到，不可寫。
+    0.14.2：檔案在但還沒有這個鍵、或檔案還沒建立，都是「還沒開」＝False。原本回 None 把勾選框鎖住並顯示「找不到 ~/.claude.json」，
+    只有先到 /chrome 開過才能勾（新裝置實測）。只含這個鍵的新檔，Claude Code 啟動後會保留它（CLAUDE_CONFIG_DIR 暫存目錄實測，11 個鍵、值仍 true）。"""
     p = web.user_config_path(lay)
     if not p.exists():
-        return None
+        return False
     try:
-        v = read_json(p).get("claudeInChromeDefaultEnabled")
-        return bool(v) if v is not None else None
+        return bool(read_json(p).get("claudeInChromeDefaultEnabled"))
     except Exception:  # noqa: BLE001
         return None
 
@@ -389,6 +425,8 @@ def refresh_usage(lay: Layout, python: str, run=subprocess.run) -> dict:
     script = lay.payload / "hooks" / "usage_guard.py"
     if not script.exists():
         return {**read_usage(lay), "text": "尚未安裝核心（hooks/usage_guard.py 不存在），無法讀用量"}
+    if not python:
+        return {**read_usage(lay), "text": "找不到系統的 Python ≥3.10，無法讀用量"}
     try:
         r = run([python, str(script), "--print"], capture_output=True, timeout=30, env={**os.environ, "CLAUDE_CONFIG_DIR": str(lay.home), "PYTHONUTF8": "1"})
         out = (r.stdout or b"").decode("utf-8", "replace").strip()
@@ -814,6 +852,8 @@ INSTALL_ACTIONS = {
     # --force：已裝 Store／MSIX 版時 winget 把 install 當 upgrade，回「找不到可用的升級」0x8A15002B 而不裝 MSI（2026-11-02 另一台實測）；
     # 官方：--force = "Direct run the command and continue with non security related issues"（learn.microsoft.com/windows/package-manager/winget/install）
     "pwsh7": ["winget", "install", "--id", "Microsoft.PowerShell", "--source", "winget", "--installer-type", "wix", "--force", "--accept-package-agreements", "--accept-source-agreements"],
+    # 選 Deno 不選 Node：yt-dlp wiki/EJS「Deno (recommended) | Enabled by default」「Code is run with restricted permissions」；Node 要另外啟用
+    "deno": ["winget", "install", "--id", "DenoLand.Deno", "--source", "winget", "--accept-package-agreements", "--accept-source-agreements"],
 }
 DOWNLOAD_PAGES = {"python": "https://www.python.org/downloads/", "claude": "https://code.claude.com/docs/en/setup"}
 
@@ -843,6 +883,8 @@ def install_hint(code: int, out: str) -> str | None:
 
 def install_action(action: str, python: str, gpu: bool = False, run=subprocess.run) -> tuple[int, str]:
     if action == "faster_whisper":
+        if not python:  # 原本把 None 傳給 subprocess，顯示「expected str, bytes or os.PathLike object, not NoneType」
+            return 1, "找不到系統的 Python ≥3.10。先安裝 Python（環境區「開下載頁」），裝好按「重新整理」再試，不用關視窗。"
         pk = ["faster-whisper"] + (["nvidia-cublas-cu12", "nvidia-cudnn-cu12"] if gpu else [])
         cmd = [python, "-m", "pip", "install", "--upgrade", *pk]
     elif action in INSTALL_ACTIONS:

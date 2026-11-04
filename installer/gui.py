@@ -47,7 +47,17 @@ def _hide_subprocess_consoles():
 
 
 _hide_subprocess_consoles()  # 要在下面第一個子程序（找系統 Python）之前：0.11.11 放在 main() 裡，開啟瞬間仍閃一個黑窗（使用者實測）
+gm.refresh_path()
 PY = gm.find_system_python()[0] if FROZEN else Path(sys.executable).as_posix()  # exe 模式：hook 與 pip 要用系統 Python，不是 exe
+
+
+def _ensure_python():
+    """視窗開著才裝的 Python／Claude Code／Deno：PATH 從登錄檔補回，PY 還是空的就重找。重新整理、安裝、套用前都先呼叫（0.14.2，新裝置實測）。"""
+    global PY
+    gm.refresh_path()
+    if not PY:
+        PY = gm.find_system_python()[0]
+    return PY
 
 
 class App:
@@ -271,8 +281,8 @@ class App:
             lb = ttk.Label(env, text=f"{MARK[it.ok]} {it.detail}", wraplength=1000, justify="left")
             lb.grid(row=i, column=0, sticky="w")
             self.notes.append(lb)  # 讓換行寬跟著視窗（ffmpeg 長路徑原本在寬螢幕也提早斷行）
-            if it.action in ("ffmpeg", "pwsh7", "faster_whisper"):
-                txt = {"ffmpeg": "安裝 ffmpeg（winget）", "pwsh7": "安裝 PowerShell 7（MSI，會跳 UAC）", "faster_whisper": "安裝 faster-whisper（pip）"}[it.action]
+            if it.action in ("ffmpeg", "pwsh7", "faster_whisper", "deno"):
+                txt = {"ffmpeg": "安裝 ffmpeg（winget）", "pwsh7": "安裝 PowerShell 7（MSI，會跳 UAC）", "faster_whisper": "安裝 faster-whisper（pip）", "deno": "安裝 Deno（winget）"}[it.action]
                 ttk.Button(env, text=txt, command=lambda a=it.action: self.do_install(a)).grid(row=i, column=1, sticky="e", padx=4)
             elif it.action in gm.DOWNLOAD_PAGES:
                 ttk.Button(env, text="開下載頁", command=lambda a=it.action: webbrowser.open(gm.DOWNLOAD_PAGES[a])).grid(row=i, column=1, sticky="e", padx=4)
@@ -438,8 +448,12 @@ class App:
         cb.grid(row=1, column=0, sticky="w")
         if c["default_enabled"] is None:
             cb.state(["disabled"])
-            ttk.Label(cf, text="（找不到 ~/.claude.json：先開過一次 Claude Code 再回來）", foreground="#555").grid(row=1, column=1, sticky="w")
+            ttk.Label(cf, text="（~/.claude.json 內容讀不懂，不敢寫入：先開一次 Claude Code 再回來）", foreground="#555").grid(row=1, column=1, sticky="w")
         ttk.Label(cf, text="沒裝擴充：Chrome 線上商店搜「Claude in Chrome」，同一帳號登入。", foreground="#555").grid(row=2, column=0, sticky="w")
+        if c["native_host"] is False:
+            self.notes.append(ttk.Label(cf, text="② 是 ❌ 不用手動處理：官方說明第一次在 Claude Code 啟用 Chrome 時會自動登記。勾上面這格並套用，再開一場 Claude Code 對話（或按 ③）；登記後重開 Chrome 一次。",
+                                        foreground="#555", wraplength=900, justify="left"))
+            self.notes[-1].grid(row=3, column=0, columnspan=2, sticky="w")
 
         self.update_diff()
         self._fit_notes()
@@ -637,6 +651,7 @@ class App:
 
         def work():
             try:
+                _ensure_python()
                 st = gm.read_state(self.lay, repo=self.repo, python=PY if FROZEN else None, importer=gm.system_importer(PY) if FROZEN else gm.video.default_importer)
                 self.q.put(("state", st))
             except Exception as e:  # noqa: BLE001
@@ -651,7 +666,7 @@ class App:
         if not ch:
             messagebox.showinfo("套用", "沒有變更。")
             return
-        if not PY:
+        if not _ensure_python():
             messagebox.showerror("套用", "找不到系統的 Python ≥3.10（hook 與影片工具要用它）。請先在「環境」區按「開下載頁」安裝 Python，裝好後重開本程式。")
             return
         if not getattr(self, "_close_after_apply", False) and not messagebox.askyesno("套用", "將執行：\n\n" + "\n".join("• " + c.text for c in ch) + "\n\n確定？"):
@@ -681,9 +696,11 @@ class App:
 
         def job():
             self._log(f"=== 安裝 {action} ===")
-            code, out = gm.install_action(action, PY, gpu=gpu)
+            code, out = gm.install_action(action, _ensure_python(), gpu=gpu)
             self._log(out.strip()[-1200:] or "(無輸出)")
             self._log(f"{'✅' if code == 0 else '❌'} 結束碼 {code}")
+            if code == 0:
+                self._log("開著的 Claude Code 對話要重開才看得到新裝的程式；這個視窗不用關。")
             if code != 0:
                 hint = gm.install_hint(code, out or "")
                 if hint:
@@ -788,7 +805,7 @@ class App:
         if not messagebox.askyesno("更新", msg):
             self._log("已略過更新（之後可再按「檢查更新」）")
             return
-        if not exe_only and not PY:
+        if not exe_only and not _ensure_python():
             self._log("❌ 找不到系統的 Python ≥3.10，無法套用。請先在「環境」區安裝 Python，再按「檢查更新」")
             return
 

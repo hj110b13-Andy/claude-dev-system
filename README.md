@@ -24,7 +24,7 @@
 - Python ≥ 3.10（安裝器、hook、工具都只用標準庫；選用的影片來源例外，`--with-video` 會 pip 裝 yt-dlp 等）
 - git（從版本庫取得本工具）
 - Claude Code ≥ 2.1.0、< 3.0.0（實測 2.1.296）
-- Node.js：本工具不需要
+- Node.js：本工具不需要（影片來源抓 YouTube 建議裝 Deno，見下方第 6 步）
 
 ## 安裝
 
@@ -106,9 +106,9 @@ python ~/.claude/claude-dev-system/tools/video.py setup  # 檢查 ffmpeg、faste
    | `gemini` | Gemini：真的逐幀看影片、招牌文字、無聲影片（影片來源用） | 只能靠逐字稿＋截圖理解影片 |
    金鑰由使用者**自己在終端機**輸入 `web --key 名稱=值`，不要請使用者貼在對話裡。Google 兩把的註冊步驟（含第一次進 Google Cloud 會遇到的兩步驟驗證與條款畫面）在 `docs/video.md`；**要教使用者點哪裡之前，先用 Claude in Chrome 開到那個畫面核對**（規則第 10 節），不可憑記憶寫步驟。
 5. **問：要不要關 firecrawl？**（0.7.0 起預設開，只當讀整頁第三步；不想要就 `web --disable firecrawl`）。
-6. **問：要不要啟用影片來源？**（讓 Claude 看 YouTube／網路影片／本機 mp4 的逐字稿與畫面）→ 要就 `update --with-video`（pip 裝 yt-dlp 等）；需要 ffmpeg（Windows `winget install Gyan.FFmpeg`）；再問 **要不要裝 faster-whisper**（沒字幕的影片才需要；`python -m pip install faster-whisper`，NVIDIA 顯卡另加 `nvidia-cublas-cu12 nvidia-cudnn-cu12`；體積約 1.5GB）。`youtube`／`gemini` 金鑰回到第 3 步的表。
+6. **問：要不要啟用影片來源？**（讓 Claude 看 YouTube／網路影片／本機 mp4 的逐字稿與畫面）→ 要就 `update --with-video`（pip 裝 yt-dlp 等）；需要 ffmpeg（Windows `winget install Gyan.FFmpeg`）；再問 **要不要裝 faster-whisper**（沒字幕的影片才需要；`python -m pip install faster-whisper`，NVIDIA 顯卡另加 `nvidia-cublas-cu12 nvidia-cudnn-cu12`；體積約 1.5GB）。`youtube`／`gemini` 金鑰回到第 3 步的表。抓 YouTube 建議再裝 Deno（`winget install --id DenoLand.Deno`；yt-dlp 官方推薦、預設啟用）。
 7. `verify` 全 ✅ 才算完成；請使用者**重開 Claude Code 對話**。
-8. **問：要不要啟用 Claude in Chrome？**（開網頁看狀況、操作需登入的網站、FB 社團、測自己的網站都靠它）→ 要就請使用者裝 Chrome 擴充「Claude in Chrome」、同帳號登入、在對話打 `/chrome` 開「Enabled by default」。這不是安裝器能做的。
+8. **問：要不要啟用 Claude in Chrome？**（開網頁看狀況、操作需登入的網站、FB 社團、測自己的網站都靠它）→ 要就請使用者裝 Chrome 擴充「Claude in Chrome」、同帳號登入、在設定視窗勾「Enabled by default」按套用（或在對話打 `/chrome` 開）。Claude Code 第一次啟用 Chrome 時會自動登記 native host，登記後要重開 Chrome 一次。擴充功能本身安裝器裝不了。
 9. **問：要不要裝 PowerShell 7？**（Windows 建議要；5.1 的 JSON 中文亂碼、`Get-Content` 編碼、不支援 `&&`／三元運算子等坑在 7 全部消失，Claude Code 會自動改用它）→ `winget install --id Microsoft.PowerShell --source winget --installer-type wix`（**要 MSI 版**，Store 版 Claude Code 偵測不到；會跳 UAC）。PowerShell 自身走 Microsoft Update 更新是安裝預設；若使用者想讓 Windows Update 一併接收其他 Microsoft 產品更新，請他自己到「設定 → Windows Update → 進階選項」打開，Claude 不代改。裝完重開 Claude Code。
 10. **告知（不代做）：Windows 系統碼頁**。安裝器已用 env 修好 Python 子程序的中文輸出；若使用者還常遇到 PowerShell 5.1 讀無 BOM 檔亂碼，可自行開啟 Windows「Beta: 使用 Unicode UTF-8 提供全球語言支援」並重開機；副作用與取捨見 `rules/web-sources.md`「Windows 亂碼的三個根源與修法」。Claude 不可代改系統設定。
 11. **問：用量門檻要設多少？** `config/dispatch-config.json` 的 `usageThresholdPct` 預設 5 小時 85%、7 天 97%；沒到門檻完全不提示也不動作，到了才注入收尾提醒。Max 方案的人常改 95／99。直接改兩個數字即可（0.7.0 起沒有方案概念），安裝器之後 update 會保留他的版本。
