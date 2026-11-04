@@ -11,6 +11,7 @@
 - 問題：`95c184c`（AI-Search&Fetch 11/4 18:32 提交，project-scan 不算 .gitignore 排除的檔）的版本也標 0.14.2，比 `v0.14.2` tag（`718831a`，18:27）晚 5 分鐘，不在任何 tag 或 Release 裡。VERSION 相同，所以其他裝置「檢查更新」不會判定有新版，拿不到這個修正；CHANGELOG 也有兩段 `## 0.14.2`。這台已安裝的是新的（verify 全部通過）。
 - 做法：VERSION 改 0.14.3，把 `95c184c` 那段 CHANGELOG 改標 0.14.3 放最上面，update、verify、push、打 tag、確認 Release 兩個附件都在。不要移動 `v0.14.2` tag。
 - 整類修法：repo CLAUDE.md「改這個 repo 時」加一條，多場對話會同時改這個 repo，改動前先 `git pull`、看 `git tag --points-at`／最新 tag；目前 VERSION 已打過 tag 就要往上加，不可沿用；可加測試或 hook 檢查「VERSION 已有 tag 但之後還有非 PROGRESS 的 commit」。
+- 同一版一起修：hook 的 `_count_newer`（`hooks/usage_guard.py`，健康檢查「盤點過期」的計數）沒有跟著 `95c184c` 改，仍只排除固定資料夾與點開頭資料夾，被 .gitignore 排除的檔照算。Stock-web 有 436 個被排除的檔（多為 docs/eval 評測輸出），跑評測就可能讓「改過 >20 檔」提早觸發；`--check` 與 hook 算法不一致，違反唯一來源。修法：hook 用同一套 `git ls-files --others --ignored --exclude-standard --directory` 判斷（注意 budget 0.8 秒，git 失敗就照舊），加測試。此項是讀程式碼判定，未實跑重現。
 - 已複查沒問題：`fa4bc5c`（0.14.1，Stock-web，逾時自動移背景也提醒巡檢）有 tag 與 Release。這兩個 commit 都是改 repo 再 update，沒有再直接改安裝副本。測試全過、工作樹乾淨。
 
 ### 待辦 1：環境區全部改成一鍵安裝（使用者已提、尚未動工）
