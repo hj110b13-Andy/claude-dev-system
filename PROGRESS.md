@@ -15,6 +15,7 @@
   - git：winget `Git.Git` 2.56.0.4。
   - Python：winget 每個次版本一個 ID（`Python.Python.3.x`）。這次 `winget search` 輸出被 tail 截斷，**最新 ID 沒看到，動工前要重查**；新裝置實測 Python 3.14.10＋faster-whisper 1.2.1 可用，3.14 是有實測的候選。
 - 做法：`INSTALL_ACTIONS` 加 python、git；Claude Code 用原生安裝腳本（`INSTALL_ACTIONS` 是 argv 清單，要確認怎麼呼叫 PowerShell）；`installer/gui.py` 按鈕文字表加項；`DOWNLOAD_PAGES` 留作沒有 winget 時的備案。裝完靠 0.14.2 的 `_ensure_python`／`refresh_path` 不用重開視窗。
+- Deno 與 Node 兩個都給按鈕（使用者 2026-11-04：「我覺得Deno與Node兩個都裝可以嗎?」，已答不衝突）：Node 用 winget `OpenJS.NodeJS.LTS`（當日 26.13.0），不用 Current 版；環境列要分開顯示兩列或各自有按鈕（現在 `js_runtime` 找到 Deno 就算通過，Node 不會出現按鈕）。`tools/video.py` 的 `ydl_opts` 有 Deno 就用 Deno，不用改。
 - 裝不了、只能開頁的：Chrome 擴充（商店要使用者按）；登入 Claude 由使用者自己做。
 - 驗收：測試涵蓋按鈕動作與沒有 winget 的備案；更新 CHANGELOG、VERSION（次版號），發 Release；最終要在全新裝置實測。
 
