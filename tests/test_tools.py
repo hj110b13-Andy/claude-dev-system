@@ -183,6 +183,51 @@ class UsageGuardConfig(unittest.TestCase):
         self.assertEqual(self.ug.pick_thresholds(cfg, "2026-11-13"), (80.0, 97.0))
 
 
+class ProjectScanGitignore(unittest.TestCase):
+    """project-scan 不把 .gitignore 排除的暫存與金鑰檔算成專案內容。"""
+
+    def _load(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("project_scan_mod", Path(__file__).resolve().parent.parent / "tools" / "project-scan.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _rels(self, mod, root):
+        return {p.relative_to(root).as_posix() for p in mod.walk(root)}
+
+    def test_git_project_skips_ignored(self):
+        import subprocess
+
+        mod = self._load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / ".gitignore").write_text(".wrangler/\n.dev.vars\n*.log\n!keep.log\n", encoding="utf-8")
+            (root / ".wrangler" / "state").mkdir(parents=True)
+            (root / ".wrangler" / "state" / "x.sqlite").write_text("x", encoding="utf-8")
+            (root / ".dev.vars").write_text("K=1", encoding="utf-8")
+            (root / "a.log").write_text("x", encoding="utf-8")
+            (root / "keep.log").write_text("x", encoding="utf-8")
+            (root / "src").mkdir()
+            (root / "src" / "m.py").write_text("x=1", encoding="utf-8")
+            rels = self._rels(mod, root)
+            self.assertIn("src/m.py", rels)
+            self.assertIn("keep.log", rels, "否定規則要照算")
+            self.assertIn(".gitignore", rels)
+            for gone in (".wrangler/state/x.sqlite", ".dev.vars", "a.log"):
+                self.assertNotIn(gone, rels)
+
+    def test_non_git_folder_unchanged(self):
+        mod = self._load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".gitignore").write_text("a.log\n", encoding="utf-8")
+            (root / "a.log").write_text("x", encoding="utf-8")
+            self.assertIn("a.log", self._rels(mod, root), "不是 git 專案就不判斷")
+
+
 if __name__ == "__main__":
     unittest.main()
 

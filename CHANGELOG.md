@@ -12,6 +12,11 @@
 - **JS runtime 沒有安裝按鈕、也認不得 Deno**：環境列文字寫「node／deno」但只檢查 node。加 `video.js_runtime`（唯一來源，檢查 yt-dlp 最低版本 Deno ≥2.3、node ≥22），環境列與 verify 共用；按鈕裝 Deno 不裝 Node：yt-dlp wiki/EJS「Deno (recommended) | Enabled by default」，Node 要另外啟用。
 - README 第 6、8 步同步。測試：test_gui_model NewDeviceFlow 6 個。尚未在全新裝置端對端驗證（要等使用者下一次新裝置測試）。
 
+## 0.14.2（2026-11-04）
+
+- **project-scan 把 .gitignore 排除的檔案也算進去**（AI-Search&Fetch 實測：`--check` 32 筆裡 7 筆是 `.wrangler/` 與 `.dev.vars`，本機跑過服務就變動，「改過 >20 檔要重跑盤點」提早觸發）。git 專案改用 `git ls-files --others --ignored --exclude-standard --directory` 判斷（巢狀 .gitignore、全域排除、否定規則都算）；不是 git 專案或 git 不能用就照舊。索引裡已有的這類檔案下次 `--check` 會列為刪除，重跑盤點後消失。
+- 測試：test_tools 的 ProjectScanGitignore：被忽略的檔與資料夾不列入、已追蹤檔照列、否定規則照算、非 git 專案照舊。
+
 ## 0.14.1（2026-11-04）
 
 - **背景任務巡檢提醒漏兩種情況**（使用者：「全域15分鐘的巡查呢？」——Stock-web 指令裡多餘的 `cat` 卡 34 分鐘，要使用者問「還在跑嗎？」才發現）。根因兩個：①指令逾時被自動移到背景時 tool_input 沒有 run_in_background，只看輸入抓不到，改連工具結果的 backgroundTaskId／「moved to the background (ID: …)」一起看；②提醒一場對話只一次，巡檢排程全部結束刪掉後再派任務就沒提醒，改成有任務 ID 就每個任務各一次（提醒句是「先 CronList，沒有才建」，不會重複建）。測試：ToolReminders 加 test_background_task_auto_moved_and_each_task。

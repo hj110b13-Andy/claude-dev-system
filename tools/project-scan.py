@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -51,10 +52,33 @@ def classify(rel: str) -> str:
     return "other"
 
 
+def git_ignored(root: Path) -> tuple[set[str], set[str]]:
+    """
+    專案 .gitignore 排除的檔案與資料夾（暫存、金鑰檔），不算專案內容；不是 git 專案或 git 不能用就回空集合。
+    用 git 判斷才吃得到巢狀 .gitignore、全域排除與否定規則，不自己解析。--directory 讓整個被忽略的資料夾只回一筆，大專案也快。
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"],
+            capture_output=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set(), set()
+    if out.returncode != 0:
+        return set(), set()
+    entries = [e for e in out.stdout.decode("utf-8", "replace").split("\0") if e]
+    return {e for e in entries if not e.endswith("/")}, {e.rstrip("/") for e in entries if e.endswith("/")}
+
+
 def walk(root: Path):
+    ignored_files, ignored_dirs = git_ignored(root)
     for dp, dns, fns in os.walk(root):
-        dns[:] = [d for d in dns if d not in EXCLUDE_DIRS and not d.startswith(".git")]
+        rel_dir = Path(dp).relative_to(root).as_posix()
+        prefix = "" if rel_dir == "." else rel_dir + "/"
+        dns[:] = [d for d in dns if d not in EXCLUDE_DIRS and not d.startswith(".git") and prefix + d not in ignored_dirs]
         for fn in fns:
+            if prefix + fn in ignored_files:
+                continue
             p = Path(dp) / fn
             try:
                 if p.is_symlink():
