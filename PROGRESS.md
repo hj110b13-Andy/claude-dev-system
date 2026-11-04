@@ -8,7 +8,7 @@
 
 ### 待辦 1：環境區全部改成一鍵安裝（使用者已提、尚未動工）
 
-- 使用者原話（2026-11-04）：「所有環境安裝的部分可不可以都用成點按鈕就直接安裝，不用再去網頁自己載、自己裝，裝的版本就挑穩定又最新的版本，你覺得如何?」我回答贊成；當時 7 天用量 99%，所以只記錄沒動工。使用者尚未回覆「確定要做」，但方向已提出，下一場直接做並回報。
+- 使用者原話（2026-11-04）：「所有環境安裝的部分可不可以都用成點按鈕就直接安裝，不用再去網頁自己載、自己裝，裝的版本就挑穩定又最新的版本，你覺得如何?」我回答贊成；當時 7 天用量 99%，所以只記錄沒動工。使用者已同意（2026-11-04：「你說的都可以」「可以，都記錄下來到時候接手可以做」），含 Claude Code 用原生安裝不用 winget、Python 選有實測的版本、Deno 與 Node 都裝；用量重置後直接做，不用再問。
 - 現況：ffmpeg、PowerShell 7、faster-whisper、Deno 已是按鈕；只有 Python、Claude Code 是「開下載頁」（`installer/cds/gui_model.py` 的 `DOWNLOAD_PAGES`，`installer/gui.py` 環境區）；git 沒有按鈕（`git` 列 action 為 None）。
 - 查證過的事實（2026-11-04）：
   - Claude Code：官方 setup 頁寫「WinGet installations do not auto-update」，`Native installations automatically update in the background`；原生安裝 `irm https://claude.ai/install.ps1 | iex`。winget 的 `Anthropic.ClaudeCode` 是 2.1.302，使用者新裝置已是 2.1.318，較舊。→ 建議用原生安裝，不用 winget。
