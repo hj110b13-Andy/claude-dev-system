@@ -6,6 +6,13 @@
 
 **本輪做完**：0.13.0～0.14.2（細節見 CHANGELOG.md）——全域系統對照 hook、行數上限自動提醒、工具後提醒、新裝置三問題（視窗開著裝的 Python 找不到、Chrome 勾選框被鎖、native host 查成 Desktop 機碼、Deno 按鈕）。
 
+### 待辦 0：補發 0.14.3（用量重置後第一件，約 5 分鐘）
+
+- 問題：`95c184c`（AI-Search&Fetch 11/4 18:32 提交，project-scan 不算 .gitignore 排除的檔）的版本也標 0.14.2，比 `v0.14.2` tag（`718831a`，18:27）晚 5 分鐘，不在任何 tag 或 Release 裡。VERSION 相同，所以其他裝置「檢查更新」不會判定有新版，拿不到這個修正；CHANGELOG 也有兩段 `## 0.14.2`。這台已安裝的是新的（verify 全部通過）。
+- 做法：VERSION 改 0.14.3，把 `95c184c` 那段 CHANGELOG 改標 0.14.3 放最上面，update、verify、push、打 tag、確認 Release 兩個附件都在。不要移動 `v0.14.2` tag。
+- 整類修法：repo CLAUDE.md「改這個 repo 時」加一條，多場對話會同時改這個 repo，改動前先 `git pull`、看 `git tag --points-at`／最新 tag；目前 VERSION 已打過 tag 就要往上加，不可沿用；可加測試或 hook 檢查「VERSION 已有 tag 但之後還有非 PROGRESS 的 commit」。
+- 已複查沒問題：`fa4bc5c`（0.14.1，Stock-web，逾時自動移背景也提醒巡檢）有 tag 與 Release。這兩個 commit 都是改 repo 再 update，沒有再直接改安裝副本。測試全過、工作樹乾淨。
+
 ### 待辦 1：環境區全部改成一鍵安裝（使用者已提、尚未動工）
 
 - 使用者原話（2026-11-04）：「所有環境安裝的部分可不可以都用成點按鈕就直接安裝，不用再去網頁自己載、自己裝，裝的版本就挑穩定又最新的版本，你覺得如何?」我回答贊成；當時 7 天用量 99%，所以只記錄沒動工。使用者已同意（2026-11-04：「你說的都可以」「可以，都記錄下來到時候接手可以做」），含 Claude Code 用原生安裝不用 winget、Python 選有實測的版本、Deno 與 Node 都裝；用量重置後直接做，不用再問。
