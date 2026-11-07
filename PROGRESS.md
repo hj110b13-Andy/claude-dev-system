@@ -7,7 +7,7 @@
 **2026-11-07 做完**（使用者：「週用量更新了，可以繼續做了…把待辦與問題都修好。」）：
 - 原待辦 0、1 全部完成並併成 v0.15.0：一鍵安裝（Python 3.14、Git、Node LTS、Claude Code 官方 stable、Deno）、Deno／Node 分兩列、hook 盤點過期計數改用 project-scan 同一套 .gitignore 判斷、發版衛生測試與 repo CLAUDE.md 規則、併入誤標 0.14.2 的 `95c184c`。原文、查證來源與數字都在 CHANGELOG.md 0.15.0；原待辦內容移到本檔最後「已完成待辦原文」。
 - 實測：這台用視窗同一個安裝函式實裝 Deno 2.9.8，PATH 不重開就補回、環境列變 ✅（原待辦 2 第一項完成）。
-- 使用者截圖的 AI-Search&Fetch 問題（圖片分析時 Gemini 三個模型 503、轉 41 秒）：在那個專案修好並推送 `97da618`，**正式站還沒部署**（`npm run deploy` 被 Claude Code 權限擋下，要使用者自己跑或允許）。細節在 AI-Search&Fetch 的 PROGRESS.md 第十六節。
+- 使用者截圖的 AI-Search&Fetch 問題（圖片分析時 Gemini 三個模型 503、轉 41 秒）：在那個專案修好並推送 `97da618`，2026-11-08 使用者允許後已部署（Worker Version aa982a3a，`/api/health` ok），剩手機再傳一次圖片驗證。（原句：正式站還沒部署——`npm run deploy` 被 Claude Code 權限擋下，要使用者自己跑或允許。）細節在 AI-Search&Fetch 的 PROGRESS.md 第十六節。
 
 ### 待辦 2：新裝置端對端確認（等使用者下次測；0.15.0 起含一鍵安裝）
 
