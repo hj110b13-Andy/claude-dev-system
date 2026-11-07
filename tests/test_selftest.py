@@ -22,6 +22,18 @@ def stream(*tool_uses, cost=0.42, text="答案"):
 
 
 class SelfTest(unittest.TestCase):
+    def test_only_accepts_commas_and_primary_sources_pass(self):
+        """0.15.1：--only pwsh,docs 被拒（使用者 11/7）；docs／pwsh 改判定一手來源，不寫死工具。"""
+        logs = []
+        self.assertEqual(st.run(only=["pwsh,docs"], list_only=True, log=logs.append), 0, logs)
+        cases = {c["id"]: c for c in st.load_cases()["cases"]}
+        real = ["Bash :: curl -s https://api.github.com/repos/yt-dlp/yt-dlp/contents/yt_dlp/extractor/bilibili.py",
+                "mcp__parallel__web_fetch :: https://requests.readthedocs.io/en/latest/user/advanced/#timeouts"]
+        self.assertTrue(st.judge(cases["docs"], real, "來源 https://")[0], "11/7 實際的一手來源查法要算通過")
+        self.assertTrue(st.judge(cases["docs"], ["mcp__context7__query-docs :: q", "mcp__deepwiki__ask_wiki_question :: q"], "來源 https://")[0])
+        self.assertFalse(st.judge(cases["docs"], ["Read :: x", "WebSearch :: requests timeout"], "來源 https://")[0], "只搜尋沒抓一手來源不算")
+        self.assertTrue(st.judge(cases["pwsh"], ["WebFetch :: https://learn.microsoft.com/powershell/x"], "來源 https://")[0])
+
     def test_cases_file_is_valid(self):
         cfg = st.load_cases()
         self.assertEqual(len(cfg["cases"]), 11)

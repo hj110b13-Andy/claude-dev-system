@@ -2,6 +2,15 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.15.1（2026-11-07）
+
+使用者貼另一台 11/5 的自我測試結果「❌ 自我測試 9/11 題通過」：pwsh「預期 ^mcp__mslearn__ 沒有出現」、docs「預期 ^mcp__context7__／^mcp__deepwiki__ 沒有出現」，三題的回答都含來源與查證過程。
+
+- **自我測試改判「有沒有查一手來源」，不寫死工具**：這台重現 docs 失敗，看報告是模型直接整頁抓 requests 官方文件（parallel web_fetch）、用 GitHub API 與 raw 檔確認 `yt_dlp/extractor/bilibili.py`，答案正確且逐字引用——判失敗的是測試本身。pwsh 這台重跑通過、另一台失敗，同樣是時好時壞。pwsh 改為 mslearn 或 learn.microsoft.com；docs 改為 context7 或 requests 官方文件頁、deepwiki 或 GitHub API／raw。只搜尋、沒抓一手來源仍判失敗（測試涵蓋）。改完兩題實際重跑都通過。
+- **規則同步**（web-quick、web-sources）：context7／mslearn 也可直接整頁抓該官方文件頁；repo 裡「哪個檔案、哪一行、目前內容」以 GitHub 本身為準（API／raw），deepwiki 是 AI 生成摘要，適合問架構。
+- **`selftest --only` 收逗號**：使用者用 `--only pwsh,docs` 被回「沒有這些題目」；原本只能 `--only pwsh --only docs`。
+- 測試：test_selftest 加逗號與一手來源判定。
+
 ## 0.15.0（2026-11-07，視窗會自動換 exe）
 
 使用者 11/4：「所有環境安裝的部分可不可以都用成點按鈕就直接安裝，不用再去網頁自己載、自己裝，裝的版本就挑穩定又最新的版本」「我覺得Deno與Node兩個都裝可以嗎?」→「你說的都可以」。11/7：「週用量更新了，可以繼續做了…把待辦與問題都修好。」

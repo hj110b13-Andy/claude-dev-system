@@ -167,6 +167,7 @@ def run(only: list[str] | None = None, list_only: bool = False, cases_path: Path
     if smoke and not only:  # 快測：selftest.json 的 smoke 清單（改規則後 10 分鐘內確認的三題）
         only = list(cfg.get("smoke") or [])
     if only:
+        only = [x.strip() for o in only for x in str(o).split(",") if x.strip()]  # 使用者 11/7 用 --only pwsh,docs 被拒
         unknown = [o for o in only if o not in {c["id"] for c in cases}]
         if unknown:
             log(f"{BAD} 沒有這些題目：{', '.join(unknown)}；可用：{', '.join(c['id'] for c in cases)}")

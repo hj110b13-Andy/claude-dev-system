@@ -13,7 +13,7 @@
 2. **文件類問題直接用文件 MCP**（比搜尋引擎準、省來回）。**必查的觸發**：問題含「哪一版開始／支不支援／有沒有這個參數／預設值／已棄用嗎」等版本、相容性、參數事實 → 即使模型有把握也要查一次並附 learn.microsoft.com／官方文件網址；答完若沒附來源，等於沒查。純概念（「什麼是閉包」）才可免查。
    **查法與引用**：先用 search 類工具（`microsoft_docs_search`、`query-docs`、`read_wiki_structure`）拿摘錄，摘錄已含答案就**不要**再 fetch 整頁（整頁文件動輒上萬字，白耗 context）；摘錄不夠才 fetch。回覆要貼**完整網址**（不是「我查了 Microsoft Learn」），關鍵句**逐字引用**；文件沒寫的事（例如「要搭配某參數」）不要寫在引用旁邊讓人以為是文件說的，要分開標「我的補充」。
    - 某程式庫／框架的 API 怎麼用、參數、版本差異 → `context7`（`resolve-library-id` 找到庫 → `query-docs`）。
-   - 某個公開 GitHub repo 的架構、某段邏輯在哪、怎麼運作 → `deepwiki`（`read_wiki_structure` → `read_wiki_contents`，或直接 `ask_wiki_question`）。
+   - 某個公開 GitHub repo 的架構、某段邏輯在哪、怎麼運作 → `deepwiki`（`read_wiki_structure` → `read_wiki_contents`，或直接 `ask_wiki_question`）。deepwiki 是 AI 生成的摘要；要回答「在哪個檔案、哪一行、目前內容」以 GitHub 本身為準（`api.github.com/repos/<owner>/<repo>/contents/<path>` 或 raw 檔），兩者擇一或並用（0.15.1）。
    - Windows、PowerShell、.NET、Azure、Office 的官方說法（例如「PowerShell 5.1 有沒有這個參數」）→ `mslearn`。
 3. 搜尋 MCP（內建搜不到、結果太薄、來源偏美國、或已撞上限時）。索引不同，互補：
    - `parallel`（`web_search`／`web_fetch`）：自建索引，回傳壓縮過的相關段落，省 token；一次可下多個查詢。
@@ -95,7 +95,7 @@ Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔�
 | 問題類型 | 第一步 | 第二步 |
 |---|---|---|
 | 某個錯誤訊息（含 traceback） | `exa`：把錯誤訊息**原句**當查詢，目標寫明「GitHub issue 或 Stack Overflow 的根因與修法」→ 直接命中 cpython／requests／claude-code 等 repo 的 issue，摘錄常含 root cause 與 workaround | `parallel` 同句再查一次；仍無 → `deepwiki` 問該 repo |
-| 某程式庫怎麼用、參數、版本差異 | `context7` | `deepwiki` 讀 repo 文件 |
+| 某程式庫怎麼用、參數、版本差異 | `context7` 或直接整頁抓官方文件 | `deepwiki` 讀 repo 文件；檔案路徑與目前內容以 GitHub API／raw 為準 |
 | Claude Code 本身（MCP 連不上、`/mcp`、hooks、設定） | `exa`／`parallel` 查 `anthropics/claude-code` issues（`site:github.com anthropics claude-code <症狀>`） | 官方文件 code.claude.com／`claude-code-guide` agent |
 | 微軟相關（PowerShell、.NET、Windows） | `mslearn` | — |
 | 某開源專案的內部邏輯 | `deepwiki` `ask_wiki_question` | 讀原始碼 |
