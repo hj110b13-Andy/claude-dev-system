@@ -8,6 +8,11 @@
   "optionalPackages": {
     "faster-whisper": "沒字幕時的本機語音辨識（離線、免費、無額度）；NVIDIA GPU 另加 nvidia-cublas-cu12 nvidia-cudnn-cu12"
   },
+  "jsRuntimeMin": {
+    "$說明": "YouTube 解挑戰用的 JS runtime 最低版本（yt-dlp wiki/EJS：Deno 2.3.0、Node 22.0.0）。唯一來源：tools/video.py 與安裝器環境列都讀這裡。",
+    "deno": "2.3.0",
+    "node": "22.0.0"
+  },
   "cacheDir": "claude-dev-system/cache/video",
   "whisperModel": "medium",
   "geminiModel": "gemini-flash-latest",

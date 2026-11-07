@@ -62,6 +62,7 @@ DEFAULTS = {
     "sleepBetweenRequests": 1,
     "autoCleanMediaDays": 7,
     "autoCleanAllDays": 30,
+    "jsRuntimeMin": {"deno": "2.3.0", "node": "22.0.0"},  # 讀不到 video.json 時的後備，正式值在 config/video.json
 }
 
 
@@ -214,11 +215,32 @@ def canonical(src: str) -> str:
 
 # ---------- yt-dlp ----------
 
+_NODE_OK = None
+
+
+def _ver(s: str) -> tuple:
+    m = re.search(r"(\d+)\.(\d+)(?:\.(\d+))?", s or "")
+    return tuple(int(x or 0) for x in m.groups()) if m else ()
+
+
+def _node_ok() -> bool:
+    """node 在 PATH 且版本 ≥ jsRuntimeMin.node（0.15.0：原本只看有沒有 node，舊版 node 也會被指定，yt-dlp 不支援）。結果快取在程序內。"""
+    global _NODE_OK
+    if _NODE_OK is None:
+        exe = shutil.which("node")
+        try:
+            v = _ver(subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=15).stdout) if exe else ()
+        except Exception:  # noqa: BLE001
+            v = ()
+        _NODE_OK = bool(v) and v >= _ver((CFG.get("jsRuntimeMin") or {}).get("node", "22.0.0"))
+    return _NODE_OK
+
+
 def ydl_opts(extra: dict | None = None) -> dict:
     o = {"quiet": True, "no_warnings": True, "noprogress": True, "sleep_interval_requests": CFG["sleepBetweenRequests"],
          "socket_timeout": 30, "retries": 2}
-    # YouTube 要用 JS runtime 解挑戰，否則缺高畫質格式、下載被限速（yt-dlp wiki/EJS）。deno 預設；沒有就用 node（≥22）。
-    if not shutil.which("deno") and shutil.which("node"):
+    # YouTube 要用 JS runtime 解挑戰，否則缺高畫質格式、下載被限速（yt-dlp wiki/EJS）。deno 預設；沒有就用 node（版本要到 video.json 的 jsRuntimeMin）。
+    if not shutil.which("deno") and _node_ok():
         o["js_runtimes"] = {"node": {}}
     if extra:
         o.update(extra)

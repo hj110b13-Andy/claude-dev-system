@@ -281,11 +281,11 @@ class App:
             lb = ttk.Label(env, text=f"{MARK[it.ok]} {it.detail}", wraplength=1000, justify="left")
             lb.grid(row=i, column=0, sticky="w")
             self.notes.append(lb)  # 讓換行寬跟著視窗（ffmpeg 長路徑原本在寬螢幕也提早斷行）
-            if it.action in ("ffmpeg", "pwsh7", "faster_whisper", "deno"):
-                txt = {"ffmpeg": "安裝 ffmpeg（winget）", "pwsh7": "安裝 PowerShell 7（MSI，會跳 UAC）", "faster_whisper": "安裝 faster-whisper（pip）", "deno": "安裝 Deno（winget）"}[it.action]
-                ttk.Button(env, text=txt, command=lambda a=it.action: self.do_install(a)).grid(row=i, column=1, sticky="e", padx=4)
-            elif it.action in gm.DOWNLOAD_PAGES:
-                ttk.Button(env, text="開下載頁", command=lambda a=it.action: webbrowser.open(gm.DOWNLOAD_PAGES[a])).grid(row=i, column=1, sticky="e", padx=4)
+            btn = gm.install_button(it.action, bool(s["env"].get("winget") and s["env"]["winget"].ok))
+            if btn and btn[0] == "install":
+                ttk.Button(env, text=btn[1], command=lambda a=it.action: self.do_install(a)).grid(row=i, column=1, sticky="e", padx=4)
+            elif btn:
+                ttk.Button(env, text="開下載頁", command=lambda u=btn[1]: webbrowser.open(u)).grid(row=i, column=1, sticky="e", padx=4)
         env.columnconfigure(0, weight=1)
 
         # 核心
@@ -691,7 +691,7 @@ class App:
         gpu = False
         if action == "faster_whisper":
             gpu = messagebox.askyesno("faster-whisper", "這台有 NVIDIA 顯卡嗎？\n是：一併裝 CUDA 套件（約 1.5GB，GPU 辨識快 8 倍）\n否：純 CPU")
-        if action == "pwsh7" and not messagebox.askyesno("PowerShell 7", "會用 winget 安裝 MSI 版並跳出 UAC，安裝後請重開 Claude Code。繼續？"):
+        if action in gm.INSTALL_CONFIRM and not messagebox.askyesno(gm.INSTALL_LABELS.get(action, action), gm.INSTALL_CONFIRM[action]):
             return
 
         def job():

@@ -255,10 +255,14 @@ def env_status(repo: Path = REPO, which=shutil.which, importer=video.default_imp
     out["ffmpeg"] = EnvItem(bool(ff), (f"ffmpeg 可用（{Path(ff).parent.name}／{Path(ff).parent.parent.name}）" if ff else "未裝（影片截圖與語音辨識需要）"), None if ff else "ffmpeg")  # 全路徑太長會撐出視窗，只顯示最後兩層
     out["pwsh"] = f_pwsh.result()
     out["winget"] = EnvItem(bool(which("winget")), "winget 可用" if which("winget") else "無 winget（安裝按鈕不可用，請手動裝）")
-    out["git"] = EnvItem(True if which("git") else None, "git 可用" if which("git") else "無 git（exe 模式不需要）")
-    js = video.js_runtime(which, run)  # 原本只看 node：裝了 Deno（yt-dlp 官方推薦）仍顯示「無」，也沒有安裝按鈕
-    out["node"] = (EnvItem(True, f"{js[0]} {'.'.join(map(str, js[1]))} 可用（YouTube 解挑戰用）") if js
-                   else EnvItem(None, "無可用的 Deno（≥2.3）或 node（≥22）（YouTube 高畫質可能缺、下載較慢）", "deno"))
+    out["git"] = EnvItem(True, "git 可用") if which("git") else EnvItem(None, "無 git（exe 模式不需要；Claude Code 在 Windows 用 Git Bash 跑指令）", "git")
+    # 0.15.0 拆成兩列、各自有按鈕（使用者 11/4：「我覺得Deno與Node兩個都裝可以嗎?」）；版本門檻同一份 jsRuntimeMin
+    mins = video.js_min()
+    for name, label, use in (("deno", "Deno", "YouTube 解挑戰優先用它"), ("node", "Node.js", "YouTube 解挑戰的備援、其他專案常用")):
+        v, low = video.runtime_version(name, which, run), mins.get(name, (0,))
+        vs, ls = ".".join(map(str, v)) if v else "", ".".join(map(str, low))
+        out[name] = (EnvItem(True, f"{label} {vs} 可用（{use}）") if v and v >= low
+                     else EnvItem(None, (f"{label} {vs} 太舊（要 ≥{ls}）" if v else f"無 {label}") + f"（{use}）", name))
     fw = f_fw.result()
     out["faster_whisper"] = EnvItem(True if fw is not None else None, f"faster-whisper {fw}" if fw is not None else "未裝（沒字幕的影片無法轉逐字稿）", None if fw is not None else "faster_whisper")
     return out
@@ -854,8 +858,40 @@ INSTALL_ACTIONS = {
     "pwsh7": ["winget", "install", "--id", "Microsoft.PowerShell", "--source", "winget", "--installer-type", "wix", "--force", "--accept-package-agreements", "--accept-source-agreements"],
     # 選 Deno 不選 Node：yt-dlp wiki/EJS「Deno (recommended) | Enabled by default」「Code is run with restricted permissions」；Node 要另外啟用
     "deno": ["winget", "install", "--id", "DenoLand.Deno", "--source", "winget", "--accept-package-agreements", "--accept-source-agreements"],
+    # 0.15.0 一鍵安裝（使用者 11/4：「所有環境安裝的部分可不可以都用成點按鈕就直接安裝…裝的版本就挑穩定又最新的版本」）
+    # Node：LTS 線，不用 Current（winget 2026-11-07 為 26.13.0）
+    "node": ["winget", "install", "--id", "OpenJS.NodeJS.LTS", "--source", "winget", "--accept-package-agreements", "--accept-source-agreements"],
+    # Python 3.14：winget 上最新的正式版（3.14.10），新裝置實測 faster-whisper 1.2.1 可用、ctranslate2 4.8.5 有 Windows cp314 套件
+    "python": ["winget", "install", "--id", "Python.Python.3.14", "--source", "winget", "--accept-package-agreements", "--accept-source-agreements"],
+    "git": ["winget", "install", "--id", "Git.Git", "--source", "winget", "--accept-package-agreements", "--accept-source-agreements"],
+    # Claude Code 用官方原生安裝的 stable 通道，不用 winget：code.claude.com/docs/en/setup「WinGet installations do not auto-update」；
+    # stable＝「typically about one week old, skipping releases with major regressions」，之後自動更新也跟 stable
+    "claude": ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+               "& ([scriptblock]::Create((irm https://claude.ai/install.ps1))) stable"],
 }
-DOWNLOAD_PAGES = {"python": "https://www.python.org/downloads/", "claude": "https://code.claude.com/docs/en/setup"}
+INSTALL_LABELS = {"ffmpeg": "安裝 ffmpeg（winget）", "pwsh7": "安裝 PowerShell 7（MSI，會跳 UAC）", "faster_whisper": "安裝 faster-whisper（pip）",
+                  "deno": "安裝 Deno（winget）", "node": "安裝 Node.js LTS（winget）", "python": "安裝 Python 3.14（winget）",
+                  "git": "安裝 Git（winget）", "claude": "安裝 Claude Code（官方，stable）"}
+INSTALL_CONFIRM = {  # 按下去前要問的（會跳 UAC、或裝完還有使用者要做的步驟）
+    "pwsh7": "會用 winget 安裝 MSI 版並跳出 UAC，安裝後請重開 Claude Code。繼續？",
+    "node": "會用 winget 安裝 Node.js LTS，可能跳出 UAC。繼續？",
+    "git": "會用 winget 安裝 Git for Windows，可能跳出 UAC。繼續？",
+    "python": "會用 winget 安裝 Python 3.14，可能跳出 UAC。裝好後這個視窗會自動找到它，不用重開。繼續？",
+    "claude": "會執行官方安裝腳本（stable 通道，之後自動更新）。裝好後要在終端機打 claude 登入一次。繼續？",
+}
+DOWNLOAD_PAGES = {"python": "https://www.python.org/downloads/", "claude": "https://code.claude.com/docs/en/setup"}  # 沒有 winget 時的備案
+
+
+def install_button(action: str | None, has_winget: bool) -> tuple[str, str] | None:
+    """環境列右邊要放什麼按鈕：("install", 文字)、("page", 網址) 或 None。需要 winget 卻沒有時退回開下載頁。"""
+    if not action:
+        return None
+    needs_winget = action in INSTALL_ACTIONS and INSTALL_ACTIONS[action][0] == "winget"
+    if action in INSTALL_LABELS and not (needs_winget and not has_winget):
+        return "install", INSTALL_LABELS[action]
+    if action in DOWNLOAD_PAGES:
+        return "page", DOWNLOAD_PAGES[action]
+    return None
 
 # winget／MSI 失敗代碼的白話說明（官方：learn.microsoft.com/troubleshoot/windows-server/application-management/msi-installation-error-1603、
 # learn.microsoft.com/intune/configmgr/tenant-attach/app-install-error-reference）

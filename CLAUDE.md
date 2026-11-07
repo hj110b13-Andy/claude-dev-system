@@ -15,4 +15,5 @@
 - 規則在 `rules/`（`core.md` 會合併進使用者的全域 CLAUDE.md，要短；細則放 `web-sources.md` 等）；安裝器在 `installer/`（只用標準庫）；工具在 `tools/`。
 - 改完：`python -m unittest discover -s tests`、更新 `config/VERSION` 與 `CHANGELOG.md`（每條寫觸發的使用者原話或測試）、本機 `update` 後 `verify`，再 commit／push。
 - **每次改 `config/VERSION` 都要發 Release**：push master 後立刻 `git tag v<版本>` 並 push tag，等 GitHub Actions 建好 exe 與 `.sha256` 再回報（`gh release view v<版本>` 確認兩個附件都在）。不可因為「只改規則、沒改視窗」就省略：exe 會比對內建版本與已安裝版本，沒有對應 Release 會一直顯示「來源比已安裝舊」或「exe 還沒建好」。（2026-11-03 使用者：「之後也都要記得，這次就有這個問題」——0.12.0 只推程式碼漏發 Release。）manifest 結構有變要 +1 `MANIFEST_SCHEMA` 並加遷移。
+- **多場對話會同時改這個 repo**（Stock-web、AI-Search&Fetch 等專案的對話也會來改）：動手前先 `git pull`；目前 `config/VERSION` 已經打過 tag（`git tag -l v<版本>` 有結果）就一定要往上加，不可沿用。`tests/test_release_hygiene.py` 會在「已發布版本之後又有改到發布內容的 commit」時失敗。（2026-11-04：18:27 發 v0.14.2，18:32 另一場又以 0.14.2 提交 project-scan 修正，不在任何 Release，其他裝置拿不到。）
 - 金鑰、`local.json`、`~/.claude.json` 永遠不進 repo。

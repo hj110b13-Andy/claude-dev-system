@@ -171,6 +171,18 @@ class Health(unittest.TestCase):
         finally:
             ug.SYS_VERSION = saved
 
+    def test_count_newer_skips_gitignored(self):
+        import subprocess
+        subprocess.run(["git", "init", "-q", str(self.proj)], check=True)
+        (self.proj / ".gitignore").write_text("docs/eval/" + chr(10) + "*.log" + chr(10), encoding="utf-8")
+        (self.proj / "docs" / "eval").mkdir(parents=True)
+        for i in range(30):
+            (self.proj / "docs" / "eval" / f"r{i}.json").write_text("{}", encoding="utf-8")
+            (self.proj / f"run{i}.log").write_text("x", encoding="utf-8")
+        (self.proj / "src.py").write_text("x=1", encoding="utf-8")
+        n, _ = ug._count_newer(str(self.proj), 0)
+        self.assertEqual(n, 2, "只算 .gitignore 和 src.py，被排除的 60 個檔不算（與 project-scan --check 同一套）")
+
     def test_compact_reinjects_and_suggests_new_session(self):
         msgs = [ug.compact_msg(str(self.proj), "sess-1") for _ in range(3)]
         self.assertTrue(all("壓縮後重新開工" in m for m in msgs))

@@ -2,6 +2,18 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.15.0（2026-11-07，視窗會自動換 exe）
+
+使用者 11/4：「所有環境安裝的部分可不可以都用成點按鈕就直接安裝，不用再去網頁自己載、自己裝，裝的版本就挑穩定又最新的版本」「我覺得Deno與Node兩個都裝可以嗎?」→「你說的都可以」。11/7：「週用量更新了，可以繼續做了…把待辦與問題都修好。」
+
+- **環境區全部一鍵安裝**：新增 Python（winget `Python.Python.3.14`：winget 上最新正式版 3.14.10，新裝置實測 faster-whisper 1.2.1 可用，ctranslate2 4.8.5 有 Windows cp314 套件）、Git（`Git.Git`）、Node.js（`OpenJS.NodeJS.LTS`，LTS 線不用 Current）、Claude Code（官方原生安裝 stable 通道，不用 winget：官方「WinGet installations do not auto-update」；stable＝「typically about one week old, skipping releases with major regressions」）。按鈕文字、安裝指令、確認訊息各集中一張表（`INSTALL_ACTIONS`／`INSTALL_LABELS`／`INSTALL_CONFIRM`），`install_button` 決定放什麼按鈕；需要 winget 卻沒有時退回開下載頁。
+- **Deno、Node 分兩列各有按鈕**：原本找到 Deno 就算通過，Node 不會出現按鈕。最低版本只放 `config/video.json` 的 `jsRuntimeMin`（Deno 2.3.0、Node 22.0.0，yt-dlp wiki/EJS），安裝器與 `tools/video.py` 都讀它；`tools/video.py` 沒有 Deno 時只在 node 版本夠才指定 node（原本只看有沒有 node）。
+- **hook 的「盤點過期」計數與 project-scan 同一套 .gitignore 判斷**：`_count_newer` 直接載入同一份安裝裡 tools/project-scan.py 的 `git_ignored`（唯一來源）。原本被排除的檔照算，Stock-web 436 個評測輸出會讓「改過 >20 檔」提早觸發。Stock-web 實測 0.1 秒。
+- **發版衛生**：repo CLAUDE.md 加「多場對話會同時改這個 repo，VERSION 已打過 tag 就要往上加」；新測試 `tests/test_release_hygiene.py`：已發布版本之後又有改到發布內容的 commit 就失敗（加入時當場抓到下面這筆）。
+- **併入：11/4 18:32 誤標 0.14.2、沒進任何 Release 的修正**（AI-Search&Fetch 提交 `95c184c`，比 v0.14.2 tag 晚 5 分鐘，其他裝置看版本相同就拿不到）：
+  - **project-scan 把 .gitignore 排除的檔案也算進去**（AI-Search&Fetch 實測：`--check` 32 筆裡 7 筆是 `.wrangler/` 與 `.dev.vars`，本機跑過服務就變動，「改過 >20 檔要重跑盤點」提早觸發）。git 專案改用 `git ls-files --others --ignored --exclude-standard --directory` 判斷（巢狀 .gitignore、全域排除、否定規則都算）；不是 git 專案或 git 不能用就照舊。索引裡已有的這類檔案下次 `--check` 會列為刪除，重跑盤點後消失。
+  - 測試：test_tools 的 ProjectScanGitignore：被忽略的檔與資料夾不列入、已追蹤檔照列、否定規則照算、非 git 專案照舊。
+
 ## 0.14.2（2026-11-04，視窗會自動換 exe）
 
 使用者在全新裝置實測：「node沒有給下載按鈕，claude in chrome要我自己在/chrome開啟才能勾選，faster-whisper第一次安裝失敗，後面關掉重開才成功。」
@@ -11,11 +23,6 @@
 - **② native host 查錯機碼（從 0.8.0 就錯）**：查的是 Claude Desktop 的 `com.anthropic.claude_browser_extension`，官方文件寫 Claude Code 是 `com.anthropic.claude_code_browser_extension`；裝了 Desktop 的機器會誤判通過，只裝 Claude Code 的永遠 ❌。改查正確機碼並確認設定檔存在。❌ 時視窗說明不用手動處理：官方「The first time you enable Chrome integration, Claude Code installs a native messaging host configuration file」，登記後重開 Chrome。
 - **JS runtime 沒有安裝按鈕、也認不得 Deno**：環境列文字寫「node／deno」但只檢查 node。加 `video.js_runtime`（唯一來源，檢查 yt-dlp 最低版本 Deno ≥2.3、node ≥22），環境列與 verify 共用；按鈕裝 Deno 不裝 Node：yt-dlp wiki/EJS「Deno (recommended) | Enabled by default」，Node 要另外啟用。
 - README 第 6、8 步同步。測試：test_gui_model NewDeviceFlow 6 個。尚未在全新裝置端對端驗證（要等使用者下一次新裝置測試）。
-
-## 0.14.2（2026-11-04）
-
-- **project-scan 把 .gitignore 排除的檔案也算進去**（AI-Search&Fetch 實測：`--check` 32 筆裡 7 筆是 `.wrangler/` 與 `.dev.vars`，本機跑過服務就變動，「改過 >20 檔要重跑盤點」提早觸發）。git 專案改用 `git ls-files --others --ignored --exclude-standard --directory` 判斷（巢狀 .gitignore、全域排除、否定規則都算）；不是 git 專案或 git 不能用就照舊。索引裡已有的這類檔案下次 `--check` 會列為刪除，重跑盤點後消失。
-- 測試：test_tools 的 ProjectScanGitignore：被忽略的檔與資料夾不列入、已追蹤檔照列、否定規則照算、非 git 專案照舊。
 
 ## 0.14.1（2026-11-04）
 

@@ -454,12 +454,37 @@ class NewDeviceFlow(unittest.TestCase):
         self.assertIsNone(gm.video.js_runtime(lambda n: n if n == "node" else None, run_for({"node": b"v20.1.0"})), "node 低於 22 不算")
         self.assertIsNone(gm.video.js_runtime(lambda n: None, run_for({})))
 
-    def test_env_row_offers_deno_button(self):
+    def test_env_rows_offer_one_click_install(self):
+        """0.15.0：Deno、Node 各一列各有按鈕；Python、git、Claude Code 也是按鈕（使用者 11/4 要全部一鍵安裝）。"""
         class R:
             stdout, returncode = b"", 1
-        it = gm.env_status(which=lambda n: None, importer=lambda m: None, ffmpeg=lambda: None, claude_status=lambda r: (False, "x"), run=lambda *a, **k: R())["node"]
-        self.assertEqual(it.action, "deno")
-        self.assertIn("deno", gm.INSTALL_ACTIONS)
+        env = gm.env_status(which=lambda n: None, importer=lambda m: None, ffmpeg=lambda: None, claude_status=lambda r: (False, "x"), run=lambda *a, **k: R())
+        for key in ("deno", "node", "git", "claude", "ffmpeg", "faster_whisper"):
+            self.assertEqual(env[key].action, key, key)
+            self.assertEqual(gm.install_button(key, True)[0], "install", key)
+        for key in ("deno", "node", "python", "git", "claude"):
+            self.assertIn(key, gm.INSTALL_ACTIONS)
+        self.assertIn("OpenJS.NodeJS.LTS", gm.INSTALL_ACTIONS["node"], "Node 用 LTS")
+        self.assertIn("Python.Python.3.14", gm.INSTALL_ACTIONS["python"])
+        self.assertNotIn("winget", gm.INSTALL_ACTIONS["claude"], "Claude Code 用官方原生安裝（winget 版不會自動更新）")
+        self.assertTrue(gm.INSTALL_ACTIONS["claude"][-1].endswith("stable"))
+        self.assertEqual(gm.install_button("python", False), ("page", gm.DOWNLOAD_PAGES["python"]), "沒有 winget 退回開下載頁")
+        self.assertEqual(gm.install_button("claude", False)[0], "install", "Claude Code 不靠 winget")
+        self.assertIsNone(gm.install_button("deno", False), "沒 winget 又沒有下載頁就不放按鈕")
+        self.assertIsNone(gm.install_button(None, True))
+
+    def test_runtime_rows_use_config_minimum(self):
+        class R:
+            def __init__(self, out):
+                self.stdout, self.returncode = out, 0
+        outs = {"deno": b"deno 2.9.8 (stable)", "node": b"v20.1.0"}
+        env = gm.env_status(which=lambda n: n if n in outs else None, importer=lambda m: None, ffmpeg=lambda: None,
+                            claude_status=lambda r: (True, "x"), run=lambda cmd, **k: R(outs.get(cmd[0], b"")))
+        self.assertTrue(env["deno"].ok)
+        self.assertIsNone(env["node"].ok)
+        self.assertIn("太舊", env["node"].detail)
+        self.assertEqual(env["node"].action, "node")
+        self.assertEqual(gm.video.js_min(), {"deno": (2, 3, 0), "node": (22, 0, 0)}, "門檻來自 config/video.json")
 
 
 class KeyTests(unittest.TestCase):

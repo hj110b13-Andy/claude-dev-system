@@ -231,13 +231,33 @@ def _pa_save(st):
         pass
 
 
+def _git_ignored(cwd):
+    """.gitignore 排除的 (檔案, 資料夾) 相對路徑集合。唯一來源：同一份安裝裡 tools/project-scan.py 的 git_ignored
+    （0.15.0：盤點 --check 已不算被排除的檔，這裡原本照算，Stock-web 436 個評測輸出會讓「盤點過期」提早觸發）。讀不到就回空集合＝照舊。"""
+    try:
+        import importlib.util
+        from pathlib import Path
+        p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "project-scan.py")
+        spec = importlib.util.spec_from_file_location("cds_project_scan", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.git_ignored(Path(cwd))
+    except Exception:
+        return set(), set()
+
+
 def _count_newer(cwd, since, limit=20000, budget=0.8):
-    """比 since（時間戳）新的檔案數，排除 PA_EXCLUDE 與點開頭的資料夾。回 (數量, 是否被截斷)。"""
+    """比 since（時間戳）新的檔案數，排除 PA_EXCLUDE、點開頭的資料夾與 .gitignore 排除的檔。回 (數量, 是否被截斷)。"""
     n = seen = 0
     t0 = time.time()
+    ign_files, ign_dirs = _git_ignored(cwd)
     for dp, dns, fns in os.walk(cwd):
-        dns[:] = [d for d in dns if d not in PA_EXCLUDE and not d.startswith(".")]
+        rel = os.path.relpath(dp, cwd).replace(os.sep, "/")
+        prefix = "" if rel == "." else rel + "/"
+        dns[:] = [d for d in dns if d not in PA_EXCLUDE and not d.startswith(".") and prefix + d not in ign_dirs]
         for fn in fns:
+            if prefix + fn in ign_files:
+                continue
             seen += 1
             try:
                 if os.path.getmtime(os.path.join(dp, fn)) > since:

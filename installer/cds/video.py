@@ -10,30 +10,47 @@ import importlib
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 from .checks import parse_ver
 from .fsio import read_json
-from .paths import Layout
+from .paths import REPO, Layout
 
 CONFIG_REL = "config/video.json"
 OK, BAD, WARN = "✅", "❌", "⚠️"
 
 
-JS_MIN = {"deno": (2, 3, 0), "node": (22, 0, 0)}  # yt-dlp wiki/EJS：Deno recommended、Enabled by default；node 要另外啟用（tools/video.py 沒有 deno 時才用）
+def js_min(repo: Path = REPO) -> dict[str, tuple[int, ...]]:
+    """YouTube 解挑戰用 JS runtime 的最低版本，順序＝優先順序（deno 先）。唯一來源：config/video.json 的 jsRuntimeMin
+    （tools/video.py 讀同一份）。yt-dlp wiki/EJS：Deno recommended、Enabled by default；node 要另外啟用。"""
+    try:
+        raw = read_json(repo / CONFIG_REL).get("jsRuntimeMin") or {}
+        got = {k: parse_ver(v) for k, v in raw.items() if not k.startswith("$") and parse_ver(v)}
+        if got:
+            return got
+    except Exception:  # noqa: BLE001
+        pass
+    return {"deno": (2, 3, 0), "node": (22, 0, 0)}
+
+
+def runtime_version(name: str, which=shutil.which, run=subprocess.run) -> tuple[int, ...] | None:
+    """某個 JS runtime 的版本；不在 PATH 或讀不到回 None。"""
+    exe = which(name)
+    if not exe:
+        return None
+    try:
+        r = run([exe, "--version"], capture_output=True, timeout=15)
+        v = parse_ver((r.stdout or b"").decode("utf-8", "replace"))
+    except Exception:  # noqa: BLE001
+        return None
+    return v if r.returncode == 0 and v else None
 
 
 def js_runtime(which=shutil.which, run=subprocess.run) -> tuple[str, tuple[int, ...]] | None:
-    """YouTube 解挑戰用的 JS runtime（唯一來源）：回 (名稱, 版本)；沒有或版本低於 yt-dlp 的最低要求回 None。deno 優先。"""
-    for name, low in JS_MIN.items():
-        exe = which(name)
-        if not exe:
-            continue
-        try:
-            r = run([exe, "--version"], capture_output=True, timeout=15)
-            v = parse_ver((r.stdout or b"").decode("utf-8", "replace"))
-        except Exception:  # noqa: BLE001
-            continue
-        if r.returncode == 0 and v and v >= low:
+    """YouTube 解挑戰實際會用的 JS runtime（唯一來源）：回 (名稱, 版本)；沒有或版本低於最低要求回 None。deno 優先。"""
+    for name, low in js_min().items():
+        v = runtime_version(name, which, run)
+        if v and v >= low:
             return name, v
     return None
 
