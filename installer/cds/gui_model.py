@@ -334,6 +334,45 @@ def read_thresholds(lay: Layout) -> dict:
 
 
 DEFAULT_TASK_CHECK = {"enabled": True, "minutes": 15}
+# 0.16.0 重型工作記憶體門檻（使用者 2026-11-09：「先設固定 3GB就好……記憶體門檻要用成視窗可更改的」）。
+# 唯一來源是 dispatch-config.json 的 resourceGate.minFreeMemGB；tools/resgate.py 讀同一個鍵。
+DEFAULT_MEM_GB = 3.0
+MEM_GB_RANGE = (1.0, 32.0)
+
+
+def valid_mem_gb(v) -> float:
+    """1～32 GB 的數字，否則 ValueError（視窗、匯入共用同一個檢查）。"""
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"記憶體門檻要是數字：{v!r}") from None
+    if isinstance(v, bool) or not (MEM_GB_RANGE[0] <= x <= MEM_GB_RANGE[1]):
+        raise ValueError(f"記憶體門檻要在 {MEM_GB_RANGE[0]:g}～{MEM_GB_RANGE[1]:g} GB：{v!r}")
+    return x
+
+
+def read_mem_gate(lay: Layout) -> float:
+    p = lay.payload / "config" / "dispatch-config.json"
+    try:
+        return valid_mem_gb((read_json(p).get("resourceGate") or {}).get("minFreeMemGB"))
+    except Exception:  # noqa: BLE001
+        return DEFAULT_MEM_GB
+
+
+def write_mem_gate(lay: Layout, gb: float) -> None:
+    """只改 resourceGate.minFreeMemGB，其餘鍵（waitMinutes、pollSeconds、說明）保留。"""
+    gb = valid_mem_gb(gb)
+    p = lay.payload / "config" / "dispatch-config.json"
+    d = read_json(p) if p.exists() else {}
+    t = d.get("resourceGate") if isinstance(d.get("resourceGate"), dict) else {}
+    t = {"$說明": t.get("$說明") or "重型工作（回測、全套測試、build、影片轉逐字稿）開跑前可用實體記憶體門檻；不足等 waitMinutes 分鐘仍不足就不跑、登記延後清單（tools/resgate.py）。",
+         **{k: v for k, v in t.items() if k != "$說明"}}
+    t["minFreeMemGB"] = gb
+    t.setdefault("waitMinutes", 10)
+    t.setdefault("pollSeconds", 60)
+    d["resourceGate"] = t
+    d["updated"] = _dt.date.today().isoformat()
+    write_json(p, d)
 DEFAULT_PROJECT_AUTO = {"autoInit": True, "autoAudit": True, "autoRefactor": False, "minSourceFiles": 10}
 
 
@@ -498,6 +537,7 @@ def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.de
         "usage": read_usage(lay),
         "thresholds": read_thresholds(lay) if m else dict(DEFAULT_THRESHOLDS),
         "task_check": read_task_check(lay) if m else dict(DEFAULT_TASK_CHECK),
+        "mem_gb": read_mem_gate(lay) if m else DEFAULT_MEM_GB,
         "project_auto": read_project_auto(lay) if m else dict(DEFAULT_PROJECT_AUTO),
         "chrome": {"extension": chrome_extension_installed(), "native_host": chrome_native_host_registered(),
                    "default_enabled": chrome_default_enabled(lay)},
@@ -524,6 +564,7 @@ class Form:
     usage_guard: bool = True
     source_guard: bool = True                          # Stop hook：回覆含年份／數字卻沒「來源」段就退回補一次（local.json sourceGuard）
     task_check: dict = field(default_factory=lambda: dict(DEFAULT_TASK_CHECK))
+    mem_gb: float = DEFAULT_MEM_GB                     # 重型工作記憶體門檻（GB）
     project_auto: dict = field(default_factory=lambda: dict(DEFAULT_PROJECT_AUTO))
 
 
@@ -532,6 +573,7 @@ def form_from_state(state: dict) -> Form:
     f.usage_guard = state["hooks"]["usage_guard_pref"]
     f.source_guard = state["hooks"].get("source_guard_pref", True)
     f.task_check = dict(state.get("task_check") or DEFAULT_TASK_CHECK)
+    f.mem_gb = float(state.get("mem_gb", DEFAULT_MEM_GB))
     f.project_auto = dict(state.get("project_auto") or DEFAULT_PROJECT_AUTO)
     f.web_enabled = state["web"]["enabled"]
     f.servers = {n: s["wanted"] for n, s in state["web"]["servers"].items()}
@@ -621,6 +663,8 @@ def diff(state: dict, form: Form) -> list[Change]:
     tc0 = state.get("task_check") or DEFAULT_TASK_CHECK
     if bool(form.task_check.get("enabled")) != bool(tc0["enabled"]) or int(form.task_check.get("minutes", tc0["minutes"])) != int(tc0["minutes"]):
         ch.append(Change("task_check", "背景任務巡檢 → " + (f"每 {int(form.task_check['minutes'])} 分鐘" if form.task_check.get("enabled") else "關閉")))
+    if float(form.mem_gb) != float(state.get("mem_gb", DEFAULT_MEM_GB)):
+        ch.append(Change("mem_gate", f"重型工作記憶體門檻：{float(state.get('mem_gb', DEFAULT_MEM_GB)):g} GB → {float(form.mem_gb):g} GB"))
     pa0 = state.get("project_auto") or DEFAULT_PROJECT_AUTO
     pa_changed = [k for k in ("autoInit", "autoAudit", "autoRefactor", "minSourceFiles") if form.project_auto.get(k, pa0[k]) != pa0[k]]
     if pa_changed:
@@ -714,6 +758,9 @@ def apply_form(lay: Layout, python: str, state: dict, form: Form, log, repo: Pat
     if any(c.kind == "thresholds" for c in changes):
         write_thresholds(lay, float(form.thresholds["fiveHour"]), float(form.thresholds["sevenDay"]))
         log(f"用量門檻寫入 {form.thresholds['fiveHour']}／{form.thresholds['sevenDay']}")
+    if any(c.kind == "mem_gate" for c in changes):
+        write_mem_gate(lay, float(form.mem_gb))
+        log(f"重型工作記憶體門檻寫入 {float(form.mem_gb):g} GB")
     if any(c.kind == "task_check" for c in changes):
         write_task_check(lay, bool(form.task_check.get("enabled")), int(form.task_check.get("minutes", DEFAULT_TASK_CHECK["minutes"])))
         log(f"背景任務巡檢寫入：{'每 ' + str(int(form.task_check['minutes'])) + ' 分鐘' if form.task_check.get('enabled') else '關閉'}")
@@ -974,6 +1021,7 @@ def export_profile(state: dict, form: Form, include_keys: bool = False, current_
          "video_enabled": form.video_enabled, "key_modes": dict(form.key_modes), "thresholds": dict(form.thresholds),
          "download_dir": form.download_dir, "chrome_default_enabled": form.chrome_default_enabled, "usage_guard": form.usage_guard,
          "source_guard": form.source_guard, "task_check": dict(form.task_check), "project_auto": dict(form.project_auto),
+         "mem_gb": float(form.mem_gb),
          "key_notes": {n: (form.key_notes.get(n) if form.key_notes.get(n) is not None else k.get("account", "")) for n, k in state["keys"].items()
                        if (form.key_notes.get(n) if form.key_notes.get(n) is not None else k.get("account", ""))}}
     if include_keys:
@@ -998,6 +1046,8 @@ def import_profile(form: Form, data: dict) -> Form:
     tc = data.get("task_check")
     if isinstance(tc, dict) and "minutes" in tc and not (isinstance(tc["minutes"], (int, float)) and tc["minutes"] >= 1):
         raise ValueError(f"設定檔的巡檢分鐘數不合法：{tc['minutes']!r}")
+    if "mem_gb" in data:
+        f.mem_gb = valid_mem_gb(data["mem_gb"])
     for k in ("web_enabled", "video_enabled", "usage_guard", "source_guard"):
         if k in data and not isinstance(data[k], bool):
             raise ValueError(f"設定檔的 {k} 必須是 true／false")

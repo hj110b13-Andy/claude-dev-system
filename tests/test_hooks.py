@@ -67,6 +67,20 @@ class SourceGuard(unittest.TestCase):
         transcript(self.tp, [("user", "AI 幻覺的原因是什麼？"), ("assistant", LONG + "它只是在接著寫最像的字。")])
         self.assertIsNone(self.run_hook(), "沒有數字不擋")
 
+    def test_local_data_counts_as_source(self):
+        """0.16.0：Stock-web 11/8～11/9 數字全來自本機回測報告仍被退回 3 次。"""
+        q = "這個出場規則回測結果怎麼樣？"
+        body = LONG + "年化 12.3%，2025 年回落 8%。"
+        for tail in ("（docs/research/exit-2026-11-08.md）", "見 .cache/backtest/run-s1.log", "scripts/backtest/exitStrategy.ts 跑出",
+                     "報告 exit-report.md", "（本站資料）", "以上為本機報告數字", "docs\\research\\x.md"):
+            transcript(self.tp, [("user", q), ("assistant", body + tail)])
+            self.assertIsNone(self.run_hook(), tail)
+        # 反例：沒有本機路徑也沒有標記 → 仍退回；只提到資料夾名稱、網域不算
+        for tail in ("", "根據新聞報導。", "可參考 docs 資料夾。", "見 example.com 說明。", "版本 3.14 更新。"):
+            transcript(self.tp, [("user", q), ("assistant", body + tail)])
+            out = self.run_hook()
+            self.assertIsNotNone(out, tail)
+
     def test_last_turn_only_and_disabled(self):
         transcript(self.tp, [("user", "台北 101 幾公尺？"), ("assistant", LONG + "508 公尺。"),
                              ("user", "謝謝，再整理一下重點"), ("assistant", LONG + "重點是 508 公尺。")])
@@ -128,12 +142,22 @@ class Health(unittest.TestCase):
             {"kind": "cycle", "files": ["a", "b"], "detail": "x"}]}), encoding="utf-8")
         (self.proj / ".claude" / "dispatch-config.json").write_text(json.dumps({"projectAutomation": {"bigFileExceptions": {
             "scripts/once.ts": "一次性回填，不再修改", "scripts/backtest/exitStrategy.ts": " "}}}), encoding="utf-8")
+        (self.proj / "scripts" / "backtest").mkdir(parents=True)
+        es = self.proj / "scripts" / "backtest" / "exitStrategy.ts"
+        es.write_text("x;" + chr(10) * 1000, encoding="utf-8")
+        (self.proj / "scripts" / "once.ts").write_text("x;" + chr(10) * 900, encoding="utf-8")
         probs = ug.project_health(str(self.proj))
         big = [p for p in probs if "行數上限" in p]
         self.assertEqual(len(big), 1, probs)
         self.assertIn("exitStrategy.ts", big[0], "原因空白不算例外")
+        self.assertIn("現在 1000 行", big[0], "報實際行數，不報索引裡的舊數字")
         self.assertNotIn("once.ts", big[0], "有寫原因的例外不提醒")
         self.assertIn("cds-modularize", big[0])
+        # 0.16.0：Stock-web exitStrategy.ts 已拆成 26 行，索引沒重跑仍一直報 6588 行
+        es.write_text("x;" + chr(10) * 26, encoding="utf-8")
+        self.assertFalse(any("行數上限" in p for p in ug.project_health(str(self.proj))), "已不超標不報")
+        es.unlink()
+        self.assertFalse(any("行數上限" in p for p in ug.project_health(str(self.proj))), "檔案已不在不報")
 
     def test_progress_kb_limit_and_per_session(self):
         # Stock-web 2026-11-03：PROGRESS.md 510 行卻 355 KB，只看行數抓不到
@@ -162,12 +186,32 @@ class Health(unittest.TestCase):
             ver.write_text("0.14.0", encoding="utf-8")
             m = ug.align_msg(str(self.proj), "s4")
             self.assertIn("從 0.13.0 更新到 0.14.0", m)
+            self.assertNotIn("過時條文", m, "沒寫死 pull --rebase 不提")
             ver.write_text("0.15.0", encoding="utf-8")
             self.assertIsNone(ug.align_msg(str(self.proj), "s5", mark_only=True), "init／audit 那則只記錄")
             self.assertIsNone(ug.align_msg(str(self.proj), "s6"))
             (self.proj / ".claude" / "dispatch-config.json").write_text(json.dumps({"projectAutomation": {"alignOnUpdate": False}}), encoding="utf-8")
             ver.write_text("0.16.0", encoding="utf-8")
             self.assertIsNone(ug.align_msg(str(self.proj), "s7"), "專案可關閉")
+        finally:
+            ug.SYS_VERSION = saved
+
+    def test_align_points_out_hardcoded_pull_rebase(self):
+        """0.16.0：Stock-web CLAUDE.md 寫死「push 前 git pull --rebase」，11/8 rebase 把多個 merge 拆成直線、卡衝突。"""
+        ver = self.tmp / "VERSION"
+        saved = ug.SYS_VERSION
+        ug.SYS_VERSION = str(ver)
+        try:
+            ver.write_text("0.16.0", encoding="utf-8")
+            (self.proj / "CLAUDE.md").write_text("規則" + chr(10) + "- push 前 `git pull --rebase`；" + chr(10), encoding="utf-8")
+            sk = self.proj / ".claude" / "skills" / "push-gate"
+            sk.mkdir(parents=True)
+            (sk / "SKILL.md").write_text("ok" + chr(10) + "git pull --rebase=merges 可以" + chr(10) + "git pull -r origin main" + chr(10), encoding="utf-8")
+            m = ug.align_msg(str(self.proj), "s1")
+            self.assertIn("CLAUDE.md:2", m)
+            self.assertIn(".claude/skills/push-gate/SKILL.md:3", m)
+            self.assertNotIn("SKILL.md:2", m, "--rebase=merges 是對的寫法")
+            self.assertIn("--no-rebase", m)
         finally:
             ug.SYS_VERSION = saved
 
@@ -286,3 +330,86 @@ class ToolReminders(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SessionUpkeep(unittest.TestCase):
+    """0.16.0：殘留程序（C）、延後工作（E）、對話暫存（I）。全部節流、只提醒。"""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="cds-upkeep-"))
+        self._saved = (ug.HOME, ug.STATE_DIR, ug.PA_STATE, ug.CONFIG, ug.DEFERRED, dict(ug._TOOL_CACHE))
+        ug.HOME = str(self.tmp / "home")
+        ug.STATE_DIR = str(self.tmp / "state")
+        ug.PA_STATE = str(self.tmp / "state" / "project-auto.json")
+        ug.CONFIG = str(self.tmp / "no-global.json")
+        ug.DEFERRED = str(self.tmp / "state" / "deferred-jobs.json")
+        self.proj = self.tmp / "proj"
+        (self.proj / ".claude").mkdir(parents=True)
+
+    def tearDown(self):
+        ug.HOME, ug.STATE_DIR, ug.PA_STATE, ug.CONFIG, ug.DEFERRED, cache = self._saved
+        ug._TOOL_CACHE.clear()
+        ug._TOOL_CACHE.update(cache)
+
+    def test_proc_msg_throttled_once_per_pid(self):
+        import types
+        calls = []
+        groups = [{"pid": 4242, "name": "bash.exe", "minutes": 300, "orphan": False, "children": [{"pid": 5, "name": "tail.exe", "cmd": "tail"}],
+                   "cmd": "until [ $(grep -c FULL run-s1.log) -ge 13 ]; do sleep 10; done"}]
+
+        def sl(mins, cwd):
+            calls.append(mins)
+            return list(groups)
+        fake = types.SimpleNamespace(session_leftovers=sl, fmt=lambda g: "PID " + ",".join(str(x["pid"]) for x in g))
+        ug._TOOL_CACHE["procs"] = fake
+        st = {}
+        m = ug.proc_msg(str(self.proj), "s1", st, now=1000.0)
+        self.assertIn("殘留程序", m)
+        self.assertIn("4242", m)
+        self.assertIn("不要自動結束", m)
+        self.assertEqual(calls, [60.0], "門檻預設 60 分鐘")
+        self.assertIsNone(ug.proc_msg(str(self.proj), "s1", st, now=1000.0 + 60), "10 分鐘內不再查")
+        self.assertEqual(len(calls), 1)
+        self.assertIsNone(ug.proc_msg(str(self.proj), "s1", st, now=1000.0 + 700), "同一個 PID 只提醒一次")
+        self.assertEqual(len(calls), 2)
+        groups.append({**groups[0], "pid": 4343})
+        self.assertIn("4343", ug.proc_msg(str(self.proj), "s1", st, now=1000.0 + 1400))
+        (self.proj / ".claude" / "dispatch-config.json").write_text(json.dumps({"procCheck": {"enabled": False}}), encoding="utf-8")
+        self.assertIsNone(ug.proc_msg(str(self.proj), "s2", {}, now=5000.0), "可關閉")
+
+    def test_deferred_hint_and_msg(self):
+        import types
+        self.assertEqual(ug._deferred_hint(), "", "清單空的不提")
+        Path(ug.DEFERRED).parent.mkdir(parents=True, exist_ok=True)
+        Path(ug.DEFERRED).write_text(json.dumps({"items": [{"id": 3, "project": "C:/p", "desc": "回測 s1", "rerun": "npm run bt"},
+                                                           {"id": 4, "project": "C:/p", "desc": "build"}]}, ensure_ascii=False), encoding="utf-8")
+        self.assertIn("延後清單有 2 項", ug._deferred_hint())
+        free = [2.0]
+        ug._TOOL_CACHE["resgate"] = types.SimpleNamespace(load_cfg=lambda cwd: {"minFreeMemGB": 3.0},
+                                                          enough=lambda cfg: (free[0] >= 3.0, free[0], 3.0))
+        st = {}
+        self.assertIsNone(ug.deferred_msg(str(self.proj), "s1", st, now=10_000.0), "記憶體還不夠不提醒")
+        free[0] = 4.0
+        m = ug.deferred_msg(str(self.proj), "s1", st, now=10_000.0)
+        self.assertIn("#3", m)
+        self.assertIn("回測 s1", m)
+        self.assertIn("跑一個再查一次", m)
+        self.assertIsNone(ug.deferred_msg(str(self.proj), "s1", st, now=10_100.0), "10 分鐘內只一次")
+        # 背景任務巡檢提醒也帶延後清單
+        r = ug.tool_reminders({"tool_name": "Agent", "tool_input": {"prompt": "x"}, "session_id": "s9", "cwd": str(self.proj)})
+        self.assertTrue(any("延後清單有 2 項" in x for x in r), r)
+
+    def test_temp_msg_weekly(self):
+        root = self.tmp / "claude"
+        (root / "abc" / "s1").mkdir(parents=True)
+        (root / "abc" / "s1" / "big.bin").write_bytes(b"x" * 5000)
+        (self.proj / ".claude" / "dispatch-config.json").write_text(json.dumps({"cleanup": {"claudeTempWarnGB": 0.000001, "remindDays": 7}}), encoding="utf-8")
+        st = {}
+        m = ug.temp_msg(str(self.proj), st, now=1_000_000.0, root=str(root))
+        self.assertIn("cleanup.py --only temp", m)
+        self.assertIn("只提醒", m)
+        self.assertIsNone(ug.temp_msg(str(self.proj), st, now=1_000_000.0 + 2 * 86400, root=str(root)), "7 天內不再提醒")
+        self.assertIsNotNone(ug.temp_msg(str(self.proj), st, now=1_000_000.0 + 8 * 86400, root=str(root)))
+        (self.proj / ".claude" / "dispatch-config.json").write_text(json.dumps({"cleanup": {"claudeTempWarnGB": 1}}), encoding="utf-8")
+        self.assertIsNone(ug.temp_msg(str(self.proj), {}, now=1.0, root=str(root)), "沒超過不提醒")
+        self.assertTrue((root / "abc" / "s1" / "big.bin").exists(), "只提醒不刪")

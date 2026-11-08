@@ -1,5 +1,11 @@
 # claude-dev-system 交接紀錄
 
+## 2026-11-09：v0.16.0（Stock-web 對話派工，A～I 全做，E 照使用者決定）
+
+- 做了：project-scan 不再把 worktree／.next／junction 算進依賴圖、讀 tsconfig 別名、每檔只讀一次（Stock-web 9.2 秒→1.8 秒）；健康檢查比對實際行數；新工具 procs.py（殘留程序）、resgate.py（記憶體閘門＋延後清單，門檻 resourceGate 3 GB、視窗可改）、cleanup.py（安全清理，預設只列清單）；查證守門認本機路徑；git 推送前同步規則與對照提醒點名寫死 `git pull --rebase`；對話暫存每 7 天提醒；派工固定三條款。細節、原話、數字在 CHANGELOG 0.16.0。
+- 驗證：`py -3 -m unittest discover -s tests`（137 項，1 項發版衛生在打 tag 前略過）、`install.py update --with-web --with-video`、`verify` 全部通過；hook 量測 PostToolUse +4 ms、UserPromptSubmit +5 ms（中位數）。
+- 沒做：E 以外沒有遺留。這台安裝的 dispatch-config.json 是使用者改過的版本（update 保留），沒有新的 resourceGate／procCheck／cleanup 段，工具用內建預設（同出廠值）；視窗改記憶體門檻時會寫入。Stock-web 兩個 skill（progress-handoff、push-gate-deploy）仍寫死 `git pull --rebase`，下次 Stock-web 對話的【全域系統對照】會點名。
+
 ## 接手狀態（2026-11-07）
 
 **已發布**：v0.15.1（exe 與 .sha256 都在）。0.15.1＝使用者貼另一台自我測試 9/11：pwsh、docs 改判「有沒有查一手來源」不寫死工具，兩題這台重跑都通過；細節見 CHANGELOG。另一台下次跑全套 11 題確認。工作樹乾淨，沒有未完成的改動或 patch，沒有背景任務。

@@ -326,11 +326,21 @@ def _big_files(cwd, idx):
         return ("盤點索引是舊版掃描（大檔檢查沒算 scripts/、tools/ 底下的研究／回測腳本）→ 重跑 "
                 "`py -3 ~/.claude/claude-dev-system/tools/project-scan.py .` 更新索引與 docs/PROJECT-INVENTORY.md，再看有沒有超過行數上限的檔")
     ex = big_file_exceptions(cwd)
-    big = [p for p in d.get("problems") or [] if p.get("kind") == "big-file" and p.get("file") not in ex]
+    lim = int(d.get("maxLines") or 800)
+    big = []
+    # 0.16.0：報之前比對實際行數——索引是舊的時候會一直報已拆掉的檔（Stock-web 11/8～11/9：exitStrategy.ts 已拆成 26 行，
+    # 健康檢查仍報「6588 行 > 800」）。檔案不在或已不超標就不報；還超標的報現在的行數。最多看 20 個，不拖慢 hook。
+    for p in [p for p in d.get("problems") or [] if p.get("kind") == "big-file" and p.get("file") not in ex][:20]:
+        fp = os.path.join(cwd, p["file"])
+        if not os.path.isfile(fp):
+            continue
+        n = _lines(fp)
+        if n > lim:
+            big.append(f"{p['file']}（現在 {n} 行 > {lim}{'（腳本）' if '腳本' in str(p.get('detail', '')) else ''}）")
     if not big:
         return None
-    shown = "、".join(f"{p['file']}（{p.get('detail', '')}）" for p in big[:5]) + (f" 等 {len(big)} 個" if len(big) > 5 else "")
-    return (f"超過行數上限 {d.get('maxLines', 800)} 行、且不在例外清單的檔：{shown} → 照 skill `cds-modularize`（C 逐模組＋保護網）排進待辦拆檔，"
+    shown = "、".join(big[:5]) + (f" 等 {len(big)} 個" if len(big) > 5 else "")
+    return (f"超過行數上限 {lim} 行、且不在例外清單的檔：{shown} → 照 skill `cds-modularize`（C 逐模組＋保護網）排進待辦拆檔，"
             "並把行數閘門測試的範圍擴到這些目錄；確定是一次性不再修改的才寫進 `.claude/dispatch-config.json` 的 "
             "`projectAutomation.bigFileExceptions`（檔案→原因）。這一項現在要做的是：列進交接紀錄待辦、告訴使用者並提出拆檔時程；"
             "拆檔本身屬大工程，使用者同意後才開拆")
@@ -496,6 +506,38 @@ def _minor(v):
         return None
 
 
+# 0.16.0：全域規則改過、專案規則裡常寫死的舊條文——對照時直接點名檔案與行號，不靠 Claude 自己翻到。
+# (正規式, 說明)；新增已知過時條文就加一列。
+STALE_RULES = [
+    (re.compile(r"git\s+pull\s+(?:--rebase(?!=merges)\b|-r\b)"),
+     "寫死 `git pull --rebase`：本機有 merge commit（多 agent 合併）時會把 merge 拆成直線、卡衝突、分支 SHA 全變"
+     "（Stock-web 2026-11-08）→ 改成「本機有 merge commit 用 `git pull --no-rebase`（或 `--rebase=merges`），沒有才 `--rebase`」（全域 workflow.md〈推送前同步〉）"),
+]
+STALE_RULE_FILES = ("CLAUDE.md", "AGENTS.md", os.path.join(".claude", "skills", "*", "SKILL.md"), os.path.join("docs", "claude-rules", "*.md"))
+
+
+def stale_rule_hits(cwd, limit=8):
+    """專案規則檔裡命中 STALE_RULES 的 (相對路徑:行號, 說明)；最多 limit 筆、每檔 1 MB 以內。"""
+    import glob
+    out = []
+    for pat in STALE_RULE_FILES:
+        for fp in sorted(glob.glob(os.path.join(cwd, pat)))[:60]:
+            try:
+                if os.path.getsize(fp) > 1_000_000:
+                    continue
+                with open(fp, encoding="utf-8", errors="replace") as f:
+                    lines = f.read().splitlines()
+            except OSError:
+                continue
+            for i, ln in enumerate(lines, 1):
+                for rx, why in STALE_RULES:
+                    if rx.search(ln):
+                        out.append((os.path.relpath(fp, cwd).replace(os.sep, "/") + f":{i}", why))
+                        if len(out) >= limit:
+                            return out
+    return out
+
+
 def align_msg(cwd, session_id=None, mark_only=False):
     """回要注入的字串或 None。條件：算專案、有 CLAUDE.md、alignOnUpdate、已安裝版本的主.次版號 ≠ 這個資料夾上次記錄的。
     mark_only=True：只記錄版本不注入（同一則已經在跑 init／audit，那兩個本來就照最新規則做）。"""
@@ -535,9 +577,19 @@ def align_msg(cwd, session_id=None, mark_only=False):
                 "每項寫根據哪條規則、證據、要改的檔與預估成本。只改文件／設定且可逆的，答完原問題後直接做完再交代；"
                 "動到程式行為、系統排程或要花大額度的先問一次。都不用改就一句話「已對照 " + ver + "，無須調整」。"
                 "要改全域系統本身時改 claude-dev-system repo 再 update，不要直接改 `~/.claude/claude-dev-system/` 底下的安裝副本"
-                "（改過的檔 update 會保留不覆蓋，之後新版都裝不上）。")
+                "（改過的檔 update 會保留不覆蓋，之後新版都裝不上）。" + _stale_rules_text(c))
     except Exception:
         return None
+
+
+def _stale_rules_text(c):
+    hits = stale_rule_hits(c)
+    if not hits:
+        return ""
+    whys = {}
+    for loc, why in hits:
+        whys.setdefault(why, []).append(loc)
+    return "已偵測到要改的過時條文：" + "；".join(f"{'、'.join(locs)}：{why}" for why, locs in whys.items()) + "。"
 
 
 # ---------- 工具後提醒（0.14.0，PostToolUse）----------
@@ -662,7 +714,7 @@ def tool_reminders(payload):
             en, mins = _task_check(cwd)
             if en and once("taskcheck|" + tid if tid else "taskcheck"):
                 out.append(f"【背景任務巡檢（hook）】剛派出背景任務，taskCheck.enabled=true → 先 `CronList`，這場對話還沒有巡檢排程就用 `CronCreate` 建每 {mins} 分鐘一次，"
-                           "prompt 用 core.md「背景任務巡檢」那句固定文字；全部結束就 `CronDelete`。子 agent 忽略此則。")
+                           "prompt 用 core.md「背景任務巡檢」那句固定文字；全部結束就 `CronDelete`。子 agent 忽略此則。" + _deferred_hint())
         if name in ("Bash", "PowerShell"):
             m = REMIND_GIT.search(str(ti.get("command") or ""))
             if m and once("git|" + m.group(0)):
@@ -677,6 +729,184 @@ def tool_reminders(payload):
         return []
 
 
+# ---------- 0.16.0：殘留程序、延後工作、對話暫存（UserPromptSubmit／PostToolUse，全部節流）----------
+_TOOL_CACHE = {}
+
+
+def _tool_mod(name):
+    """載入同一份安裝裡的 tools/<name>.py（唯一來源，不在 hook 複製一份）；只在真的要用時才載入。"""
+    m = _TOOL_CACHE.get(name)
+    if m is None:
+        import importlib.util
+        p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", name + ".py")
+        spec = importlib.util.spec_from_file_location("cds_tool_" + name.replace("-", "_"), p)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        _TOOL_CACHE[name] = m
+    return m
+
+
+def _section(cwd, name, defaults):
+    """dispatch-config.json 的某一段：全域，再專案（cwd 往上找）覆蓋；只收與預設同型別的值。"""
+    out = dict(defaults)
+    for path in (CONFIG, find_project_config(cwd)):
+        if not path:
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                t = (json.load(f) or {}).get(name) or {}
+        except Exception:
+            continue
+        for k, v in defaults.items():
+            x = t.get(k)
+            if isinstance(v, bool):
+                if isinstance(x, bool):
+                    out[k] = x
+            elif isinstance(x, (int, float)) and not isinstance(x, bool) and x >= 0:
+                out[k] = x
+    return out
+
+
+DEFERRED = os.path.join(STATE_DIR, "deferred-jobs.json")
+
+
+def _deferred_items():
+    """延後清單（tools/resgate.py 寫的唯一一份）；讀不到回 []。"""
+    try:
+        with open(DEFERRED, encoding="utf-8") as f:
+            items = (json.load(f) or {}).get("items") or []
+        return [x for x in items if isinstance(x, dict)]
+    except Exception:
+        return []
+
+
+def _deferred_hint():
+    items = _deferred_items()
+    if not items:
+        return ""
+    first = items[0]
+    return (f"另外延後清單有 {len(items)} 項「記憶體不足、沒有執行」的工作（最早：#{first.get('id')} {first.get('desc', '')}）"
+            "：巡檢與每次有 agent／背景任務完成時先跑 `py -3 ~/.claude/claude-dev-system/tools/resgate.py next`，記憶體夠就依登記順序開跑，跑一個再查一次。")
+
+
+def deferred_msg(cwd, session_id, st, now=None, every=600):
+    """UserPromptSubmit（含 agent 完成通知那一輪）：延後清單有項目、而且現在記憶體夠 → 提醒依登記順序開跑。同一場對話最多每 10 分鐘一次。"""
+    try:
+        items = _deferred_items()
+        if not items:
+            return None
+        now = now or time.time()
+        key = "deferred|" + str(session_id or "-")
+        if now - float(st.get(key, 0)) < every:
+            return None
+        rg = _tool_mod("resgate")
+        ok, free, need = rg.enough(rg.load_cfg(cwd))
+        if not ok:
+            return None
+        st[key] = now
+        x = items[0]
+        return (f"【延後工作（hook）】延後清單有 {len(items)} 項之前「記憶體不足、沒有執行」的工作，現在可用記憶體 "
+                f"{'量不到' if free is None else f'{free:.1f} GB'} ≥ {need:g} GB → 依登記順序開跑第一項 #{x.get('id')}"
+                f"（{x.get('project', '')}：{x.get('desc', '')}；重跑：{x.get('rerun') or '見原派工'}）：重派或 SendMessage 喚回原 agent，"
+                f"開跑後 `resgate.py done {x.get('id')}`，跑一個再查一次記憶體。子 agent 忽略此則。")
+    except Exception:
+        return None
+
+
+PROC_DEFAULTS = {"enabled": True, "minMinutes": 60, "everyMinutes": 10}
+
+
+def proc_msg(cwd, session_id, st, now=None):
+    """這場對話的工具指令開出、跑超過 minMinutes 分鐘的程序（Stock-web 2026-11-08 until／tail 迴圈空轉到隔天）。
+    每場對話每 everyMinutes 分鐘最多查一次（查一次約 10～30 ms）；同一個 PID 只提醒一次；只提醒，不結束程序。"""
+    try:
+        cfg = _section(cwd, "procCheck", PROC_DEFAULTS)
+        if not cfg["enabled"]:
+            return None
+        now = now or time.time()
+        key = "procs|" + str(session_id or "-")
+        rec = st.get(key) if isinstance(st.get(key), dict) else {}
+        if now - float(rec.get("at", 0)) < float(cfg["everyMinutes"]) * 60:
+            return None
+        pr = _tool_mod("procs")
+        groups = pr.session_leftovers(float(cfg["minMinutes"]), cwd)
+        seen = set(rec.get("seen") or [])
+        new = [g for g in groups if g["pid"] not in seen]
+        st[key] = {"at": now, "seen": sorted(seen | {g["pid"] for g in groups})[-200:]}
+        if not new:
+            return None
+        return (f"【殘留程序（hook）】這場對話的工具指令開出、已跑超過 {cfg['minMinutes']:g} 分鐘的程序：{pr.fmt(new)}。"
+                "對照仍在跑的背景任務與 agent：屬於已結束的 agent、已交報告的任務（例如 until／while 等待迴圈、tail、沒人用的伺服器）就是殘留 → "
+                "告訴使用者 PID 與命令、請使用者決定要不要結束（同意後只依 PID 結束），不要自動結束、不可整批結束 node／bash；仍在用的就忽略。"
+                "子 agent：是你自己開的就在交報告前結束。")
+    except Exception:
+        return None
+
+
+TEMP_DEFAULTS = {"claudeTempWarnGB": 2, "remindDays": 7}
+
+
+def _dir_size_until(root, limit_bytes, budget=0.5):
+    """不跟隨連結地加總大小；超過 limit 或時間用完就停。回 (位元組, 是否算完)。"""
+    total, stack, t0 = 0, [root], time.time()
+    is_link = None
+    try:
+        is_link = _tool_mod("project-scan").is_link_dir
+    except Exception:
+        is_link = lambda p: os.path.islink(p) or bool(getattr(os.path, "isjunction", lambda _p: False)(p))  # noqa: E731
+    while stack:
+        if time.time() - t0 > budget:
+            return total, False
+        d = stack.pop()
+        try:
+            it = os.scandir(d)
+        except OSError:
+            continue
+        with it:
+            for e in it:
+                try:
+                    if e.is_symlink() or is_link(e.path):
+                        continue
+                    if e.is_dir(follow_symlinks=False):
+                        stack.append(e.path)
+                    else:
+                        total += e.stat(follow_symlinks=False).st_size
+                except OSError:
+                    continue
+                if total >= limit_bytes:
+                    return total, True
+    return total, True
+
+
+def temp_msg(cwd, st, now=None, root=None):
+    """Claude 對話暫存（<TEMP>/claude）超過 claudeTempWarnGB → 每 remindDays 天最多提醒一次可跑 cleanup.py；只提醒不刪。
+    每天最多量一次（0.5 秒內），Stock-web 2026-11-08 累積到 3.8 GB。"""
+    try:
+        import tempfile
+        cfg = _section(cwd, "cleanup", TEMP_DEFAULTS)
+        if not cfg["claudeTempWarnGB"]:
+            return None
+        now = now or time.time()
+        rec = st.get("tempwarn") if isinstance(st.get("tempwarn"), dict) else {}
+        if now - float(rec.get("warnedAt", 0)) < float(cfg["remindDays"]) * 86400 or now - float(rec.get("checkedAt", 0)) < 86400:
+            return None
+        root = root or os.path.join(tempfile.gettempdir(), "claude")
+        rec["checkedAt"] = now
+        st["tempwarn"] = rec
+        if not os.path.isdir(root):
+            return None
+        lim = float(cfg["claudeTempWarnGB"]) * 1024 ** 3
+        size, _done = _dir_size_until(root, lim)
+        if size < lim:
+            return None
+        rec["warnedAt"] = now
+        return (f"【磁碟清理（hook）】Claude 對話暫存 `{root}` 已超過 {cfg['claudeTempWarnGB']:g} GB → 回答末尾用一句話告訴使用者可跑 "
+                "`py -3 ~/.claude/claude-dev-system/tools/cleanup.py --only temp`（先列清單與可省空間；目前對話與 24 小時內動過的不刪，確認後加 --apply）。"
+                f"只提醒，不要自己刪；{cfg['remindDays']:g} 天內不再提醒。")
+    except Exception:
+        return None
+
+
 # ---------- 查證守門（Stop）----------
 # 另一台裝置的 Claude 2026-11-02 自評：規則只是指示，它判定「這題不算查證型」就整段跳過，寫了「2024 年 Google 披薩加膠水」
 # 卻沒附來源。這裡把規則變成機械檢查：問答題的最後一則回覆含年份／數字卻沒有「來源」段 → block 一次要它補；
@@ -685,6 +915,11 @@ SG_LOCAL = os.path.join(HOME, "claude-dev-system", "config", "local.json")
 SG_YEAR = re.compile(r"(?<![\d.])(?:19|20)\d{2}\s*年")
 SG_NUM = re.compile(r"\d[\d,.]*\s*(?:萬|億|兆|元|％|%|美元|日圓|歐元|人民幣|公里|公尺|公分|公斤|公噸|公頃|坪|人|戶|家|km|kg|GB|MB|TB|kWh|ppm|μg|µg)")
 SG_SOURCE = ("來源", "http://", "https://", "未附來源", "未能確認", "不含待查證事實")
+# 0.16.0：數字來自本機資料（回測報告、快取、腳本輸出）也算有來源——Stock-web 11/8～11/9 回覆數字全來自本機回測報告，被退回 3 次要求附網址。
+# 判定：回覆裡有本機路徑（docs/…、.cache/…、scripts/…、data/…、reports/…，或任何 xxx.md／.json／.csv／.log 檔名）或標「本站資料／本機報告」。
+SG_LOCAL_MARK = ("本站資料", "本機報告", "本機資料", "本地資料", "本站回測")
+SG_LOCAL_PATH = re.compile(r"(?<![\w/.:-])(?:\.?/)?(?:docs|\.cache|scripts|data|reports?|results?|out|logs?)[/\\][\w\-./\\]+"
+                           r"|[\w\-./\\]*[\w\-]\.(?:md|json|jsonl|csv|tsv|log|txt|ipynb)\b")
 SG_QUESTION = ("嗎", "?", "？", "多少", "什麼", "甚麼", "如何", "怎麼", "為什麼", "為何", "哪", "是不是", "有沒有", "幾")
 SG_MIN_ANSWER = 200
 
@@ -747,6 +982,8 @@ def sg_judge(prompt, answer):
     if not any(q in prompt for q in SG_QUESTION):
         return None
     if any(m in answer for m in SG_SOURCE):
+        return None
+    if any(m in answer for m in SG_LOCAL_MARK) or SG_LOCAL_PATH.search(answer):
         return None
     years = SG_YEAR.findall(answer)
     nums = SG_NUM.findall(answer)
@@ -850,6 +1087,16 @@ def main():
         hm = health_msg(hook_cwd, session_id=payload.get("session_id"))  # 盤點過期、CLAUDE.md／交接紀錄過大：同資料夾同對話每天一次
         if hm:
             msgs.append(hm)
+    if event in ("UserPromptSubmit", "PostToolUse"):  # 0.16.0：殘留程序、延後工作、對話暫存（全部節流，平常只讀狀態檔）
+        st = _pa_load()
+        before = json.dumps(st, sort_keys=True)
+        sid = payload.get("session_id")
+        extra = [proc_msg(hook_cwd, sid, st, now)]
+        if event == "UserPromptSubmit":
+            extra += [deferred_msg(hook_cwd, sid, st, now), temp_msg(hook_cwd, st, now)]
+        if json.dumps(st, sort_keys=True) != before:  # 沒變就不寫檔
+            _pa_save(st)
+        msgs.extend(m for m in extra if m)
     if event == "PostToolUse":  # 0.14.0：改安裝副本、背景任務巡檢、波及範圍、共用目錄 git
         msgs.extend(tool_reminders(payload))
     stale = stale_agents()

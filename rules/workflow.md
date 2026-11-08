@@ -24,6 +24,22 @@
 
 ## 背景等待
 - 等背景工作時定期主動回報（帶實際進度數字），不整段沉默；agent 交完最終報告就停掉它。
+- **殘留程序**（0.16.0）：agent 交完報告不代表它開的程序都結束了。巡檢時跑 `py -3 ~/.claude/claude-dev-system/tools/procs.py`，列出這場對話的工具指令開出、跑超過 `procCheck.minMinutes`（預設 60）分鐘的 bash／tail／node 等程序（含子程序與真正的指令）；
+  對照仍在跑的背景任務與 agent，屬於已結束的就是殘留 → 告訴使用者 PID 與命令，由使用者決定；只提醒、不自動結束、不可整批結束 node／bash。
+  hook 每 `procCheck.everyMinutes`（預設 10）分鐘最多查一次（約 10～30 ms），新出現的才注入【殘留程序（hook）】。
+  （2026-11-08 Stock-web：`until [ $(grep -c "FULL" …run-s1.log) -ge 13 ] … do sleep 10; done` 與 tail.exe 從 21:02 空轉到隔天，巡檢沒抓到，使用者自己看到才問。）
+- **延後清單**：有 agent／背景任務完成時先 `resgate.py next`（規則與使用者原話在 `agent-dispatch.md`〈重型工作與延後清單〉）。
+
+## 推送前同步（0.16.0）
+- 判定：`git log --merges --oneline @{u}..HEAD` 有輸出（本機有還沒推的 merge commit，例如剛合併 agent 分支）→ 用 `git pull --no-rebase`（或 `git pull --rebase=merges`）；沒有輸出才可用 `git pull --rebase`。
+- 原因（2026-11-08 Stock-web）：多 agent 合併流程在本機產生多個 merge commit，`git pull --rebase` 把它們拆成直線、一路卡衝突，分支 SHA 全變，看起來像「沒合併」；之後要判斷 worktree 分支有沒有合併，也只能靠內容比對（`tools/cleanup.py` 用 `git merge-tree`）。
+- 專案規則或 skill 寫死 `git pull --rebase` 的，hook【全域系統對照】會點名檔案與行號，改成上面的判定。
+
+## 磁碟清理（0.16.0）
+- 什麼時候用：hook 注入【磁碟清理（hook）】（Claude 對話暫存超過 `cleanup.claudeTempWarnGB`，預設 2 GB，每 7 天最多一次）、磁碟快滿、worktree 累積多個已收工、使用者問「可以清什麼」。
+- 怎麼用：`py -3 ~/.claude/claude-dev-system/tools/cleanup.py --project <專案>` 先列清單與可省空間（預設 dry-run），給使用者看；使用者同意後加 `--apply`。`--only worktrees,temp,npm,cache` 選項目。
+- 安全規則（工具已內建）：不跟隨 junction／symlink（先只拆連結再刪）；worktree 只刪「沒有未提交變更、分支內容已在主分支」的（SHA 祖先、`git merge-tree` 內容比對、舊 git 才用 `git cherry`；`git pull --rebase` 改寫過 SHA 也認得），判不出就保留；分支預設保留；`.claude/worktrees/` 底下沒登記的資料夾只列不刪；對話暫存保留目前對話與 24 小時內動過的；鎖住的檔照實回報、不重試硬刪。
+- 起因：2026-11-08 Stock-web 一次清出約 14 GB；刪 worktree 前有 12 個 .cache 子目錄 junction 指向主目錄資料，直接遞迴刪會刪到主資料；`%LOCALAPPDATA%\Temp\claude` 累積到 3.8 GB。
 
 
 ---

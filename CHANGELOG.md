@@ -2,6 +2,22 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.16.0（2026-11-09，視窗會自動換 exe）
+
+使用者（2026-11-09 Stock-web 對話）看過改進清單後：「二、適合改進到全域系統 claude-dev-system 的 A~I全都做，其中E的部分你先具體跟我談你的上限與門檻要怎麼設，我再決定。」E 談完後：「等 10 分鐘還不夠就不跑：直接回報「記憶體不足、沒有執行」，由我決定之後再跑。不會卡住，也不會硬跑出問題，只是那個工作會延後。我選這個，但要寫清楚規則當有其他agent完成時，要確認記憶體是否足夠了，並開始跑「記憶體不足、沒有執行」的任務。然後先設固定 3GB就好，提醒就不用了，記憶體門檻要用成視窗可更改的。」
+
+- **A. project-scan 把 worktree 算進盤點**（11/8 Stock-web「被引用最多」出現 `.claude/worktrees/agent-xxx/scripts/eval/types.ts：被 104 個檔引用`，跑了約 5 分鐘）。根因三個：①`ts_graph` 呼叫 `depgraph.build_graph` 時 depgraph 自己 `os.walk` 整個 root，只排除 `__tests__`、`node_modules`，project-scan 的 EXCLUDE_DIRS／.gitignore 判斷完全沒用到——worktree 1,834 檔、`.next` 837 檔都算進依賴圖；②Windows 的 `os.walk` 會走進 junction（`os.path.islink` 對 junction 回 False，Python 3.14 實測），名字不在排除清單的連結都會被跟隨；③別名寫死 `@/`→root，Next.js 的 `"@/*": ["./src/*"]` 解析不到，Stock-web src/ 底下所有 `@/` 引用都沒算。改法：depgraph 收呼叫端給的檔案清單與內容（不再自己遍歷），走訪跳過目錄連結與巢狀 checkout（子資料夾有 `.git` 檔或資料夾），別名讀 tsconfig／jsconfig 的 `paths`（JSONC）。慢的原因：防毒即時掃描讓每次 `open()` 約 3 ms，原本每個檔雜湊、數行、depgraph 各開一次（冷啟動 12,156 次 open 佔 48 秒裡的 36 秒），每條邊再兩次 `Path.resolve`；改成每檔只讀一次、路徑用字串處理，`--check` 大小與修改時間相同就不重算雜湊。Stock-web 實測：舊版 9.2 秒（熱）／48 秒（冷）→ 新版 1.8 秒；`--check` 0.6 秒。結果：被引用最多變成 `src/lib/data/types.ts` 266、`src/lib/ai/siteRating.ts` 247（原本前三名都是 worktree 副本），依賴邊 8,768→10,027。
+- **B. 健康檢查讀到過期盤點**（11/8～11/9 一直報「scripts/backtest/exitStrategy.ts（6588 行 > 800）」，實際已拆成 26 行）：報大檔前比對實際行數，檔案不在或已不超標就不報，還超標的報「現在 N 行」。
+- **C. 巡檢看不到 agent 留下的系統程序**（11/8 `until [ $(grep -c "FULL" …run-s1.log) -ge 13 ] … do sleep 10; done` 與 tail.exe 從 21:02 空轉到隔天）：新工具 `tools/procs.py`（Windows 用 Toolhelp32／NtQueryInformationProcess，一次約 20 ms；其他系統用 ps）列出這場對話（CLAUDE_PID）底下工具殼開出、跑超過 `procCheck.minMinutes`（60）分鐘的程序與子程序，只留真正的指令；上層已不在的工具殼也列。hook 每 `procCheck.everyMinutes`（10）分鐘最多查一次，新 PID 才注入【殘留程序（hook）】，只提醒、不自動結束。巡檢固定 prompt 加「跑 procs.py」。
+- **D. 派工範本三條固定條款**（rules/agent-dispatch.md、skill cds-agent-dispatch）：①交報告前結束自己開的背景程序（含 until／tail 迴圈、回測、伺服器）②重型程序開跑前過記憶體閘門（門檻只讀 config）③暫存檔用自己的子資料夾（11/8 共用 scratchpad 被別的 agent 覆蓋 head.md／tail.md；這次改 repo 時也在共用 scratchpad 撞到別人的 re.py，`import re` 直接失敗）。
+- **E. 重型工作記憶體閘門＋延後清單**：設定唯一來源 `dispatch-config.json` 的 `resourceGate`（`minFreeMemGB` 3、`waitMinutes` 10、`pollSeconds` 60）；新工具 `tools/resgate.py`：`wait` 不足每 60 秒看一次、最多 10 分鐘（最後一次檢查留 15 秒，不被 Bash 10 分鐘上限砍掉），仍不足不跑、印「記憶體不足、沒有執行」並登記延後清單 `<CLAUDE_HOME>/state/deferred-jobs.json`（專案、工作、怎麼重跑、登記時間）；`next`／`done`／`list`。主對話規則：有 agent／背景任務完成先 `resgate.py next`，夠就依登記順序開跑、跑一個再查一次（core.md 一句、agent-dispatch.md 細則、巡檢 prompt 加「檢查延後清單」）；hook 在清單有項目且記憶體夠時注入【延後工作（hook）】，派背景任務的巡檢提醒也帶清單項數。沒有「同時 N 個重型」的提醒。設定視窗「核心」區加「重型工作記憶體門檻（GB）」（1～32，存回 config，匯出／匯入同一個檢查）。
+- **F. 安全清理工具 `tools/cleanup.py`**（11/8 Stock-web 一次清出約 14 GB；刪 worktree 前有 12 個 .cache 子目錄 junction 指向主目錄資料）：預設只列清單與可省空間，`--apply` 才刪。worktree 只刪沒有未提交變更、分支內容已在主分支的（SHA 祖先 → `git merge-tree` 內容比對，`git pull --rebase` 改寫 SHA 也認得 → 舊 git 才用 `git cherry`；判不出保留），先只拆目錄連結再 `git worktree remove`（不加 --force），分支預設保留；對話暫存保留目前對話與 24 小時內動過的；npm cache 用 `npm cache clean --force`；專案 `.next` 等可重建快取（不含 `.cache`）。刪除一律不跟隨連結，鎖住的檔照實列出不重試。workflow.md〈磁碟清理〉寫明何時用。
+- **G. 查證守門誤擋本機資料數字**（11/8～11/9 Stock-web 數字全來自本機回測報告仍被退回 3 次）：回覆有本機路徑（docs/、.cache/、scripts/、data/、reports/… 或 .md／.json／.csv／.log 檔名）或標「本站資料／本機報告」就算有來源；只提資料夾名、網域、版本號仍退回。
+- **H. 全域 git 規則：有 merge commit 不 rebase**（11/8 Stock-web：rebase 把多個 merge 拆成直線、卡衝突、分支 SHA 全變，看起來像沒合併）：core.md 一句、workflow.md〈推送前同步〉（判定 `git log --merges @{u}..HEAD`）、agent-dispatch.md。【全域系統對照】會點名專案 CLAUDE.md、AGENTS.md、`.claude/skills/*/SKILL.md`、`docs/claude-rules/*.md` 裡寫死 `git pull --rebase` 的檔案與行號（Stock-web 實測抓到 progress-handoff、push-gate-deploy 兩個 skill）。
+- **I. Claude 對話暫存自動提醒**（11/8 `%LOCALAPPDATA%\Temp\claude` 3.8 GB）：開工 hook 每天最多量一次（0.5 秒內、超過門檻就停），超過 `cleanup.claudeTempWarnGB`（2 GB）每 `remindDays`（7）天最多提醒一次可跑 `cleanup.py --only temp`；只提醒不刪。
+- **hook 效能**（同一台、同條件各跑 11 次）：PostToolUse 中位數 129→133 ms（+4 ms；每 10 分鐘那一次要查程序 +約 40 ms）；UserPromptSubmit 中位數 147→152 ms（+5 ms；每天第一次要量對話暫存，那一次 319→687 ms）。狀態沒變不寫檔。
+- 測試：test_tools 加 ProjectScanWorktrees（巢狀 worktree、目錄 junction、tsconfig 別名、mtime 捷徑、JSONC）、Cleanup（已合併／rebase 後 SHA 不同／未合併／有未提交／junction 不被跟隨主資料不受影響／對話暫存）、ResGate、Procs；test_hooks 加本機資料來源（含反例）、過期大檔、pull --rebase 點名、SessionUpkeep（殘留程序、延後工作、對話暫存）；test_gui_model 加記憶體門檻。
+
 ## 0.15.1（2026-11-07）
 
 使用者貼另一台 11/5 的自我測試結果「❌ 自我測試 9/11 題通過」：pwsh「預期 ^mcp__mslearn__ 沒有出現」、docs「預期 ^mcp__context7__／^mcp__deepwiki__ 沒有出現」，三題的回答都含來源與查證過程。

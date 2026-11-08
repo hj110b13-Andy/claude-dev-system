@@ -1,7 +1,7 @@
 {
   "$說明": "用量門檻與派工模型／努力程度表的單一來源。讀取順序：專案 .claude/dispatch-config.json（cwd 往上找）→ 本檔 → 內建預設 85／97。0.7.0 起沒有「訂閱方案」概念：usageThresholdPct 直接給兩個數字，沒到門檻完全不動也不提示；GUI／執行檔可直接改。安裝後複製到 <CLAUDE_HOME>/claude-dev-system/config/，可直接改；update 偵測到改過會保留並把新版放 .new。",
   "version": 2,
-  "updated": "2026-11-01",
+  "updated": "2026-11-09",
   "usageThresholdPct": {
     "$說明": "觸發收尾的門檻（%）：5 小時用量 >= fiveHour 或 7 天用量 >= sevenDay（7 天觸發要做詳細版收尾）。沒到就什麼都不做。",
     "fiveHour": 85,
@@ -93,5 +93,22 @@
     "progressMaxLines": 600,
     "progressMaxKB": 100,
     "newSessionAfterCompactions": 3
+  },
+  "resourceGate": {
+    "$說明": "0.16.0 重型工作記憶體閘門（唯一來源；tools/resgate.py、設定視窗都讀這裡）：回測、全套測試、build、影片轉逐字稿開跑前，可用實體記憶體 < minFreeMemGB 就每 pollSeconds 秒看一次、最多等 waitMinutes 分鐘；仍不足不跑，回報「記憶體不足、沒有執行」並登記延後清單（<CLAUDE_HOME>/state/deferred-jobs.json）。有 agent／背景任務完成時主對話先查記憶體，夠就依登記順序開跑延後的工作。設定視窗可改 minFreeMemGB（1～32）。",
+    "minFreeMemGB": 3,
+    "waitMinutes": 10,
+    "pollSeconds": 60
+  },
+  "procCheck": {
+    "$說明": "0.16.0 殘留程序提醒：hook 每 everyMinutes 分鐘最多查一次這場對話的工具指令開出、跑超過 minMinutes 分鐘的程序（bash／tail／node 等，tools/procs.py），有就提醒對照仍在跑的任務；只提醒、不自動結束。enabled=false 不查。",
+    "enabled": true,
+    "minMinutes": 60,
+    "everyMinutes": 10
+  },
+  "cleanup": {
+    "$說明": "0.16.0 磁碟清理提醒：Claude 對話暫存（<TEMP>/claude）超過 claudeTempWarnGB 時，開工 hook 每 remindDays 天最多提醒一次可跑 tools/cleanup.py；只提醒不刪。",
+    "claudeTempWarnGB": 2,
+    "remindDays": 7
   }
 }

@@ -28,10 +28,19 @@ EXCLUDE = ("__tests__", "node_modules")
 ALIASES: dict = {}
 
 
+def _is_link_dir(path) -> bool:
+    """目錄連結（symlink／Windows junction）不跟隨：Windows 的 os.walk 會走進 junction（與 project-scan.is_link_dir 同一判斷）。"""
+    try:
+        return os.path.islink(path) or bool(getattr(os.path, "isjunction", lambda _p: False)(path))
+    except OSError:
+        return True
+
+
 def collect_files(root: str, exclude=None) -> list:
     exclude = tuple(exclude or EXCLUDE)
     out = []
-    for d, _, fs in os.walk(root):
+    for d, dns, fs in os.walk(root):
+        dns[:] = [x for x in dns if not _is_link_dir(os.path.join(d, x))]
         parts = d.replace(os.sep, "/").split("/")
         if any(x in parts for x in exclude):
             continue
@@ -58,20 +67,24 @@ def resolve(src: str, spec: str, fset: set, root: str, aliases=None):
     return None
 
 
-def build_graph(root: str, exclude=None, aliases=None):
+def build_graph(root: str, exclude=None, aliases=None, files=None, texts=None):
+    """files：呼叫端已過濾好的檔案清單（絕對路徑、/ 分隔），給了就不自己遍歷（project-scan 用它，worktree、.next 不會混進來）；
+    texts：{路徑: 內容}，已讀過的不再開檔。"""
     root = root.replace(os.sep, "/").rstrip("/")
-    files = collect_files(root, exclude)
+    files = sorted(files) if files is not None else collect_files(root, exclude)
     fset = set(files)
     g: dict[str, set] = defaultdict(set)
     ext: dict[str, set] = defaultdict(set)
     unreadable = []
     for f in files:
-        try:
-            with open(f, encoding="utf-8") as fh:
-                text = fh.read()
-        except Exception as e:  # noqa: BLE001
-            unreadable.append((f, str(e)))
-            continue
+        text = (texts or {}).get(f)
+        if text is None:
+            try:
+                with open(f, encoding="utf-8") as fh:
+                    text = fh.read()
+            except Exception as e:  # noqa: BLE001
+                unreadable.append((f, str(e)))
+                continue
         for m in IMPORT_RE.finditer(text):
             spec = next(x for x in m.groups() if x)
             al = aliases if aliases is not None else (ALIASES or {"@/": root})

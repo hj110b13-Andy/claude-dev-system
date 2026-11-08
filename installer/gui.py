@@ -316,6 +316,14 @@ class App:
         self._no_wheel_change(ttk.Spinbox(tcf, from_=1, to=120, width=5, textvariable=self.tc_min_var, command=self.update_diff)).pack(side="left")
         ttk.Label(tcf, text="分鐘自動檢查一次所有任務（結束或出錯就處理；全部結束就停；沒有任務時不會跑）").pack(side="left")
         self.tc_min_var.trace_add("write", lambda *a: self.update_diff())
+        mgf = ttk.Frame(core); mgf.pack(anchor="w", pady=4)
+        ttk.Label(mgf, text="重型工作記憶體門檻（GB）：").pack(side="left")
+        self.mem_var = tk.StringVar(value=f"{float(f.mem_gb):g}")
+        lo, hi = gm.MEM_GB_RANGE
+        self._no_wheel_change(ttk.Spinbox(mgf, from_=lo, to=hi, increment=0.5, width=5, textvariable=self.mem_var, command=self.update_diff)).pack(side="left")
+        ttk.Label(mgf, text=f"（{lo:g}～{hi:g}；回測、全套測試、build、影片轉逐字稿開跑前可用記憶體低於此值就等最多 10 分鐘，仍不足不跑、登記延後清單）",
+                  foreground="#555").pack(side="left")
+        self.mem_var.trace_add("write", lambda *a: self.update_diff())
         pa = f.project_auto
         paf = ttk.Frame(core); paf.pack(anchor="w", fill="x", pady=(4, 0))
         self.pa_vars = {k: tk.BooleanVar(value=bool(pa.get(k))) for k in ("autoInit", "autoAudit", "autoRefactor")}
@@ -485,6 +493,10 @@ class App:
             f.task_check = {"enabled": self.tc_var.get(), "minutes": max(1, int(self.tc_min_var.get()))}
         except ValueError:
             f.task_check = dict(self.state.get("task_check") or gm.DEFAULT_TASK_CHECK)
+        try:
+            f.mem_gb = gm.valid_mem_gb(self.mem_var.get())
+        except ValueError:
+            f.mem_gb = float(self.state.get("mem_gb", gm.DEFAULT_MEM_GB))  # 超出範圍或不是數字：不套用
         try:
             f.project_auto = {k: v.get() for k, v in self.pa_vars.items()}
             f.project_auto["minSourceFiles"] = max(1, int(self.pa_min_var.get()))
@@ -923,6 +935,7 @@ class App:
         self.sguard_var.set(f.source_guard)
         self.tc_var.set(bool(f.task_check.get("enabled")))
         self.tc_min_var.set(str(int(f.task_check.get("minutes", gm.DEFAULT_TASK_CHECK["minutes"]))))
+        self.mem_var.set(f"{float(f.mem_gb):g}")
         for k, v in self.pa_vars.items():
             v.set(bool(f.project_auto.get(k, v.get())))
         self.pa_min_var.set(str(int(f.project_auto.get("minSourceFiles", self.pa_min_var.get()))))

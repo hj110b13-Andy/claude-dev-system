@@ -306,7 +306,7 @@ Claude 不能直接「看」影片（Claude API 只收 JPEG／PNG／GIF／WebP �
 
 ## 11. 背景任務巡檢（CronCreate；0.10.0 從 core.md 原文搬入）
 
-**背景任務巡檢**：派出 Agent、背景 Bash、Monitor 或 Workflow 之後，若 `~/.claude/claude-dev-system/config/dispatch-config.json` 的 `taskCheck.enabled` 為 true（專案 `.claude/dispatch-config.json` 優先），**立刻**用 `CronCreate` 建一個每 `taskCheck.minutes` 分鐘（預設 15）的巡檢排程，prompt 固定為「巡檢：列出所有進行中的背景任務與 agent，逐一讀最新輸出；已結束或出錯的立刻處理（收結果、TaskStop、重派或回報使用者），仍在跑的只記一行進度；全部結束就 CronDelete 這個排程」；每場對話只建一個（先 `CronList` 查）；全部任務結束或被使用者中止時 `CronDelete`；沒有背景任務時不建；巡檢本身不派新 agent。排程只在閒置時觸發、可能晚最多半個週期，這是 Claude Code 的限制。
+**背景任務巡檢**：派出 Agent、背景 Bash、Monitor 或 Workflow 之後，若 `~/.claude/claude-dev-system/config/dispatch-config.json` 的 `taskCheck.enabled` 為 true（專案 `.claude/dispatch-config.json` 優先），**立刻**用 `CronCreate` 建一個每 `taskCheck.minutes` 分鐘（預設 15）的巡檢排程，prompt 固定為「巡檢：列出所有進行中的背景任務與 agent，逐一讀最新輸出；已結束或出錯的立刻處理（收結果、TaskStop、重派或回報使用者），仍在跑的只記一行進度；跑 `py -3 ~/.claude/claude-dev-system/tools/procs.py` 看有沒有已結束 agent 留下的長時間程序（有就告訴使用者 PID，不自動結束）；並檢查延後清單（`py -3 ~/.claude/claude-dev-system/tools/resgate.py next`，記憶體夠就依登記順序開跑）；全部結束就 CronDelete 這個排程」；每場對話只建一個（先 `CronList` 查）；全部任務結束或被使用者中止時 `CronDelete`；沒有背景任務時不建；巡檢本身不派新 agent。排程只在閒置時觸發、可能晚最多半個週期，這是 Claude Code 的限制。
 
 設定位置：全域 `~/.claude/claude-dev-system/config/dispatch-config.json` 的 `taskCheck`（`enabled`、`minutes`，設定視窗可改）；專案 `.claude/dispatch-config.json` 同名鍵優先。巡檢只看得到這場對話派出的任務（CronCreate 是對話層級），跨對話的任務彼此看不到。
 

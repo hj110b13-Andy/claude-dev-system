@@ -9,6 +9,22 @@
 6. 協調資訊（誰在改哪些檔、遇到未提交變更怎麼辦）。
 7. 總時限、每 10 分鐘回報、回報格式：開頭「進度 已完成/總數｜預計還需 N 分（依據）」；交完最終報告就結束。
 
+## 派工固定條款（0.16.0 起每份派工都附，原文照抄進派工說明）
+1. **交最終報告前確認自己開的背景程序全部結束**：含 `until`／`while` 等待迴圈、`tail -f`、回測、測試、開發伺服器；依自己記下的 PID 或埠號結束，不可整批結束 node／bash；結束不了的寫進報告（PID＋命令）。
+   （2026-11-08 Stock-web：agent 留下 `until [ $(grep -c "FULL" …run-s1.log) -ge 13 ] … do sleep 10; done` 與 tail.exe，交報告後從 21:02 空轉到隔天，使用者自己看到才問。）
+2. **重型程序（回測、全套測試、build、影片轉逐字稿）開跑前先過記憶體閘門**：`py -3 ~/.claude/claude-dev-system/tools/resgate.py wait --project <專案> --desc "<工作>" --rerun "<怎麼重跑>"`
+   （Bash 工具前景跑 timeout 設 600000）。exit 0 才開跑；exit 1＝等滿 10 分鐘仍不足，**不跑**，報告寫「記憶體不足、沒有執行」（已自動登記延後清單）。門檻只在 dispatch-config.json 的 `resourceGate.minFreeMemGB`（預設 3 GB），派工說明不另寫數字。
+3. **暫存檔用自己的子資料夾**：scratchpad 底下先建 `<agent 名稱或任務代號>/` 再寫檔，不直接寫在 scratchpad 根目錄。
+   （2026-11-08 Stock-web：session scratchpad 與其他 agent 共用，覆蓋了別人的 head.md／tail.md；2026-11-09 這個 repo 的派工也在共用 scratchpad 撞到別人的 re.py。）
+
+## 重型工作與延後清單（0.16.0；使用者 2026-11-09 決定）
+- 使用者原話：「等 10 分鐘還不夠就不跑：直接回報「記憶體不足、沒有執行」，由我決定之後再跑。不會卡住，也不會硬跑出問題，只是那個工作會延後。我選這個，但要寫清楚規則當有其他agent完成時，要確認記憶體是否足夠了，並開始跑「記憶體不足、沒有執行」的任務。然後先設固定 3GB就好，提醒就不用了，記憶體門檻要用成視窗可更改的。」
+- 門檻唯一來源：`dispatch-config.json` 的 `resourceGate`（`minFreeMemGB` 3、`waitMinutes` 10、`pollSeconds` 60；專案 `.claude/dispatch-config.json` 優先；設定視窗可改 `minFreeMemGB`，1～32）。
+- 閘門：`resgate.py wait` 可用實體記憶體 < 門檻就每 60 秒看一次、最多 10 分鐘；仍不足 exit 1、印「記憶體不足、沒有執行」並登記延後清單。只想查不想等用 `resgate.py check`。
+- 延後清單唯一一份：`<CLAUDE_HOME>/state/deferred-jobs.json`（全部專案共用，每筆記專案、工作描述、怎麼重跑、登記時間、當時可用記憶體）；`resgate.py list` 看、`resgate.py done <編號>` 開跑後移除。
+- **主對話的規則**：每當有 agent／背景任務完成（收到完成通知、巡檢發現結束），先跑 `resgate.py next`：記憶體 ≥ 門檻就依登記順序開跑第一項（重派，或 SendMessage 喚回原 agent 接著跑），`done` 移除後再查一次，夠再開下一項；不夠就等下一個完成事件。hook 在延後清單有項目且記憶體夠時注入【延後工作（hook）】，派背景任務時的巡檢提醒也會帶上清單項數。
+- 不做「同時 N 個重型」的提醒（使用者：「提醒就不用了」）。
+
 ## 模型與努力程度
 - 依 `dispatch-config.json`（專案 `.claude/` 優先於全域）的 `modelTable` 表（skill `cds-agent-dispatch` 有完整步驟）。規格越精確越適合便宜模型；需要判斷、取捨、跨模組設計才用最強模型。
 - 升級：同類已失敗過、影響所有使用者、要跨報告取捨、牽涉權限隱私。降級：規格已寫死、只動文件／測試期望值、重跑既有腳本。
@@ -17,6 +33,7 @@
 
 ## 協作
 - 共用工作目錄：只 add／commit 自己的檔；同檔有別人在改，先看 `git diff -- <檔>` 只收自己的區塊。
+- 推送前同步：本機有 merge commit（合併過 agent 分支）用 `git pull --no-rebase`（或 `--rebase=merges`），沒有才可 `--rebase`（`workflow.md`〈推送前同步〉）。
 - 小步 commit；未完成改動存 patch 到暫存資料夾並在回報寫路徑。
 - 並行數量依設定檔 `concurrency`（文字說明；用量接近門檻時降到 1～2 個）；會改同一檔的排先後。
 

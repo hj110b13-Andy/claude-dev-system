@@ -29,6 +29,11 @@ description: 派 agent 前決定模型（opus／sonnet／haiku）與努力程度
 - Agent 工具的 `model`、`effort` 照表填（不支援 effort 的版本就省略）。
 - 派工第一行：「（模型／努力程度：X／Y，理由：類型 Z）」。
 - 規格七要素：背景與原話、證據、修法方向、不能破壞的行為、可量化驗收、協調資訊、時限＋回報格式（「進度 已完成/總數｜預計還需 N 分（依據）」，交完最終報告就結束）。
+- **固定條款三條（每份派工照抄，0.16.0）**：
+  1. 交最終報告前確認自己開的背景程序（含 until／while 等待迴圈、tail、回測、測試、伺服器）全部結束，依自己記下的 PID 或埠號結束、不整批結束 node／bash；結束不了的寫進報告。
+  2. 重型程序（回測、全套測試、build、影片轉逐字稿）開跑前跑 `py -3 ~/.claude/claude-dev-system/tools/resgate.py wait --project <專案> --desc "<工作>" --rerun "<怎麼重跑>"`（前景 timeout 600000）；exit 1 就不跑，報告寫「記憶體不足、沒有執行」（已登記延後清單）。門檻只讀 dispatch-config.json 的 `resourceGate`，不在派工說明寫數字。
+  3. 暫存檔寫在 scratchpad 底下自己的子資料夾 `<agent 名稱或任務代號>/`，不寫在根目錄（11/8 共用 scratchpad 被別的 agent 覆蓋 head.md／tail.md）。
+- 細則：`~/.claude/claude-dev-system/rules/agent-dispatch.md`〈派工固定條款〉〈重型工作與延後清單〉。
 
 ## 第四步：事後校正
 返工（模型太弱）或浪費（太強）時記一句；同類連 2 次返工升一格、連 3 次輕鬆完成試降一格，改 dispatch-config.json。

@@ -210,6 +210,33 @@ class ReadAndDiff(Base):
         self.assertNotIn("plan", d)
         self.assertIn("modelTable", d, "其他鍵保留")
 
+    def test_mem_gate_roundtrip_and_range(self):
+        """0.16.0 E：重型工作記憶體門檻視窗可改（使用者 2026-11-09「記憶體門檻要用成視窗可更改的」），1～32 GB。"""
+        s = self.state()
+        f = gm.form_from_state(s)
+        self.apply(f, s)
+        s = self.state()
+        self.assertEqual(s["mem_gb"], 3.0, "預設 3 GB")
+        f = gm.form_from_state(s)
+        f.mem_gb = 4.5
+        self.assertTrue(any("3 GB → 4.5 GB" in c.text for c in gm.diff(s, f)))
+        self.apply(f, s)
+        self.assertEqual(self.state()["mem_gb"], 4.5)
+        d = json.loads((self.lay.payload / "config" / "dispatch-config.json").read_text(encoding="utf-8"))
+        self.assertEqual(d["resourceGate"]["minFreeMemGB"], 4.5)
+        self.assertEqual(d["resourceGate"]["waitMinutes"], 10, "其他鍵補預設／保留")
+        self.assertIn("modelTable", d, "其他鍵保留")
+        for bad in (0, 0.5, 33, "x", True, None):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                gm.valid_mem_gb(bad)
+        with self.assertRaises(ValueError):
+            gm.write_mem_gate(self.lay, 100)
+        base = gm.form_from_state(self.state())
+        with self.assertRaises(ValueError):
+            gm.import_profile(base, {"claude-dev-system-profile": 1, "mem_gb": 64})
+        self.assertEqual(gm.import_profile(base, {"claude-dev-system-profile": 1, "mem_gb": 8}).mem_gb, 8.0)
+        self.assertEqual(gm.export_profile(self.state(), base)["mem_gb"], 4.5)
+
     def test_task_check_roundtrip(self):
         s = self.state()
         f = gm.form_from_state(s)
