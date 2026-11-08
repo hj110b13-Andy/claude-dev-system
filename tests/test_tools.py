@@ -414,8 +414,13 @@ class Cleanup(unittest.TestCase):
     def setUp(self):
         import importlib.util
 
-        self.tmp = Path(tempfile.mkdtemp(prefix="cds-clean-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="cds-clean-longname-"))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        if os.name == "nt":  # 0.16.1：GitHub Actions 的暫存路徑是 RUNNER~1 短檔名，git 回長檔名 → 已登記的 worktree 被當成沒登記；這裡故意用短檔名重現
+            import ctypes
+            buf = ctypes.create_unicode_buffer(1024)
+            if ctypes.windll.kernel32.GetShortPathNameW(str(self.tmp), buf, 1024) and buf.value:
+                self.tmp = Path(buf.value)
         spec = importlib.util.spec_from_file_location("cds_cleanup", REPO / "tools" / "cleanup.py")
         self.cl = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.cl)  # type: ignore[union-attr]

@@ -1,6 +1,6 @@
 # claude-dev-system 交接紀錄
 
-## 2026-11-09：v0.16.0（Stock-web 對話派工，A～I 全做，E 照使用者決定）
+## 2026-11-09：v0.16.1（Stock-web 對話派工，A～I 全做，E 照使用者決定；v0.16.0 tag 的 CI 測試因 8.3 短檔名失敗沒出 Release，0.16.1 修好重發）
 
 - 做了：project-scan 不再把 worktree／.next／junction 算進依賴圖、讀 tsconfig 別名、每檔只讀一次（Stock-web 9.2 秒→1.8 秒）；健康檢查比對實際行數；新工具 procs.py（殘留程序）、resgate.py（記憶體閘門＋延後清單，門檻 resourceGate 3 GB、視窗可改）、cleanup.py（安全清理，預設只列清單）；查證守門認本機路徑；git 推送前同步規則與對照提醒點名寫死 `git pull --rebase`；對話暫存每 7 天提醒；派工固定三條款。細節、原話、數字在 CHANGELOG 0.16.0。
 - 驗證：`py -3 -m unittest discover -s tests`（137 項，1 項發版衛生在打 tag 前略過）、`install.py update --with-web --with-video`、`verify` 全部通過；hook 量測 PostToolUse +4 ms、UserPromptSubmit +5 ms（中位數）。

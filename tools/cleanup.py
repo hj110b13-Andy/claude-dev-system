@@ -196,6 +196,15 @@ def merged_reason(repo, main, head):
     return None
 
 
+def _same_path_key(p) -> str:
+    """同一個資料夾的比對鍵：git 回 C:/Users/runneradmin/…（長檔名、正斜線），暫存路徑可能是 RUNNER~1 這種 8.3 短檔名、反斜線；
+    realpath 換成實際長路徑再 normcase（0.16.1：GitHub Actions 上已登記的 worktree 被當成「沒登記」）。"""
+    try:
+        return os.path.normcase(os.path.realpath(str(p)))
+    except OSError:
+        return os.path.normcase(os.path.abspath(str(p)))
+
+
 def plan_worktrees(repo: Path, main=None):
     items = []
     wts = worktrees(repo)
@@ -206,7 +215,7 @@ def plan_worktrees(repo: Path, main=None):
     registered = set()
     for w in wts[1:]:
         path = Path(str(w.get("worktree")))
-        registered.add(os.path.normcase(str(path)))
+        registered.add(_same_path_key(path))
         br = str(w.get("branch", "")).replace("refs/heads/", "")
         head = br or str(w.get("HEAD", ""))
         it = {"kind": "worktrees", "path": str(path), "branch": br, "size": 0, "action": "keep", "why": ""}
@@ -232,7 +241,7 @@ def plan_worktrees(repo: Path, main=None):
     wt_root = repo / ".claude" / "worktrees"
     if wt_root.is_dir():
         for d in sorted(wt_root.iterdir()):
-            if d.is_dir() and os.path.normcase(str(d)) not in registered:
+            if d.is_dir() and _same_path_key(d) not in registered:
                 size, _n, links = scan_tree(str(d))
                 items.append({"kind": "worktrees", "path": str(d), "branch": "", "size": size, "action": "keep",
                               "why": "沒登記成 git worktree 的資料夾，保留（請人工確認內容再刪）"})
