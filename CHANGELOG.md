@@ -2,6 +2,13 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.16.2（2026-11-09，視窗會自動換 exe）
+
+使用者看過 0.16.0 G 項的檢查（「只要回覆裡出現任何 .md、.json 檔名就算有來源」是漏洞）後同意收緊：「改」。
+
+- **查證守門：工作文件與設定檔不算數字的出處**：0.16.0 起回覆裡只要有任一 `xxx.md`／`.json` 檔名就放行，順口一句「已更新 PROGRESS.md」就能讓憑印象的數字溜過。改成 CLAUDE.md、AGENTS.md、PROGRESS.md、PROGRESS-ARCHIVE.md、HANDOFF.md、TODO.md、README.md、CHANGELOG.md、SKILL.md、MEMORY.md、package.json、tsconfig.json、settings.json、dispatch-config.json、project-scan.json 等不算（`SG_LOCAL_GENERIC`）；回測報告、快取、腳本輸出等其他本機路徑照舊放行，Stock-web 引用 `docs/backtest/…md` 不受影響。原本提議的「檔名要在『來源』段附近」沒做：回覆有「來源」二字本來就直接放行，這條加了反而會擋掉 Stock-web 沒寫「來源」二字的正常引用。
+- 驗證：舊程式對「已更新 PROGRESS.md」「見 docs/progress.md」「改了 package.json」都放行、新程式退回；「數字見 docs/backtest/a.md」新舊都放行。test_hooks 加這幾個正反例。
+
 ## 0.16.1（2026-11-09，視窗會自動換 exe）
 
 - **v0.16.0 的 Release 沒建出來**：GitHub Actions 單元測試 1 項失敗（Cleanup：已合併的 worktree 被判成「沒登記成 git worktree 的資料夾」，Release 因此沒有 exe）。根因：`cleanup.py` 用字串比對 git 回的路徑（長檔名 `C:/Users/runneradmin/…`）和走訪到的路徑（runner 的暫存是 8.3 短檔名 `RUNNER~1`），同一個資料夾比不起來。改用 realpath 後再比對；測試改成故意用短檔名的暫存資料夾，這台用舊程式重現同一個失敗、新程式通過。0.16.0 的功能內容不變（見下一段），請以 0.16.1 為準。

@@ -1,5 +1,9 @@
 # claude-dev-system 交接紀錄
 
+## 2026-11-09：v0.16.2（查證守門收緊）
+
+- 使用者同意（「改」）：0.16.0 G 項只要有任一 .md／.json 檔名就算有來源，順口提 PROGRESS.md 就能放行憑印象的數字。改成工作文件與設定檔（`SG_LOCAL_GENERIC`）不算，回測報告等本機路徑照舊放行。舊程式／新程式對照與測試見 CHANGELOG 0.16.2。
+
 ## 2026-11-09：v0.16.1（Stock-web 對話派工，A～I 全做，E 照使用者決定；v0.16.0 tag 的 CI 測試因 8.3 短檔名失敗沒出 Release，0.16.1 修好重發）
 
 - 做了：project-scan 不再把 worktree／.next／junction 算進依賴圖、讀 tsconfig 別名、每檔只讀一次（Stock-web 9.2 秒→1.8 秒）；健康檢查比對實際行數；新工具 procs.py（殘留程序）、resgate.py（記憶體閘門＋延後清單，門檻 resourceGate 3 GB、視窗可改）、cleanup.py（安全清理，預設只列清單）；查證守門認本機路徑；git 推送前同步規則與對照提醒點名寫死 `git pull --rebase`；對話暫存每 7 天提醒；派工固定三條款。細節、原話、數字在 CHANGELOG 0.16.0。

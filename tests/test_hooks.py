@@ -72,11 +72,15 @@ class SourceGuard(unittest.TestCase):
         q = "這個出場規則回測結果怎麼樣？"
         body = LONG + "年化 12.3%，2025 年回落 8%。"
         for tail in ("（docs/research/exit-2026-11-08.md）", "見 .cache/backtest/run-s1.log", "scripts/backtest/exitStrategy.ts 跑出",
-                     "報告 exit-report.md", "（本站資料）", "以上為本機報告數字", "docs\\research\\x.md"):
+                     "報告 exit-report.md", "（本站資料）", "以上為本機報告數字", "docs\\research\\x.md",
+                     "已更新 PROGRESS.md；數字見 docs/backtest/2026-11-09a-confirm-list-result.md"):
             transcript(self.tp, [("user", q), ("assistant", body + tail)])
             self.assertIsNone(self.run_hook(), tail)
         # 反例：沒有本機路徑也沒有標記 → 仍退回；只提到資料夾名稱、網域不算
-        for tail in ("", "根據新聞報導。", "可參考 docs 資料夾。", "見 example.com 說明。", "版本 3.14 更新。"):
+        # 0.16.2：只順口提到工作文件／設定檔不算出處（使用者 11/9 同意收緊：「改」）
+        for tail in ("", "根據新聞報導。", "可參考 docs 資料夾。", "見 example.com 說明。", "版本 3.14 更新。",
+                     "已更新 PROGRESS.md。", "規則寫在 CLAUDE.md 與 README.md", "見 docs/progress.md", "改了 package.json",
+                     ".claude/skills/x/SKILL.md 已同步"):
             transcript(self.tp, [("user", q), ("assistant", body + tail)])
             out = self.run_hook()
             self.assertIsNotNone(out, tail)

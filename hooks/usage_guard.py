@@ -920,6 +920,22 @@ SG_SOURCE = ("來源", "http://", "https://", "未附來源", "未能確認", "�
 SG_LOCAL_MARK = ("本站資料", "本機報告", "本機資料", "本地資料", "本站回測")
 SG_LOCAL_PATH = re.compile(r"(?<![\w/.:-])(?:\.?/)?(?:docs|\.cache|scripts|data|reports?|results?|out|logs?)[/\\][\w\-./\\]+"
                            r"|[\w\-./\\]*[\w\-]\.(?:md|json|jsonl|csv|tsv|log|txt|ipynb)\b")
+# 0.16.2：工作文件與設定檔幾乎每次回覆都會提到，不能當數字的出處（只提「已更新 PROGRESS.md」就放行憑印象的數字＝漏洞）。
+SG_LOCAL_GENERIC = {"claude.md", "agents.md", "progress.md", "progress-archive.md", "handoff.md", "todo.md", "readme.md",
+                    "changelog.md", "skill.md", "memory.md", "package.json", "package-lock.json", "tsconfig.json",
+                    "jsconfig.json", "settings.json", "settings.local.json", "dispatch-config.json", "local.json",
+                    "project-scan.json", ".claude.json"}
+
+
+def sg_local_source(answer):
+    """回覆裡有沒有可當數字出處的本機資料路徑（排除工作文件與設定檔）。"""
+    for m in SG_LOCAL_PATH.finditer(answer):
+        name = re.split(r"[/\\]", m.group(0).rstrip("./\\"))[-1].lower()
+        if name and name not in SG_LOCAL_GENERIC:
+            return True
+    return False
+
+
 SG_QUESTION = ("嗎", "?", "？", "多少", "什麼", "甚麼", "如何", "怎麼", "為什麼", "為何", "哪", "是不是", "有沒有", "幾")
 SG_MIN_ANSWER = 200
 
@@ -983,7 +999,7 @@ def sg_judge(prompt, answer):
         return None
     if any(m in answer for m in SG_SOURCE):
         return None
-    if any(m in answer for m in SG_LOCAL_MARK) or SG_LOCAL_PATH.search(answer):
+    if any(m in answer for m in SG_LOCAL_MARK) or sg_local_source(answer):
         return None
     years = SG_YEAR.findall(answer)
     nums = SG_NUM.findall(answer)
