@@ -989,6 +989,25 @@ def sg_last_turn(transcript_path):
     return prompt, "\n".join(answer)
 
 
+# 0.19.0：建議守門與跳過條件收緊（Stock-web 2026-11-10 使用者：「你要照著規則與長期記憶來辦事阿，不然那些規則是說假的是不是」——
+# 同一天 main 列 6 種「沒測過的方法」全憑印象、沒標已查證／未查證；又在含研究結論的回覆末尾加「不含待查證事實」跳過守門）。
+# ①回覆提出建議／方案（不論問句與否）卻沒有逐項標「已查證／未查證」→ 退回一次（core.md「先找現成做法」：每項建議標明已查證或未查證）。
+# ②「〔不含待查證事實〕」只給純概念或自己算的數字用；回覆有年份、或引用研究／論文／報告結論時不算數，照樣要「來源」段。
+SG_RECO = re.compile(r"我的建議|我建議|建議(?:你|改|採|用|做|先|把)|建議方向|(?:方案|選項)\s*[1-9一二三四五]|要照這個做嗎|下一輪(?:就|改|只)")
+SG_RECO_MARK = ("已查證", "未查證")
+SG_SKIP_MARK = "不含待查證事實"
+SG_CLAIM = re.compile(r"研究|論文|期刊|學者|文獻|報告指出|統計顯示|證實|實證")
+
+
+def sg_reco_judge(answer):
+    """提出建議卻沒標查證狀態：回原因字串；否則 None。"""
+    if not answer or len(answer) < SG_MIN_ANSWER or "```" in answer:
+        return None
+    if SG_RECO.search(answer) and not any(m in answer for m in SG_RECO_MARK):
+        return "提出了建議／方案"
+    return None
+
+
 def sg_judge(prompt, answer):
     """要不要退回。回 None（放行）或原因字串。"""
     if not prompt or not answer or len(answer) < SG_MIN_ANSWER:
@@ -997,7 +1016,10 @@ def sg_judge(prompt, answer):
         return None
     if not any(q in prompt for q in SG_QUESTION):
         return None
-    if any(m in answer for m in SG_SOURCE):
+    has_source = any(m in answer for m in SG_SOURCE if m != "不含待查證事實")
+    if has_source:
+        return None
+    if SG_SKIP_MARK in answer and not SG_YEAR.search(answer) and not SG_CLAIM.search(answer):
         return None
     if any(m in answer for m in SG_LOCAL_MARK) or sg_local_source(answer):
         return None
@@ -1012,6 +1034,18 @@ def source_guard(payload):
     if payload.get("stop_hook_active") or not sg_enabled():
         return None
     prompt, answer = sg_last_turn(payload.get("transcript_path") or "")
+    reco = sg_reco_judge(answer)
+    if reco:
+        try:
+            os.makedirs(STATE_DIR, exist_ok=True)
+            with open(os.path.join(STATE_DIR, "source-guard.log"), "a", encoding="utf-8") as f:
+                f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} block-reco｜問：{(prompt or '')[:60]!r}" + chr(10))
+        except Exception:
+            pass
+        return {"decision": "block",
+                "reason": "【建議守門（hook）】這則回覆" + reco + "，但沒有逐項標明「已查證（附來源）／未查證」（core.md「先找現成做法」）。"
+                          "請把每一項建議、方法、方向標上：已查證＝附網址與原句短引；未查證＝標「未查證」並先上網補查，查不到就刪掉或明說查不到。"
+                          "不可把憑印象的做法當成已確認。只補這一次，之後不會再退回。"}
     why = sg_judge(prompt, answer)
     if not why:
         return None

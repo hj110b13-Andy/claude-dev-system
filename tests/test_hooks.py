@@ -417,3 +417,21 @@ class SessionUpkeep(unittest.TestCase):
         (self.proj / ".claude" / "dispatch-config.json").write_text(json.dumps({"cleanup": {"claudeTempWarnGB": 1}}), encoding="utf-8")
         self.assertIsNone(ug.temp_msg(str(self.proj), {}, now=1.0, root=str(root)), "沒超過不提醒")
         self.assertTrue((root / "abc" / "s1" / "big.bin").exists(), "只提醒不刪")
+
+
+class RecoGuard(unittest.TestCase):
+    """0.19.0：建議沒標已查證／未查證要退回；「不含待查證事實」不能蓋過研究結論。"""
+    LONG = "說明" * 120
+
+    def test_reco_needs_verification_labels(self):
+        self.assertIsNotNone(ug.sg_reco_judge(self.LONG + "我的建議：改用時間序列動能、市況切換模型。"))
+        self.assertIsNone(ug.sg_reco_judge(self.LONG + "我的建議：改用時間序列動能（已查證：MOP 2012）、市況切換模型（未查證）。"))
+        self.assertIsNone(ug.sg_reco_judge(self.LONG + "已推送部署，測試全過。"))
+        self.assertIsNone(ug.sg_reco_judge(self.LONG + "我的建議```code```"), "程式工作不擋")
+
+    def test_skip_mark_not_for_research_claims(self):
+        q = "這樣有用嗎？"
+        self.assertIsNotNone(ug.sg_judge(q, self.LONG + "研究顯示年化多 2.5%。〔不含待查證事實〕"))
+        self.assertIsNotNone(ug.sg_judge(q, self.LONG + "2008 年跌了 32%。〔不含待查證事實〕"))
+        self.assertIsNone(ug.sg_judge(q, self.LONG + "我算的：多 2.5%。〔不含待查證事實〕"))
+        self.assertIsNone(ug.sg_judge(q, self.LONG + "研究顯示多 2.5%。來源：https://x.y"))
