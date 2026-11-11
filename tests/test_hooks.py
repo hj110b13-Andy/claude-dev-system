@@ -575,6 +575,33 @@ class SubagentReportGuard(unittest.TestCase):
         self.assertIn("交報告", ug.subagent_brief({"cwd": str(self.tmp), "agent_type": "general-purpose"}))
         self.assertNotIn("不合格退回一次", ug.subagent_brief({"cwd": str(self.cwd), "agent_type": "general-purpose"}))
 
+    def stop(self, aid, last, agent_type="general-purpose", active=False, meta=True):
+        tp = self.proj / "sess" / "subagents" / f"agent-{aid}.jsonl"
+        if meta and tp.exists():
+            Path(str(tp)[:-6] + ".meta.json").write_text("{}", encoding="utf-8")
+        return ug.subagent_stop_guard({"hook_event_name": "SubagentStop", "stop_hook_active": active, "agent_id": aid, "agent_type": agent_type,
+                                       "session_id": "sess", "cwd": str(self.cwd), "transcript_path": str(self.proj / "sess.jsonl"),
+                                       "agent_transcript_path": str(tp), "last_assistant_message": last})
+
+    def test_stop_fallback_blocks_plain_text_report_once(self):
+        en = "All three modules were refactored and every test passes; details follow below. " * 4
+        self.agent("d1", "do it", [("Read", {"file_path": "x.md"})])
+        out = self.stop("d1", en)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("最後一則訊息", out["reason"])
+        self.assertIsNone(self.stop("d1", en), "同一個 agent 只擋一次")
+
+    def test_stop_fallback_skips_handback_internal_forks_and_active(self):
+        en = "All three modules were refactored and every test passes; details follow below. " * 4
+        self.agent("d2", "do it", [("SubagentHandback", {"message": "x"})])
+        self.assertIsNone(self.stop("d2", en), "已經用 SubagentHandback 交過，在那裡核對")
+        self.agent("d3", "do it", [])
+        self.assertIsNone(self.stop("d3", en, agent_type=""), "內部分支 agent_type 是空字串")
+        self.assertIsNone(self.stop("d3", en, active=True))
+        self.agent("d4", "do it", [])
+        self.assertIsNone(self.stop("d4", en, meta=False), "沒有 .meta.json 的不是真的派出的 agent")
+        self.assertIsNone(self.stop("d5", en), "紀錄檔不存在")
+
     def test_installer_registers_pretooluse_on_handback(self):
         sys.path.insert(0, str(REPO / "installer"))
         try:
@@ -584,6 +611,7 @@ class SubagentReportGuard(unittest.TestCase):
         self.assertIn(("PreToolUse", "SubagentHandback"), settings_ops.HOOK_SPECS)
         s, _ = settings_ops.add_hooks({}, "py -3 x.py # claude-dev-system")
         self.assertEqual(s["hooks"]["PreToolUse"][0]["matcher"], "SubagentHandback")
+        self.assertIn(("SubagentStop", None), settings_ops.HOOK_SPECS)
 
 
 class RecoGuard(unittest.TestCase):

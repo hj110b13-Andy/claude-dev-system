@@ -1170,8 +1170,8 @@ def subagent_brief(payload):
         return chr(10).join(out) if len(out) > 1 else None
     br = _git_branch(cwd)
     out.append(f"- 工作目錄：開工時是 `{cwd}`" + (f"（git 分支 `{br}`）" if br else "") + "，這是繼承主對話當下的位置，不一定是這份工作該在的地方。"
-               "派工單指定了目錄或分支就照派工單；要 commit 時先 `git branch --show-current`，分支不是派工單寫的那個、或派工單沒寫 commit 到哪個分支，"
-               "就不 commit，改存 patch 並在報告寫明路徑與原因。")
+               "派工單指定了目錄或分支就照派工單，commit 前先 `git branch --show-current`，不是指定的分支就不 commit、改存 patch 並在報告寫路徑；"
+               "派工單叫你 commit 卻沒寫分支：照做，但報告開頭寫明 commit hash、所在分支與工作目錄，由 main 核對；派工單沒叫你 commit 就不 commit。")
     mem = os.path.normpath(os.path.join(os.path.dirname(payload.get("transcript_path") or ""), "memory"))
     if os.path.isfile(os.path.join(mem, "MEMORY.md")):
         out.append(f"- 長期記憶：你的 context 只有 MEMORY.md 索引（每行一條使用者給過的指示），內文沒有載入。開工前把索引裡與這份工作有關的每一條用 Read 讀內文"
@@ -1262,39 +1262,64 @@ def subagent_report_judge(report, scan, lang, mem_dir):
     return bad
 
 
+def _sub_guard_reason(payload, report, scan, how):
+    """兩個入口共用：回退回理由字串或 None，並記下「這個 agent 已退回過」。scan＝agent 對話紀錄掃描結果（可為 None）。"""
+    aid = str(payload.get("agent_id") or "")
+    if not aid or not report.strip() or payload.get("agent_type") in SUB_LIGHT_TYPES or not _sub_cfg(payload.get("cwd"))["guard"]:
+        return None
+    try:
+        with open(SUB_GUARD_STATE, encoding="utf-8") as f:
+            seen = json.load(f) or {}
+    except Exception:
+        seen = {}
+    if aid in seen:
+        return None
+    mem = os.path.normpath(os.path.join(os.path.dirname(payload.get("transcript_path") or ""), "memory"))
+    bad = subagent_report_judge(report, scan, _settings_language(), mem)
+    if not bad:
+        return None
+    now = time.time()
+    seen = {k: v for k, v in seen.items() if now - float(v) < 3 * 86400}
+    seen[aid] = now
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(SUB_GUARD_STATE, "w", encoding="utf-8") as f:
+        json.dump(seen, f)
+    with open(os.path.join(STATE_DIR, "source-guard.log"), "a", encoding="utf-8") as f:
+        f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} block-agent {aid} {len(bad)} 項：{'｜'.join(b[:24] for b in bad)}" + chr(10))
+    return ("【報告守門（hook）】這份報告還不能交，有 " + str(len(bad)) + " 項不合格：" + chr(10)
+            + chr(10).join(f"{i}. {b}" for i, b in enumerate(bad, 1)) + chr(10) + how + "只退回這一次，之後不會再擋。")
+
+
 def subagent_report_guard(payload):
     """PreToolUse(SubagentHandback)：不合格就擋下這次交報告並說明要補什麼；同一個 agent 只擋一次。任何例外都放行。"""
     try:
-        aid = str(payload.get("agent_id") or "")
-        if not aid or payload.get("agent_type") in SUB_LIGHT_TYPES or not _sub_cfg(payload.get("cwd"))["guard"]:
-            return None
-        report = str((payload.get("tool_input") or {}).get("message") or "")
-        if not report.strip():
-            return None
-        try:
-            with open(SUB_GUARD_STATE, encoding="utf-8") as f:
-                seen = json.load(f) or {}
-        except Exception:
-            seen = {}
-        if aid in seen:
-            return None
         tp = _sub_transcript(payload)
-        mem = os.path.normpath(os.path.join(os.path.dirname(payload.get("transcript_path") or ""), "memory"))
-        bad = subagent_report_judge(report, _sub_scan(tp) if tp else None, _settings_language(), mem)
-        if not bad:
+        reason = _sub_guard_reason(payload, str((payload.get("tool_input") or {}).get("message") or ""), _sub_scan(tp) if tp else None,
+                                   "補完後再呼叫一次 SubagentHandback，交**完整報告**（不是只交補充的部分）。")
+        if not reason:
             return None
-        now = time.time()
-        seen = {k: v for k, v in seen.items() if now - float(v) < 3 * 86400}
-        seen[aid] = now
-        os.makedirs(STATE_DIR, exist_ok=True)
-        with open(SUB_GUARD_STATE, "w", encoding="utf-8") as f:
-            json.dump(seen, f)
-        with open(os.path.join(STATE_DIR, "source-guard.log"), "a", encoding="utf-8") as f:
-            f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} block-agent {aid} {len(bad)} 項：{'｜'.join(b[:24] for b in bad)}" + chr(10))
-        reason = ("【報告守門（hook）】這份報告還不能交，有 " + str(len(bad)) + " 項不合格：" + chr(10)
-                  + chr(10).join(f"{i}. {b}" for i, b in enumerate(bad, 1)) + chr(10)
-                  + "補完後再呼叫一次 SubagentHandback，交**完整報告**（不是只交補充的部分）。只退回這一次，之後不會再擋。")
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}
+    except Exception:
+        return None
+
+
+def subagent_stop_guard(payload):
+    """SubagentStop 後備：agent 沒有用 SubagentHandback 交報告時（不是 auto mode、fork、2.1.271 之前——tools-reference.md 寫該工具
+    「Provided only in auto mode, to subagents that the Agent tool runs locally other than forks」）才在這裡核對最後一則訊息。
+    內部分支（agent_type 空字串、紀錄檔或 .meta.json 不存在；anthropics/claude-code#87065、#91910）一律放行。"""
+    try:
+        if payload.get("stop_hook_active") or not payload.get("agent_type"):
+            return None
+        tp = str(payload.get("agent_transcript_path") or "")
+        tp = os.path.expanduser(tp) if tp else (_sub_transcript(payload) or "")
+        if not tp or not os.path.isfile(tp) or not os.path.isfile(tp[:-6] + ".meta.json"):
+            return None
+        scan = _sub_scan(tp)
+        if scan is None or "SubagentHandback" in scan["tools"]:
+            return None  # 報告已經由 SubagentHandback 交出並在那裡核對過
+        reason = _sub_guard_reason(payload, str(payload.get("last_assistant_message") or ""), scan,
+                                   "補完後重新寫出**完整報告**當作你的最後一則訊息（main 只會收到最後一則，不是只寫補充的部分）。")
+        return {"decision": "block", "reason": reason} if reason else None
     except Exception:
         return None
 
@@ -1319,6 +1344,11 @@ def main():
             out = subagent_report_guard(payload)
             if out:
                 print(json.dumps(out, ensure_ascii=True))
+        return
+    if event == "SubagentStop":  # 0.22.0 後備：沒走 SubagentHandback 的 agent
+        out = subagent_stop_guard(payload)
+        if out:
+            print(json.dumps(out, ensure_ascii=True))
         return
     if event == "SubagentStart":  # 0.21.0：把不會自動傳給 agent 的東西補進去
         msg = subagent_brief(payload)

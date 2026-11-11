@@ -12,7 +12,8 @@ from . import HOOK_MARK
 # SessionStart（0.12.0）：壓縮／接續後重新注入開工檢查（Stock-web 一場對話開 19 天、壓縮 20 次，開工檢查只在第一天做過）
 HOOK_SPECS = [("UserPromptSubmit", None), ("PostToolUse", "Bash|PowerShell|Agent|Task|Edit|Write|NotebookEdit|Workflow"), ("Stop", None), ("SessionStart", None),
               ("SubagentStart", None),
-              ("PreToolUse", "SubagentHandback")]  # 0.22.0：agent 交報告時核對語言、數字出處、web-quick、記憶、commit 分支，不合格退回一次  # 0.21.0：agent 開工時補語言、工作目錄與分支、記憶內文路徑、自我核對清單
+              ("PreToolUse", "SubagentHandback"),
+              ("SubagentStop", None)]  # 0.22.0：agent 交報告時核對語言、數字出處、web-quick、記憶、commit 分支，不合格退回一次  # 0.21.0：agent 開工時補語言、工作目錄與分支、記憶內文路徑、自我核對清單
 HOOK_SCRIPT = "usage_guard.py"
 
 

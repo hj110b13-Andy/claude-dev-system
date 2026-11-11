@@ -179,6 +179,7 @@ class Preservation(Base):
         s["hooks"]["Stop"] = [{"hooks": [{"type": "command", "command": "py -3 C:/x/usage_guard.py"}]}]
         s["hooks"]["SessionStart"] = [{"hooks": [{"type": "command", "command": "py -3 C:/x/usage_guard.py"}]}]
         s["hooks"]["SubagentStart"] = [{"hooks": [{"type": "command", "command": "py -3 C:/x/usage_guard.py"}]}]
+        s["hooks"]["SubagentStop"] = [{"hooks": [{"type": "command", "command": "py -3 C:/x/usage_guard.py"}]}]
         s["hooks"].setdefault("PreToolUse", []).append({"matcher": "SubagentHandback", "hooks": [{"type": "command", "command": "py -3 C:/x/usage_guard.py"}]})
         raw = json.dumps(s, indent=2)
         self.write_settings(None, raw)
