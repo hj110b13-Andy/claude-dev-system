@@ -1,5 +1,20 @@
 # claude-dev-system 交接紀錄
 
+## 2026-11-11：v0.22.0（0.21.0 留下的四項全做完）
+
+- 使用者原話：「還沒解決的繼續全都做完。」「你的任務本身也可以派給agent，順便測試效果怎麼樣。如果不衝突的話，能並行處理就並行處理加快速度。」中途問：「然後你現在優化完了嗎?我可以叫Stock-web派agent了嗎?」
+- 做了（細節、數字、來源在 CHANGELOG 0.22.0）：①交報告守門（PreToolUse SubagentHandback）＋SubagentStop 後備 ②設定視窗兩個開關、核心區六列自動換行 ③實派 3 個 sonnet agent 做實際工作＋1 個故意違規探針，量遵守率 ④【共用工作目錄】誤報、專案自動化把子資料夾當新專案兩個 hook bug ⑤README 版本需求小節 ⑥Stock-web 的記憶 `do-it-yourself-no-agents` 沒有動：使用者 11/11 已在 Stock-web 對話親自解除（「可以派agent了」），那場對話自己更新了記憶。
+- 決策：2026-11-11｜守門攔在 SubagentHandback 不攔 SubagentStop｜SubagentStop 時報告已送達、還會被內部分支觸發｜官方 hooks 文件〈SubagentStop input〉、anthropics/claude-code#87065、#91910。
+- 決策：2026-11-11｜`compat.json` 最低版本不抬到 2.1.271｜低於該版只會漏擋不會壞，抬高等於不支援舊版｜README 新小節。
+- 決策：2026-11-11｜派工單叫 commit 沒寫分支→照做並在報告揭露（不是拒絕 commit）｜agent 無從判斷哪個分支才對，揭露後由 main 核對；實派的 agent 也是這樣做｜CHANGELOG 0.22.0。
+- 沒做／待觀察：
+  - SubagentStop 後備只有單元測試，沒有在非 auto mode 實跑。
+  - 遵守率樣本只有 3 個 sonnet agent；opus、長時間研究型（Stock-web 那種回測研究）還沒有數據。Stock-web 恢復派工後，用 `~/.claude/state/source-guard.log` 的 `block-agent` 筆數與 agent 紀錄看實際表現。
+  - agent 的中途文字仍有一半是英文（最終報告都是中文）；守門只查最終報告。
+  - anthropics/claude-code#91910：subagent 自己壓縮時 SessionStart(compact) 不帶 agent 欄位，「壓縮後重新開工」清單可能注入到 agent；payload 分不出來，沒處理。
+  - 設定視窗在 980 寬時「用量守門」「查證守門」兩個長勾選框是單一元件，沒有超出但也不會換行。
+- 驗證方式：`py -3 -m unittest discover -s tests`、`py -3 installer/install.py verify`；派一個要它交英文報告的 agent，應被【報告守門（hook）】退回一次。
+
 ## 2026-11-11：v0.21.0（agent 不守規則的查證與保底）
 
 - 使用者原話：「它派出去的agent常常都不會遵守該專案裡的規則與長期記憶等等，還有連全域優化系統的規則它也不不遵守，不知道是不遵守還是不會看，你幫我確認看看。」

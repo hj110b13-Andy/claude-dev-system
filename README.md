@@ -9,7 +9,7 @@
 |---|---|---|
 | `rules/` | 通用規則（分層說明見 `rules/README.md`）；`core.md` 是唯一會進 CLAUDE.md 的部分 | `claude-dev-system/rules/`；`core.md` 另合併進 `CLAUDE.md` 標記區塊 |
 | `skills/` | `cds-agent-dispatch`、`cds-safe-refactor`、`cds-doc-governance`、`cds-feedback-audit`、`cds-blast-radius`、`cds-verify-app`、`cds-session-pickup`、`cds-project-init`、`cds-project-audit`、`cds-modularize`（皆有 frontmatter） | `skills/<名稱>/`（Claude Code 原生個人 skill 位置） |
-| `hooks/usage_guard.py` | 用量守門 hook、查證守門 hook（Stop：問答題回覆含年份／數字卻沒「來源」段就退回補一次）、壓縮後重新開工 hook（SessionStart：對話被壓縮後重新注入開工清單與專案健康檢查，壓縮滿 3 次建議開新對話）（通用版；門檻讀設定檔） | `claude-dev-system/hooks/`，並在 `settings.json` 註冊 UserPromptSubmit／PostToolUse |
+| `hooks/usage_guard.py` | 用量守門 hook、查證守門 hook（Stop：問答題回覆含年份／數字卻沒「來源」段就退回補一次）、壓縮後重新開工 hook（SessionStart：對話被壓縮後重新注入開工清單與專案健康檢查，壓縮滿 3 次建議開新對話）、派工補充 hook（SubagentStart：agent 開工時補語言、工作目錄與分支、記憶路徑、核對清單）、交報告守門 hook（PreToolUse SubagentHandback＋SubagentStop 後備：agent 報告不合格退回一次）（通用版；門檻讀設定檔） | `claude-dev-system/hooks/`，並在 `settings.json` 註冊 UserPromptSubmit／PostToolUse |
 | `tools/` | `depgraph.py`（依賴圖／循環閘門）、`moduleInventory.py`（模組盤點）、`progress-diff.py`（文件瘦身逐句比對）、`project-scan.py`（專案盤點）、`cleanup.py`（安全清理：worktree、對話暫存、npm cache、.next；預設只列清單）、`procs.py`（列出這場對話跑太久的工具指令程序，只列不殺）、`resgate.py`（重型工作記憶體閘門與延後清單）、`video.py`（影片：搜尋、逐字稿、截圖、數據、Gemini 問答；選用，需 `--with-video`）；不寫死路徑，全用參數 | `claude-dev-system/tools/` |
 | `config/` | `VERSION`、`compat.json`、`dispatch-config.json`（用量門檻、方案期間、模型表；專案 `.claude/dispatch-config.json` 優先於全域）、`web-sources.json`（聯網來源：免金鑰搜尋 MCP 與 WebSearch 上限 env，選用）、`video.json`（影片來源：要 pip 的套件與 video.py 預設值，選用） | `claude-dev-system/config/`（dispatch-config 可自行修改，更新時保留；本機金鑰與開關在 `local.json`，不進 repo） |
 | `installer/` | `install.py`＋`cds/` 模組（只用 Python 標準庫） | — |

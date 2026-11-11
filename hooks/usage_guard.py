@@ -202,11 +202,20 @@ def _pa_count_sources(cwd, limit=3000, budget=0.5):
 
 
 def _pa_skip(cwd):
-    """家目錄、磁碟根目錄、claude-dev-system 本身不做。回正規化的 cwd 或 None。"""
+    """家目錄、磁碟根目錄、claude-dev-system 本身不做。回正規化的專案資料夾（子資料夾會往上找 git 根目錄）或 None。"""
     if not cwd or not os.path.isdir(cwd):
         return None
     cwd = os.path.abspath(cwd)
     home = os.path.expanduser("~")
+    # 0.22.0：工作目錄在專案的子資料夾時（沒有自己的 .git／CLAUDE.md），往上找到 git 根目錄當專案——2026-11-11 這個 repo 的對話
+    # cd 到 installer/ 後被判成「沒有 CLAUDE.md、非 git 的新專案」要求初始化。只認 .git（上層的 CLAUDE.md 可能是工作區共用的，不代表專案根）。
+    if not os.path.exists(os.path.join(cwd, ".git")) and not os.path.exists(os.path.join(cwd, "CLAUDE.md")):
+        d = os.path.dirname(cwd)
+        while d and d != os.path.dirname(d) and d != home:
+            if os.path.exists(os.path.join(d, ".git")):
+                cwd = d
+                break
+            d = os.path.dirname(d)
     if cwd in (home, os.path.dirname(cwd)) or os.path.dirname(cwd) == cwd:
         return None
     if os.path.exists(os.path.join(cwd, "installer", "cds", "paths.py")) and os.path.exists(os.path.join(cwd, "rules", "core.md")):

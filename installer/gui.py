@@ -331,23 +331,27 @@ class App:
         self.sguard_var = tk.BooleanVar(value=f.source_guard)
         ttk.Checkbutton(core, text="查證守門 hook（回覆結束時機械檢查：問答題的回覆含年份／數字卻沒「來源」段，就退回補來源一次；程式工作與純概念不擋）",
                         variable=self.sguard_var, command=self.update_diff).pack(anchor="w")
-        th = ttk.Frame(core); th.pack(anchor="w", pady=4)
+        thf = self._flow(core, 4)  # 0.22.0：這三列在視窗寬 980 時說明文字被右邊切掉，改用自動換行容器
+        th = ttk.Frame(thf); self._flow_add(thf, th)
         ttk.Label(th, text="門檻：5 小時 ≥").pack(side="left")
         self.five_var = tk.StringVar(value=str(f.thresholds["fiveHour"]))
         self.seven_var = tk.StringVar(value=str(f.thresholds["sevenDay"]))
         self._no_wheel_change(ttk.Spinbox(th, from_=1, to=100, width=5, textvariable=self.five_var, command=self.update_diff)).pack(side="left")
         ttk.Label(th, text="%　7 天 ≥").pack(side="left")
         self._no_wheel_change(ttk.Spinbox(th, from_=1, to=100, width=5, textvariable=self.seven_var, command=self.update_diff)).pack(side="left")
-        ttk.Label(th, text="%　（這是全域值；專案若有自己的 .claude/dispatch-config.json，該專案以它為準）", foreground="#555").pack(side="left")
+        ttk.Label(th, text="%").pack(side="left")
+        self._flow_add(thf, ttk.Label(thf, text="（這是全域值；專案若有自己的 .claude/dispatch-config.json，該專案以它為準）", foreground="#555"))
         for v in (self.five_var, self.seven_var):
             v.trace_add("write", lambda *a: self.update_diff())
         tc = f.task_check
-        tcf = ttk.Frame(core); tcf.pack(anchor="w", pady=4)
+        tcw = self._flow(core, 4)
+        tcf = ttk.Frame(tcw); self._flow_add(tcw, tcf)
         self.tc_var = tk.BooleanVar(value=bool(tc.get("enabled")))
         ttk.Checkbutton(tcf, text="背景任務巡檢：有背景任務或 agent 在跑時，每", variable=self.tc_var, command=self.update_diff).pack(side="left")
         self.tc_min_var = tk.StringVar(value=str(int(tc.get("minutes", gm.DEFAULT_TASK_CHECK["minutes"]))))
         self._no_wheel_change(ttk.Spinbox(tcf, from_=1, to=120, width=5, textvariable=self.tc_min_var, command=self.update_diff)).pack(side="left")
-        ttk.Label(tcf, text="分鐘自動檢查一次所有任務（結束或出錯就處理；全部結束就停；沒有任務時不會跑）").pack(side="left")
+        ttk.Label(tcf, text="分鐘自動檢查一次所有任務").pack(side="left")
+        self._flow_add(tcw, ttk.Label(tcw, text="（結束或出錯就處理；全部結束就停；沒有任務時不會跑）"))
         self.tc_min_var.trace_add("write", lambda *a: self.update_diff())
         sbf = self._flow(core, 4)
         self._flow_add(sbf, ttk.Label(sbf, text="派出的 agent："))
@@ -355,13 +359,14 @@ class App:
         for k, txt in (("enabled", "開工時自動補上語言、工作目錄與分支、記憶路徑、核對清單"),
                        ("guard", "交報告時核對（語言、數字出處、記憶、分支），不合格退回一次")):
             self._flow_add(sbf, ttk.Checkbutton(sbf, text=txt, variable=self.sb_vars[k], command=self.update_diff))
-        mgf = ttk.Frame(core); mgf.pack(anchor="w", pady=4)
+        mgw = self._flow(core, 4)
+        mgf = ttk.Frame(mgw); self._flow_add(mgw, mgf)
         ttk.Label(mgf, text="重型工作記憶體門檻（GB）：").pack(side="left")
         self.mem_var = tk.StringVar(value=f"{float(f.mem_gb):g}")
         lo, hi = gm.MEM_GB_RANGE
         self._no_wheel_change(ttk.Spinbox(mgf, from_=lo, to=hi, increment=0.5, width=5, textvariable=self.mem_var, command=self.update_diff)).pack(side="left")
-        ttk.Label(mgf, text=f"（{lo:g}～{hi:g}；回測、全套測試、build、影片轉逐字稿開跑前可用記憶體低於此值就等最多 10 分鐘，仍不足不跑、登記延後清單）",
-                  foreground="#555").pack(side="left")
+        self._flow_add(mgw, ttk.Label(mgw, text=f"（{lo:g}～{hi:g}；回測、全套測試、build、影片轉逐字稿開跑前可用記憶體低於此值就等最多 10 分鐘，仍不足不跑、登記延後清單）",
+                                      foreground="#555"))
         self.mem_var.trace_add("write", lambda *a: self.update_diff())
         pa = f.project_auto
         paf = self._flow(core, (4, 0))

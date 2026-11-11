@@ -34,7 +34,7 @@ description: 派 agent 前決定模型（opus／sonnet／haiku）與努力程度
   2. 重型程序（回測、全套測試、build、影片轉逐字稿）開跑前跑 `py -3 ~/.claude/claude-dev-system/tools/resgate.py wait --project <專案> --desc "<工作>" --rerun "<怎麼重跑>"`（前景 timeout 600000）；exit 1 就不跑，報告寫「記憶體不足、沒有執行」（已登記延後清單）。門檻只讀 dispatch-config.json 的 `resourceGate`，不在派工說明寫數字。
   3. 暫存檔寫在 scratchpad 底下自己的子資料夾 `<agent 名稱或任務代號>/`，不寫在根目錄（11/8 共用 scratchpad 被別的 agent 覆蓋 head.md／tail.md）。
   4. （0.21.0）寫明「在 `<絕對路徑>` 工作，commit 到分支 `<名稱>`」或「不 commit，只交 patch」；派工前先 `git branch --show-current`（agent 的工作目錄繼承主對話當下位置；11/10 Stock-web 有 agent 因此 commit 到部署分支）。
-- **這份工作一定要守的規則與相關記憶，逐條寫進派工說明**（0.21.0）：agent 拿得到 CLAUDE.md 與 MEMORY.md 索引，拿不到回覆語言設定、記憶內文、Stop 守門；實測寫進派工說明的規則幾乎都照做，只在 CLAUDE.md 的常被略過。SubagentStart hook 會自動補一份保底清單，不取代派工說明。收報告時自己核對結論、數字出處與 commit 分支後才轉給使用者。
+- **這份工作一定要守的規則與相關記憶，逐條寫進派工說明**（0.21.0）：agent 拿得到 CLAUDE.md 與 MEMORY.md 索引，拿不到回覆語言設定、記憶內文、Stop 守門；實測寫進派工說明的規則幾乎都照做，只在 CLAUDE.md 的常被略過。SubagentStart hook 會自動補一份保底清單、交報告時另有守門核對五項並退回一次（0.22.0），都不取代派工說明。收報告時自己核對結論、數字出處與 commit 分支後才轉給使用者。
 - 細則：`~/.claude/claude-dev-system/rules/agent-dispatch.md`〈派工固定條款〉〈agent 開工時實際拿到什麼〉〈重型工作與延後清單〉。
 
 ## 第四步：事後校正

@@ -2,6 +2,25 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.22.0（2026-11-11，視窗會自動換 exe）
+
+使用者（2026-11-11，看完 0.21.0 的「還沒解決的」四項）：「還沒解決的繼續全都做完。」「你的任務本身也可以派給agent，順便測試效果怎麼樣。如果不衝突的話，能並行處理就並行處理加快速度。」
+
+- **交報告守門（`hooks/usage_guard.py` 的 `subagent_report_guard`，PreToolUse／matcher `SubagentHandback`）**：agent 交報告的那一下核對五項——①報告是不是使用者設定的語言 ②有 3 個以上年份／帶單位數字卻沒有任何出處（網址或檔案路徑）③上網查過卻沒讀 web-quick.md ④有記憶索引卻沒讀任何內文、報告也沒寫「記憶索引已看，無相關」 ⑤派工單沒寫分支卻 commit、報告又沒交代分支。不合格用 `permissionDecision: "deny"` 退回並列出要補什麼，同一個 agent 只退一次。開關 `subagentBrief.guard`（預設開）。
+  - 攔截點的來源：官方 hooks 文件〈SubagentStop input〉「On Claude Code v2.1.271 or later, a subagent that runs with the SubagentHandback tool delivers its report through that tool before it stops」（SubagentStop 時報告已送達）；anthropics/claude-code#87065、#91910（SubagentStop 會被 agent_type 空字串的內部分支觸發）。
+  - **SubagentStop 後備（`subagent_stop_guard`）**：`SubagentHandback` 只在 auto mode、非 fork 才有（tools-reference.md「Provided only in auto mode, to subagents that the Agent tool runs locally other than forks」）。沒用它交報告的 agent 改在 SubagentStop 核對最後一則訊息，`decision: "block"` 退回一次；agent_type 空字串、紀錄檔或 `.meta.json` 不存在的一律放行。**這條後備只有單元測試，沒有在非 auto mode 實跑過。**
+- **設定視窗**：「派出的 agent」一列兩個開關（開工補充、交報告守門）。核心區六列（門檻、背景任務巡檢、派出的 agent、記憶體門檻、專案自動化、健康檢查）改用放不下就整組換行的容器：視窗寬 980 時原本右邊被切掉（量測 paf 1054／919、hcf 1335／919、sbf 1014／919），改後 980 與 1280、1920 都不超出。
+- **【共用工作目錄】提醒不再誤報**：只在 `git add -A`／`git stash`／`git reset --hard` 真的被當指令執行時才跳，grep／echo／commit 訊息／heredoc 內文／`-c` 字串裡出現不算（改前 10 條不該提醒的案例誤報 8 條，改後 0 條；這場對話當天誤報過 2 次）。
+- **專案自動化不再把子資料夾當新專案**：工作目錄在 git 專案的子資料夾時往上找 git 根目錄（當天這個 repo 的對話 cd 到 `installer/` 後被要求跑 `cds-project-init`）。
+- **派工補充的分支條文改成與守門一致**：派工單叫 commit 卻沒寫分支→照做，但報告開頭寫明 commit hash、分支、工作目錄；派工單沒叫 commit 就不 commit。
+- **README 新小節「agent 開工補充與交報告守門：版本需求與已知限制」**：SubagentStart 事件 2.0.43、hook payload 的 agent_id／agent_type 2.1.69、SubagentHandback 2.1.271（每個版本號附 changelog 原句）；低於這些版本只會漏擋、不會壞，所以 `compat.json` 的最低版本不動。
+- **實派驗證（這場對話，hook 全開，派工單都沒寫語言、記憶、上網規則）**：
+  - 3 個做實際工作的 agent（sonnet；上面 README、視窗版面、提醒誤報三項就是它們做的）：補充送達 3／3；讀相關記憶內文 3／3（0.21.0 前 Stock-web 是 0／81）；有上網的 1 個先讀了 web-quick.md（之前 2／9）；最終報告中文 3／3；commit 的分支與 hash 都有交代 3／3；2 個要跑全套測試的都先過記憶體閘門、不足就沒跑並登記延後（當時 Stock-web 另一場對話的回測佔用，可用 1.8～2.5 GB）。守門 0 次退回（都合格）。中途文字仍有英文（6 則裡 3 則），只有最終報告全是中文。
+  - 1 個故意違規的探針（haiku，被要求交英文報告、不讀記憶）：第一次交報告被守門擋下並列出 2 項，讀了 2 條記憶、改成中文重交，第二次放行。
+  - main 核對：版本號逐條對回 changelog 與 tools-reference.md 原文；版面看了 980 寬的實際截圖並另外量測；提醒誤報讀了 diff。
+- 已知、沒處理：anthropics/claude-code#91910（open）——subagent 自己壓縮對話時，SessionStart(compact) 的 payload 不帶 agent 欄位，我們的「壓縮後重新開工」清單可能被注入到 agent；payload 分不出來，先記在 PROGRESS。
+- 驗證：新增測試 SubagentReportGuard 10 項、設定視窗 1 項、提醒誤報 1 項、專案根目錄 1 項；全套 unittest 結果見 PROGRESS。
+
 ## 0.21.0（2026-11-11，視窗會自動換 exe）
 
 使用者（2026-11-11）：「我現在有發現一個問題，在Stock-web有發生過……它派出去的agent常常都不會遵守該專案裡的規則與長期記憶等等，還有連全域優化系統的規則它也不不遵守，不知道是不遵守還是不會看，你幫我確認看看。」

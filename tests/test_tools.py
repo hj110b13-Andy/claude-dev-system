@@ -138,6 +138,22 @@ class UsageGuardConfig(unittest.TestCase):
             finally:
                 ug.STATE_DIR, ug.USAGE, ug.CONFIG, ug.fetch, sys.stdin = old
 
+    def test_project_root_resolves_from_subfolder_of_git_repo(self):
+        # 0.22.0：cd 到 git 專案的子資料夾不可被當成另一個新專案；上層只有 CLAUDE.md（工作區共用）不算專案根
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp) / "ws"
+            repo = ws / "repo"
+            sub = repo / "pkg" / "inner"
+            sub.mkdir(parents=True)
+            (repo / ".git").mkdir()
+            (ws / "CLAUDE.md").write_text("# 工作區共用", encoding="utf-8")
+            self.assertEqual(os.path.normcase(self.ug._pa_skip(str(sub))), os.path.normcase(str(repo)))
+            self.assertEqual(os.path.normcase(self.ug._pa_skip(str(repo))), os.path.normcase(str(repo)))
+            plain = ws / "newproj" / "src"
+            plain.mkdir(parents=True)
+            self.assertEqual(os.path.normcase(self.ug._pa_skip(str(plain))), os.path.normcase(str(plain)), "上層只有 CLAUDE.md 不往上併")
+            self.assertIsNone(self.ug._pa_skip(str(REPO / "installer")), "claude-dev-system 的子資料夾也不做")
+
     def test_project_auto_msg_decides_init_audit_none_and_dedupes(self):
         import json
         ug = self.ug
