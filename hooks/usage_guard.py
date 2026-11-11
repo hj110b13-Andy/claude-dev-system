@@ -1253,6 +1253,7 @@ SUB_CODE_PATH = re.compile(r"[\w\-./\\]*[\w\-]\.(?:py|ts|tsx|js|jsx|mjs|cjs|sql|
 SUB_CJK_LANG = ("chinese", "中文", "繁體", "zh")
 SUB_GUARD_STATE = os.path.join(STATE_DIR, "subagent-guard.json")
 SUB_MEM_NONE = re.compile(r"記憶索引已看[，,、：:\s]*(?:都|全部|皆)?(?:無相關|沒有相關|與這份工作無關|都無關)")
+SUB_LANG_MIN_RATIO = 0.3  # 中文字比例低於這個值＝不是中文（自己定的；tools/agent-audit.py 匯入同一個值）
 SUB_MIN_NUMS = 3  # 自己定的：少於 3 個帶單位數字的報告不查出處（短回報、進度句）
 
 
@@ -1298,10 +1299,22 @@ def _sub_transcript(payload):
     return None
 
 
+def sub_memory_read(blob, mem_dir):
+    """blob（Read 過的路徑＋Bash／PowerShell 指令）裡有沒有讀過 mem_dir 底下任何一條記憶的內文（MEMORY.md 索引不算）。
+    認「路徑含 <專案>/memory 且出現某個記憶檔名」，所以先 cd 進資料夾再用相對檔名讀也算。守門與 tools/agent-audit.py 共用。"""
+    norm = (blob or "").replace(chr(92), "/")
+    try:
+        names = [n for n in os.listdir(mem_dir) if n.lower().endswith(".md") and n != "MEMORY.md"]
+    except OSError:
+        return False
+    key = os.path.basename(os.path.dirname(mem_dir)) + "/memory"
+    return key in norm and any(n in norm for n in names)
+
+
 def subagent_report_judge(report, scan, lang, mem_dir):
     """回不合格項目清單（字串）。scan 為 None（讀不到紀錄）時只查報告本身。純函式，測試直接呼叫。"""
     bad = []
-    if lang and any(k in lang.lower() for k in SUB_CJK_LANG) and len(report) >= 80 and _sub_cjk_ratio(report) < 0.3:
+    if lang and any(k in lang.lower() for k in SUB_CJK_LANG) and len(report) >= 80 and _sub_cjk_ratio(report) < SUB_LANG_MIN_RATIO:
         bad.append(f"報告不是使用者設定的語言（{lang}）→ 整份改用該語言重寫。")
     nums = len(SG_NUM.findall(report)) + len(SG_YEAR.findall(report))
     if nums >= SUB_MIN_NUMS and not ("http://" in report or "https://" in report or "未附來源" in report
@@ -1315,13 +1328,7 @@ def subagent_report_judge(report, scan, lang, mem_dir):
     # 0.23.0（Stock-web 2026-11-11 兩個實例）：①先 cd 到記憶資料夾再用相對檔名讀也算讀過（原本只認完整路徑，誤擋一個讀過 4 條的 agent）
     # ②報告寫「有關的三條沒有衝突」卻沒讀內文不算數——只有明寫「無相關」才可免讀（原本看到「記憶索引」四個字就放行）。
     if mem_dir and os.path.isfile(os.path.join(mem_dir, "MEMORY.md")) and not SUB_MEM_NONE.search(report):
-        norm = blob.replace(chr(92), "/")
-        try:
-            names = [n for n in os.listdir(mem_dir) if n.lower().endswith(".md") and n != "MEMORY.md"]
-        except OSError:
-            names = []
-        key = os.path.basename(os.path.dirname(mem_dir)) + "/memory"
-        if not (key in norm and any(n in norm for n in names)):
+        if not sub_memory_read(blob, mem_dir):
             bad.append(f"沒有讀任何一條長期記憶的內文 → 看 context 裡的 MEMORY.md 索引，與這份工作有關的用 Read 讀內文（`{mem_dir}`）並照做、必要時修正成果；"
                        "真的一條都無關才在報告加一行「記憶索引已看，無相關」（有關卻沒讀內文不算）。")
     if any(SUB_COMMIT.search(c) for c in scan["cmds"]) and not re.search(r"分支|branch", scan["prompt"], re.I) and not re.search(r"分支|branch", report, re.I):
@@ -1370,7 +1377,7 @@ def subagent_lang_nudge(payload):
             for b in (d.get("message") or {}).get("content") or [] if d.get("type") == "assistant" else []:
                 if isinstance(b, dict) and b.get("type") == "text":
                     t = (b.get("text") or "").strip()
-                    if len(t) > 40 and _sub_cjk_ratio(t) < 0.3:
+                    if len(t) > 40 and _sub_cjk_ratio(t) < SUB_LANG_MIN_RATIO:
                         hit = t
         if not hit:
             return None

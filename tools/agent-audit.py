@@ -26,7 +26,7 @@ from collections import Counter
 HOME = os.path.expanduser("~")
 PROJECTS = os.path.join(HOME, ".claude", "projects")
 GUARD_LOG = os.path.join(HOME, ".claude", "state", "source-guard.log")
-LANG_RATIO = 0.3  # 同 usage_guard.subagent_report_judge 的門檻
+LANG_RATIO = None  # main() 載入 usage_guard 後設成 ug.SUB_LANG_MIN_RATIO（唯一來源）
 
 # ---- 以下是 usage_guard.py 沒有的判定（本工具自己的）----
 RE_MEMORY = re.compile(r"memory[\\/](?!MEMORY\.md)[\w\-]+\.md")
@@ -95,8 +95,11 @@ def _content_text(c):
         return str(c)
 
 
-def analyze(path, ug):
+def analyze(path, ug, mem_dir=None):
+    global LANG_RATIO
+    LANG_RATIO = ug.SUB_LANG_MIN_RATIO
     aid = os.path.basename(path)[len("agent-"):-len(".jsonl")]
+    last_tool = None  # 上一個工具呼叫：退回訊息只認「緊接在 SubagentHandback 之後的工具結果」，grep 到 hook 原始碼裡同一句不算
     meta = {}
     try:
         with open(path[:-6] + ".meta.json", encoding="utf-8") as f:
@@ -134,7 +137,9 @@ def analyze(path, ug):
         c = msg.get("content")
         if t == "user":
             blob = c if isinstance(c, str) else _content_text(c)
-            if RE_DENY in blob:
+            is_result = isinstance(c, list) and any(isinstance(x, dict) and x.get("type") == "tool_result" for x in c)
+            # 兩種退回：PreToolUse 擋下 SubagentHandback（工具結果）；SubagentStop 後備（一般訊息，開頭就是守門字樣）
+            if RE_DENY in blob and ((is_result and last_tool == "SubagentHandback") or (not is_result and "【報告守門（hook）】" in blob[:200])):
                 denied_seen = True
                 ev.append(("DENY", re.sub(r"\s+", " ", blob)[:300]))
             continue
@@ -151,6 +156,7 @@ def analyze(path, ug):
             if x.get("type") != "tool_use":
                 continue
             n, i = x.get("name") or "", x.get("input") or {}
+            last_tool = n
             p = str(i.get("file_path") or "")
             cmd = str(i.get("command") or "")
             if n == "Read" and "web-quick" in p:
@@ -189,7 +195,8 @@ def analyze(path, ug):
     cmds = scan["cmds"] or cmds_all
     web = any(ug.SUB_WEB_TOOL.search(x) for x in scan["tools"])
     # 命令裡 resgate 與重型分開判（含 resgate 的指令不算重型）
-    heavy = any(RE_HEAVY.search(c) and "resgate" not in c for c in cmds)
+    # 0.23.0 起建議寫法是 `resgate.py run … -- <重型指令>`（同一個指令裡），所以含 resgate 的指令也算「要跑重型工作」
+    heavy = any(RE_HEAVY.search(c) for c in cmds)
     resg = any("resgate" in c for c in cmds)
     deny_idx = [k for k, (kind, _) in enumerate(ev) if kind == "DENY"]
     resubmitted = None
@@ -202,7 +209,7 @@ def analyze(path, ug):
         "model": meta.get("model") or (model or "").replace("claude-", "") or "?",
         "effort": meta.get("effort"),
         "brief": brief,
-        "mem": bool(RE_MEMORY.search(blob)),
+        "mem": ug.sub_memory_read(blob, mem_dir) if mem_dir and os.path.isdir(mem_dir) else bool(RE_MEMORY.search(blob)),
         "mem_tool": any(RE_MEMORY.search(p) for p in scan["reads"]),  # 用 Read 工具讀；其餘（Get-Content、cat）只經指令
         "web": web,
         "web_quick": web and ("web-quick" in blob or "web-sources" in blob),
@@ -334,7 +341,7 @@ def main():
     rows = []
     for sid, sub, _ in sessions:
         for f in sorted(glob.glob(os.path.join(sub, "agent-*.jsonl")), key=os.path.getmtime):
-            r = analyze(f, ug)
+            r = analyze(f, ug, os.path.join(pdir, "memory"))
             r["session"] = sid
             rows.append(r)
     blocks = read_blocks(GUARD_LOG)
