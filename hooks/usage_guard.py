@@ -1574,10 +1574,12 @@ def subagent_report_judge(report, scan, lang, mem_dir):
 
 SUB_LANG_STATE = os.path.join(STATE_DIR, "subagent-lang.json")
 SUB_LANG_TAIL = 60000  # 只讀 agent 對話紀錄最後這麼多位元組
+SUB_LANG_MAX = 5  # 自己定的：同一個 agent 最多提醒這麼多次（0.26.0 前只提醒 1 次——Stock-web 2026-11-11 三個 opus agent 收到一次提醒後
+#                   只改一句又寫回英文，紀錄是「英、提醒、中、英、英」；探針用的 haiku 一次就改）
 
 
 def subagent_lang_nudge(payload):
-    """PostToolUse 在 agent 裡觸發時：它最近寫的說明文字不是使用者的語言就提醒，同一個 agent 只提醒一次。
+    """PostToolUse 在 agent 裡觸發時：它最近寫的說明文字不是使用者的語言就提醒；每出現一則新的就再提醒，同一則不重複，最多 SUB_LANG_MAX 次。
     2026-11-11 實派 3 個 agent：最終報告都是中文，但工具呼叫之間的說明文字 6 則裡 3 則英文
     （Stock-web 2026-09-14 使用者原話：「這個過程都還是英文，要用繁體中文」）。任何例外都不提醒。"""
     try:
@@ -1595,7 +1597,9 @@ def subagent_lang_nudge(payload):
                 seen = json.load(f) or {}
         except Exception:
             seen = {}
-        if aid in seen:
+        rec = seen.get(aid)
+        rec = rec if isinstance(rec, dict) else ({"n": 1, "last": "", "at": float(rec)} if rec else {"n": 0, "last": "", "at": 0})
+        if rec["n"] >= SUB_LANG_MAX:
             return None
         with open(tp, "rb") as f:
             f.seek(0, 2)
@@ -1615,16 +1619,18 @@ def subagent_lang_nudge(payload):
                     t = (b.get("text") or "").strip()
                     if len(t) > 40 and _sub_cjk_ratio(t) < SUB_LANG_MIN_RATIO:
                         hit = t
-        if not hit:
-            return None
+        if not hit or hit[:80] == rec["last"]:
+            return None  # 沒有不合語言的文字，或同一則已經提醒過
         now = time.time()
-        seen = {k: v for k, v in seen.items() if now - float(v) < 3 * 86400}
-        seen[aid] = now
+        seen = {k: v for k, v in seen.items() if now - float(v["at"] if isinstance(v, dict) else v) < 3 * 86400}
+        n = rec["n"] + 1
+        seen[aid] = {"n": n, "last": hit[:80], "at": now}
         os.makedirs(STATE_DIR, exist_ok=True)
         with open(SUB_LANG_STATE, "w", encoding="utf-8") as f:
-            json.dump(seen, f)
-        return (f"【語言（hook）】你剛才在工具呼叫之間寫的說明文字不是使用者設定的語言（{lang}）：「{hit[:50]}…」。"
-                "使用者會看這些過程文字：從現在起，說明文字與最終報告都用該語言（與全域 CLAUDE.md 同一種文字）；指令、程式碼、檔名照原樣。只提醒這一次。")
+            json.dump(seen, f, ensure_ascii=False)
+        again = "" if n == 1 else f"這是第 {n} 次提醒，前面提醒過你又寫回原來的語言。"
+        return (f"【語言（hook）】{again}你剛才在工具呼叫之間寫的說明文字不是使用者設定的語言（{lang}）：「{hit[:50]}…」。"
+                "使用者會看這些過程文字：從現在起，每一則說明文字與最終報告都用該語言（與全域 CLAUDE.md 同一種文字）；指令、程式碼、檔名照原樣。")
     except Exception:
         return None
 

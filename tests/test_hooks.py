@@ -681,7 +681,16 @@ class SubagentLangNudge(unittest.TestCase):
         msg = self.call("e1")
         self.assertIn("【語言（hook）】", msg)
         self.assertIn("chinese", msg)
-        self.assertIsNone(self.call("e1"), "同一個 agent 只提醒一次")
+        self.assertIsNone(self.call("e1"), "同一則文字不重複提醒")
+        self.agent("e1", ["Now I will inspect the repository layout and then run the complete test suite.",
+                          "我先看資料夾結構，再跑測試確認沒有壞掉。",
+                          "Waiting for the type check to finish before I look at the remaining failures."])
+        again = self.call("e1")
+        self.assertIn("第 2 次提醒", again, "0.26.0：提醒後又寫回英文要再提醒（Stock-web opus agent 實例）")
+        for i in range(3, ug.SUB_LANG_MAX + 3):
+            self.agent("e1", [f"Round {i}: still writing my progress notes in English for some reason, sorry about that."])
+            last = self.call("e1")
+        self.assertIsNone(last, "超過上限就不再提醒")
 
     def test_chinese_or_short_or_code_text_not_nudged(self):
         self.agent("e2", ["我先看一下資料夾結構，再跑全套測試確認沒有壞。", "OK", "跑 `py -3 -m unittest discover -s tests` 確認全部通過，再看 git status 有沒有殘留。"])

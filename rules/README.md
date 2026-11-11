@@ -8,5 +8,7 @@
 | 3. 專案規則 | 各專案 `CLAUDE.md`、`.claude/` | 專案內自動載入 | 業務規則、資料模型、專案命令、專案門檻 |
 | 4. 任務派工規格 | 派 agent 時的指示 | 只對該 agent | 該次任務的驗收與限制 |
 
+`core-detail.md`（0.26.0）：core.md 縮短的條文的完整原文——判定條件細節、例子、使用者原話與日期；core.md 只留觸發條件與必做動作。
+
 衝突時**越下層越優先**（專案規則 > 全域規則）；專案的特殊需求不可升格成全域規則（規格 11.5）。
 原 Stock-web `docs/claude-rules/global-workflow.md`（規則二、三、六～十二、派工規格品質、git 協作）已於 0.2.0 去專案化並分入 `workflow.md`（二、三、六～九）、`token-efficiency.md`（十）、`safe-refactor.md`（十一）、`doc-governance.md`（十二）、`agent-dispatch.md`（派工規格品質、git 協作）；各檔後半「完整規則原文」保留使用者原話、數字、日期。
