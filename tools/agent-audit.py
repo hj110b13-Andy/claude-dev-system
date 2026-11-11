@@ -95,6 +95,20 @@ def _content_text(c):
         return str(c)
 
 
+# 0.25.1：重型工作只認「真的在執行」的指令——子指令開頭是執行器（py／node／npx／tsx／npm…）而且含重型關鍵字。
+# 原本整段文字比對，`ls scripts/backtest/`、`cat scripts/backtest/x.ts`、`grep … docs/backtest/…` 這類只是讀檔也算
+# （2026-11-11 Stock-web 一個 opus agent 被算成 11 次重型工作，其實都在讀檔）。子指令切法用 hook 的 _command_segments。
+RE_RUNNER = re.compile(r"^(?:\w+=\S+\s+)*(?:py|python3?|node|npx|tsx|npm|pnpm|yarn|pytest|vitest|next)(?:\.exe|\.cmd)?\b", re.I)
+
+
+def is_heavy(cmd, ug):
+    try:
+        segs = ug._command_segments(cmd)
+    except Exception:
+        segs = [cmd]
+    return any(RE_RUNNER.match(sg) and RE_HEAVY.search(sg) for sg in segs)
+
+
 def analyze(path, ug, mem_dir=None):
     global LANG_RATIO
     LANG_RATIO = ug.SUB_LANG_MIN_RATIO
@@ -170,7 +184,7 @@ def analyze(path, ug, mem_dir=None):
                 if "resgate" in cmd:
                     resg = True
                     ev.append(("resgate", "resgate"))
-                elif RE_HEAVY.search(cmd):
+                elif is_heavy(cmd, ug):
                     heavy = True
                     ev.append(("heavy", "重型工作"))
                 elif ug.SUB_COMMIT.search(cmd):
@@ -196,7 +210,7 @@ def analyze(path, ug, mem_dir=None):
     web = any(ug.SUB_WEB_TOOL.search(x) for x in scan["tools"])
     # 命令裡 resgate 與重型分開判（含 resgate 的指令不算重型）
     # 0.23.0 起建議寫法是 `resgate.py run … -- <重型指令>`（同一個指令裡），所以含 resgate 的指令也算「要跑重型工作」
-    heavy = any(RE_HEAVY.search(c) for c in cmds)
+    heavy = any(is_heavy(c, ug) for c in cmds)
     resg = any("resgate" in c for c in cmds)
     deny_idx = [k for k, (kind, _) in enumerate(ev) if kind == "DENY"]
     resubmitted = None

@@ -91,6 +91,20 @@ class AgentAudit(unittest.TestCase):
         self.assertEqual(rc, 0)
         return json.loads(out)
 
+    def test_heavy_only_when_executed(self):
+        # 0.25.1：讀 backtest 資料夾裡的檔不是重型工作；真的執行才算，且與閘門寫在同一個指令也算
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("agent_audit_mod", Path(__file__).resolve().parents[1] / "tools" / "agent-audit.py")
+        aa = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(aa)
+        ug = aa.load_guard()
+        for cmd in ("ls scripts/backtest/ | grep cool", "cat scripts/backtest/a.ts | head -200", 'grep -n "x" docs/backtest/r.md',
+                    "cd repo && sed -n 1,80p scripts/backtest/signal.ts", 'git commit -m "跑完 backtest" -- a.md'):
+            self.assertFalse(aa.is_heavy(cmd, ug), cmd)
+        for cmd in ("cd repo && npx tsx scripts/backtest/run.ts", "npm run build", "CI=1 npx.cmd vitest run a.test.ts",
+                    "py -3 -m unittest discover -s tests", 'py -3 resgate.py run --desc "x" -- npx.cmd vitest run'):
+            self.assertTrue(aa.is_heavy(cmd, ug), cmd)
+
     def test_denominators(self):
         self.build()
         s = self.summary()["summary"]

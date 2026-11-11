@@ -2,6 +2,11 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.25.1（2026-11-11，視窗會自動換 exe）
+
+- **agent-audit.py 的「重型工作」只認真的在執行的指令**：原本整段文字比對 `backtest`，`ls scripts/backtest/`、`cat scripts/backtest/x.ts`、`grep … docs/backtest/…` 這類讀檔也算。看 Stock-web 當天 10:35 派的 opus agent 時發現它被算成 11 次重型工作、看起來像沒過閘門，逐條看其實都在讀檔；真正跑測試那次有先過閘門（用的是 0.23.0 新增的 `resgate.py run`）。現在要子指令開頭是執行器（py／node／npx／tsx／npm…）且含重型關鍵字才算，子指令切法共用 hook 的 `_command_segments`。
+- 驗證：tests/test_agent_audit.py 新增 1 項（5 條讀檔不算、5 條執行要算）。
+
 ## 0.25.0（2026-11-11，視窗會自動換 exe）
 
 使用者（2026-11-11）問「還有甚麼要修或優化的?」，main 建議先做兩項自己系統製造的雜訊：「照你建議做」。
