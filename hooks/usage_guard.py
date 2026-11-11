@@ -423,6 +423,60 @@ def health_msg(cwd, force=False, session_id=None):
         return None
 
 
+# 0.23.0：agent 自己壓縮對話時，Claude Code 也會觸發 SessionStart(compact)，payload 不帶任何 agent 欄位（anthropics/claude-code#91910，
+# 2.1.322 仍 open）。2026-11-11 在這台重現：一個探針 agent 壓縮 3 次，3 次【壓縮後重新開工】都被注入到 agent 裡，主對話的壓縮計數被加到 3。
+# 分辨方式：壓縮完成時該對話紀錄會先寫一筆 compact_boundary（實測比 hook 注入早約 0.2 秒）。主對話紀錄沒有剛寫的 boundary、
+# 而某個 agent 紀錄有 → 是 agent 的壓縮，不注入、不計數。讀不到或判不出來一律照舊注入（寧可多注入，不可讓主對話漏掉重新開工）。
+COMPACT_FRESH_SEC = 15  # 自己定的：實測間隔 0.2 秒，留寫檔延遲的餘裕
+COMPACT_TAIL = 400000
+
+
+def _fresh_compact_boundary(path, now=None):
+    """這份對話紀錄尾端有沒有 COMPACT_FRESH_SEC 秒內寫入的 compact_boundary。"""
+    try:
+        import datetime
+        now = now or time.time()
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - COMPACT_TAIL))
+            tail = f.read().decode("utf-8", errors="replace")
+        for line in reversed(tail.splitlines()):
+            if '"compact_boundary"' not in line:
+                continue
+            try:
+                d = json.loads(line)
+            except Exception:
+                continue
+            if d.get("subtype") != "compact_boundary":
+                continue
+            ts = datetime.datetime.fromisoformat(str(d.get("timestamp")).replace("Z", "+00:00")).timestamp()
+            return 0 <= now - ts <= COMPACT_FRESH_SEC
+        return False
+    except Exception:
+        return False
+
+
+def compact_from_subagent(payload, now=None):
+    """SessionStart(compact) 是不是某個 agent 自己壓縮觸發的（不是主對話）。有明確證據才回 True。"""
+    try:
+        tp = payload.get("transcript_path") or ""
+        sid = str(payload.get("session_id") or "")
+        if not tp or not sid:
+            return False
+        now = now or time.time()
+        if _fresh_compact_boundary(tp, now):
+            return False  # 主對話自己剛壓縮
+        sub = os.path.join(os.path.dirname(tp), sid, "subagents")
+        for name in os.listdir(sub):
+            p = os.path.join(sub, name)
+            if name.endswith(".jsonl") and now - os.path.getmtime(p) <= COMPACT_FRESH_SEC + 5 and _fresh_compact_boundary(p, now):
+                return True
+        return False
+    except Exception:
+        return False
+
+
 def compact_msg(cwd, session_id):
     """SessionStart（compact／resume）：壓縮會把前面讀過的 skill、規則細節與開工檢查摘要掉；重新注入開工清單＋健康檢查＋專案自動化。
     同一場對話壓縮滿 newSessionAfterCompactions 次（及其倍數）建議開新對話。"""
@@ -1487,6 +1541,8 @@ def main():
             print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": msg}}, ensure_ascii=True))
         return
     if event == "SessionStart":  # 0.12.0：壓縮或接續後重新開工；新對話（startup）由 UserPromptSubmit 的專案自動化處理
+        if payload.get("source") == "compact" and compact_from_subagent(payload):
+            return  # agent 自己的壓縮：不把主對話的開工清單塞給它，也不算進主對話的壓縮次數
         if payload.get("source") in ("compact", "resume"):
             msg = compact_msg(payload.get("cwd"), payload.get("session_id"))
             if msg:

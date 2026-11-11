@@ -5,6 +5,7 @@ import importlib.util
 import json
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -487,6 +488,37 @@ class SubagentBrief(unittest.TestCase):
         self.assertIn(("SubagentStart", None), settings_ops.HOOK_SPECS)
         s, rec = settings_ops.add_hooks({}, "py -3 x.py # claude-dev-system")
         self.assertEqual(len(s["hooks"]["SubagentStart"]), 1)
+
+
+class SubagentCompaction(unittest.TestCase):
+    """0.23.0：agent 自己壓縮觸發的 SessionStart(compact) 不注入主對話的開工清單（anthropics/claude-code#91910）。"""
+
+    def setUp(self):
+        import datetime
+        self.dt = datetime
+        self.tmp = Path(tempfile.mkdtemp())
+        self.main = self.tmp / "sess.jsonl"
+        self.sub = self.tmp / "sess" / "subagents"
+        self.sub.mkdir(parents=True)
+        self.payload = {"hook_event_name": "SessionStart", "source": "compact", "session_id": "sess", "transcript_path": str(self.main)}
+
+    def boundary(self, ago):
+        ts = self.dt.datetime.fromtimestamp(time.time() - ago, self.dt.timezone.utc).isoformat().replace("+00:00", "Z")
+        return json.dumps({"type": "system", "subtype": "compact_boundary", "timestamp": ts})
+
+    def test_subagent_compaction_detected(self):
+        self.main.write_text(json.dumps({"type": "user", "message": {"content": "hi"}}) + chr(10), encoding="utf-8")
+        (self.sub / "agent-a1.jsonl").write_text(self.boundary(0.3) + chr(10), encoding="utf-8")
+        self.assertTrue(ug.compact_from_subagent(self.payload))
+
+    def test_main_compaction_or_stale_or_missing_is_not_subagent(self):
+        self.main.write_text(self.boundary(0.3) + chr(10), encoding="utf-8")
+        (self.sub / "agent-a1.jsonl").write_text(self.boundary(0.3) + chr(10), encoding="utf-8")
+        self.assertFalse(ug.compact_from_subagent(self.payload), "主對話自己剛壓縮：照舊注入")
+        self.main.write_text("{}" + chr(10), encoding="utf-8")
+        (self.sub / "agent-a1.jsonl").write_text(self.boundary(600) + chr(10), encoding="utf-8")
+        self.assertFalse(ug.compact_from_subagent(self.payload), "agent 的壓縮是很久以前的：不能當證據")
+        self.assertFalse(ug.compact_from_subagent({"source": "compact", "session_id": "none", "transcript_path": str(self.tmp / "x.jsonl")}), "讀不到就照舊")
 
 
 class AutoTurnGuard(unittest.TestCase):
