@@ -8,6 +8,7 @@ update／uninstall 都不會動它，也不會進 repo。
 from __future__ import annotations
 
 import copy
+import json
 import re
 import shutil
 import urllib.parse
@@ -143,13 +144,36 @@ def default_runner(args: list[str]) -> tuple[int, str]:
     return r.returncode, ((r.stdout or b"") + (r.stderr or b"")).decode("utf-8", "replace").strip()
 
 
-def _same(have: dict | None, want: dict) -> bool:
-    return bool(have) and have.get("url") == want["url"] and dict(have.get("headers") or {}) == want["headers"]
+# 0.24.0：註冊時加 "alwaysLoad": false，讓這些伺服器的工具全部留在工具搜尋後面（要用時才載入定義）。
+# 起因（2026-11-11 量 Stock-web 對話）：firecrawl 與 firecrawl-key 的 5 個工具被伺服器標成一開始就載入，兩份定義共 45 KB，
+# 每一次請求都帶著；那場對話壓縮後起跳就約 10 萬 token，2 小時內壓縮 7 次。
+# 依據：code.claude.com/docs/en/mcp〈Defer a server's tools〉「To keep all of a server's tools behind tool search, set
+# "alwaysLoad": false in that server's entry … Requires Claude Code v2.1.287 or later」。
+DEFER_MIN_VERSION = (2, 1, 287)
 
 
-def sync_mcp(lay: Layout, old: dict, runner=default_runner, log: list | None = None) -> dict:
-    """把 user scope 的 MCP 對齊 desired：只動本工具加過的名稱；使用者自己同名的略過；關掉的移除。"""
+def defer_supported() -> bool:
+    """這台的 Claude Code 版本夠不夠新（讀不到版本就當不支援，照舊註冊）。"""
+    try:
+        from . import checks
+        raw = checks.run_version(["claude", "--version"])
+        return bool(raw) and tuple(checks.parse_ver(raw)) >= DEFER_MIN_VERSION
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _same(have: dict | None, want: dict, defer: bool = False) -> bool:
+    if not (bool(have) and have.get("url") == want["url"] and dict(have.get("headers") or {}) == want["headers"]):
+        return False
+    return (have.get("alwaysLoad") is False) if defer else True
+
+
+def sync_mcp(lay: Layout, old: dict, runner=default_runner, log: list | None = None, defer: bool | None = None) -> dict:
+    """把 user scope 的 MCP 對齊 desired：只動本工具加過的名稱；使用者自己同名的略過；關掉的移除。
+    defer＝註冊成工具延後載入（None：真的呼叫 claude 時依版本自動判斷；測試用的假 runner 預設不開）。"""
     log = log if log is not None else []
+    if defer is None:
+        defer = runner is default_runner and defer_supported()
     src, local = sources(lay), load_local(lay)
     want, have = desired_servers(src, local), installed_servers(lay)
     mine = set(old.get("mcpAdded", []))
@@ -159,20 +183,26 @@ def sync_mcp(lay: Layout, old: dict, runner=default_runner, log: list | None = N
             rec["skipped"].append(name)
             log.append(f"{WARN} MCP {name} 已由使用者自行設定，略過不覆蓋（想交給本工具管理：先 `claude mcp remove -s user {name}` 再重跑）")
             continue
-        if name in mine and _same(have.get(name), spec):
+        if name in mine and _same(have.get(name), spec, defer):
             rec["mcpAdded"].append(name)
             continue
         if name in mine and name in have:
-            runner(["remove", "--scope", "user", name])  # 連線設定變了（例如新增金鑰），重建
-        args = ["add", "--scope", "user", "--transport", "http", name, spec["url"]]
-        for k, v in spec["headers"].items():
-            args += ["--header", f"{k}: {v}"]
+            runner(["remove", "--scope", "user", name])  # 連線設定變了（例如新增金鑰、改成延後載入），重建
+        if defer:
+            entry = {"type": "http", "url": spec["url"], "alwaysLoad": False}
+            if spec["headers"]:
+                entry["headers"] = dict(spec["headers"])
+            args = ["add-json", "--scope", "user", name, json.dumps(entry, ensure_ascii=False)]
+        else:
+            args = ["add", "--scope", "user", "--transport", "http", name, spec["url"]]
+            for k, v in spec["headers"].items():
+                args += ["--header", f"{k}: {v}"]
         code, out = runner(args)
         if code != 0:
             log.append(f"{BAD} MCP {name} 註冊失敗：{mask(out, local)}")
             continue
         rec["mcpAdded"].append(name)
-        log.append(f"MCP 註冊 {name} → {mask(spec['url'], local)}" + ("（含 header）" if spec["headers"] else ""))
+        log.append(f"MCP 註冊 {name} → {mask(spec['url'], local)}" + ("（含 header）" if spec["headers"] else "") + ("（工具延後載入）" if defer else ""))
     for name in sorted(mine - set(want)):
         if name in have:
             code, out = runner(["remove", "--scope", "user", name])

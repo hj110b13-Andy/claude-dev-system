@@ -506,8 +506,20 @@ class SubagentCompaction(unittest.TestCase):
         ts = self.dt.datetime.fromtimestamp(time.time() - ago, self.dt.timezone.utc).isoformat().replace("+00:00", "Z")
         return json.dumps({"type": "system", "subtype": "compact_boundary", "timestamp": ts})
 
-    def msg(self, model):
-        return json.dumps({"type": "assistant", "message": {"role": "assistant", "model": model, "content": [{"type": "text", "text": "x"}]}})
+    def msg(self, model, tokens=1000):
+        return json.dumps({"type": "assistant", "message": {"role": "assistant", "model": model, "usage": {"input_tokens": tokens},
+                                                             "content": [{"type": "text", "text": "x"}]}})
+
+    def test_same_model_decided_by_context_size(self):
+        # 2026-11-11 實跑：主對話與 agent 同模型時 boundary 等 2 秒也沒落檔，改比最後一次請求的 context 大小
+        self.main.write_text(self.msg("claude-opus-5-5", 60000) + chr(10), encoding="utf-8")
+        (self.sub / "agent-a1.jsonl").write_text(self.msg("claude-opus-5-5", 165000) + chr(10), encoding="utf-8")
+        self.assertTrue(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5")))
+        self.main.write_text(self.msg("claude-opus-5-5", 166000) + chr(10), encoding="utf-8")
+        (self.sub / "agent-a1.jsonl").write_text(self.msg("claude-opus-5-5", 90000) + chr(10), encoding="utf-8")
+        self.assertFalse(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5")), "主對話比較滿：是主對話在壓縮")
+        (self.sub / "agent-a1.jsonl").write_text(self.msg("claude-opus-5-5", 170000) + chr(10), encoding="utf-8")
+        self.assertFalse(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5")), "差不到一成：判不出來就照舊注入")
 
     def test_different_model_matching_active_agent_is_subagent(self):
         self.main.write_text(self.msg("claude-sonnet-5-5") + chr(10), encoding="utf-8")
@@ -756,6 +768,13 @@ class SubagentReportGuard(unittest.TestCase):
 class RecoGuard(unittest.TestCase):
     """0.19.0：建議沒標已查證／未查證要退回；「不含待查證事實」不能蓋過研究結論。"""
     LONG = "說明" * 120
+
+    def test_descriptive_or_negated_mentions_are_not_recommendations(self):
+        # 0.24.0：敘述句、否定句裡的「建議」不算提建議
+        for text in ("主對話的壓縮計數被加到 3，會誤建議你開新對話。", "壓縮滿 3 次 hook 會建議開新對話。", "這個做法不建議改。", "系統的建議方向已寫在文件。"):
+            self.assertIsNone(ug.sg_reco_judge(self.LONG + text), text)
+        for text in ("我建議先修第 1 項。", "建議你改用新的指令。", "我會建議把門檻調低。", "方案 1：加一個檢查。"):
+            self.assertEqual(ug.sg_reco_judge(self.LONG + text), "提出了建議／方案", text)
 
     def test_reco_needs_verification_labels(self):
         self.assertIsNotNone(ug.sg_reco_judge(self.LONG + "我的建議：改用時間序列動能、市況切換模型。"))

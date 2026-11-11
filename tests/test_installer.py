@@ -171,6 +171,29 @@ class KeyModeFree(Base):
             w.set_key_mode_arg(local, "exa=bogus")
 
 
+class McpDefer(Base):
+    """0.24.0：註冊 MCP 時加 alwaysLoad:false（工具延後載入）；舊註冊在下一次同步時重建。"""
+
+    def test_defer_registers_with_always_load_false_and_rebuilds_old_entries(self):
+        calls = []
+        runner = fake_mcp_runner(self.lay, calls)
+        self.write_settings(USER_SETTINGS)
+        code, log = commands.apply(self.lay, PY, repo=REPO, mode="install", with_web=True, runner=runner)  # 假 runner：預設不延後
+        self.assertEqual(code, 0, chr(10).join(log))
+        have = web.installed_servers(self.lay)
+        rec = {"mcpAdded": sorted(have)}
+        self.assertTrue(have and all("alwaysLoad" not in v for v in have.values()), have)
+        calls.clear()
+        rec2 = web.sync_mcp(self.lay, rec, runner, [], defer=True)
+        have = web.installed_servers(self.lay)
+        self.assertEqual(sorted(rec2["mcpAdded"]), sorted(rec["mcpAdded"]))
+        self.assertTrue(all(have[n].get("alwaysLoad") is False for n in rec2["mcpAdded"]), have)
+        self.assertTrue(any(c[0] == "remove" for c in calls) and any(c[0] == "add-json" for c in calls))
+        calls.clear()
+        web.sync_mcp(self.lay, rec2, runner, [], defer=True)
+        self.assertEqual(calls, [], "已經是延後載入就不再重建")
+
+
 class Preservation(Base):
     def test_existing_usage_guard_hook_not_duplicated(self):
         s = copy.deepcopy(USER_SETTINGS)
@@ -328,6 +351,14 @@ def fake_mcp_runner(lay: Layout, calls: list):
         calls.append(list(args))
         cfg = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
         servers = cfg.setdefault("mcpServers", {})
+        if args[0] == "add-json":
+            name, entry = args[3], json.loads(args[4])
+            if name in servers:
+                return 1, f"MCP server {name} already exists in user config"
+            servers[name] = entry
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(cfg), encoding="utf-8")
+            return 0, f"Added http MCP server {name} to user config"
         if args[0] == "add":
             name, url = args[5], args[6]
             if name in servers:

@@ -511,15 +511,41 @@ def _last_model(path):
 
 
 COMPACT_ACTIVE_SEC = 180  # 自己定的：agent 紀錄這麼久內有寫入才算「正在跑」（壓縮本身實測 11～22 秒沒有寫入）
-COMPACT_POLL_SEC = 2.0    # 自己定的：模型相同時最多等這麼久看 compact_boundary 落在哪一份紀錄
+COMPACT_TOKEN_MARGIN = 1.1  # 自己定的：模型相同時，agent 最後一次請求的 context 要比主對話大一成以上才判定是它在壓縮
+
+
+def _last_tokens(path):
+    """這份對話紀錄最後一次請求送出的 context 大小（input＋cache 讀寫，token）。讀不到回 None。"""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - COMPACT_TAIL))
+            tail = f.read().decode("utf-8", errors="replace")
+        for line in reversed(tail.splitlines()):
+            if '"usage"' not in line:
+                continue
+            try:
+                d = json.loads(line)
+            except Exception:
+                continue
+            u = (d.get("message") or {}).get("usage") if d.get("type") == "assistant" else None
+            if u:
+                n = int(u.get("input_tokens") or 0) + int(u.get("cache_read_input_tokens") or 0) + int(u.get("cache_creation_input_tokens") or 0)
+                if n:
+                    return n
+        return None
+    except Exception:
+        return None
 
 
 def compact_from_subagent(payload, now=None, poll=None):
     """SessionStart(compact) 是不是某個 agent 自己壓縮觸發的（不是主對話）。有明確證據才回 True，判不出來回 False（照舊注入）。
-    2026-11-11 實測（hook-debug）：hook 執行當下 compact_boundary 還沒寫進檔（非同步），prompt_id 主對話與 agent 共用，都不能用；
-    可用的是 payload 的 model＝正在壓縮那一方的模型。
-    ①payload.model ≠ 主對話最後一則助理訊息的模型，且＝某個正在跑的 agent 的模型 → agent。
-    ②模型相同：最多等 COMPACT_POLL_SEC 秒，compact_boundary 先出現在主對話紀錄 → 主對話；只出現在 agent 紀錄 → agent。"""
+    2026-11-11 實測（hook-debug）：hook 執行當下 compact_boundary 還沒寫進檔（非同步，等 2 秒也沒有），prompt_id 主對話與 agent 共用，
+    都不能用；可用的是 payload 的 model＝正在壓縮那一方的模型，以及各紀錄最後一次請求的 context 大小。
+    ①payload.model ≠ 主對話最後一則助理訊息的模型，且＝某個正在跑的 agent 的模型 → agent（實跑：壓縮 2 次、注入 0 次）。
+    ②模型相同：壓縮的是 context 較滿的那一方——某個正在跑的 agent 最後一次請求的 context ≥ 主對話的 COMPACT_TOKEN_MARGIN 倍 → agent。
+    poll 參數保留給測試呼叫相容，沒有作用。"""
     try:
         tp = payload.get("transcript_path") or ""
         sid = str(payload.get("session_id") or "")
@@ -534,19 +560,17 @@ def compact_from_subagent(payload, now=None, poll=None):
             active = []
         if not active:
             return False  # 沒有正在跑的 agent：一定是主對話
+        if _fresh_compact_boundary(tp, now0):
+            return False  # 主對話紀錄已經有剛寫的壓縮標記
         pm, mm = str(payload.get("model") or ""), _last_model(tp)
         if pm and mm and pm != mm:
             return any(_last_model(f) == pm for f in active)
-        deadline = time.time() + (COMPACT_POLL_SEC if poll is None else poll)
-        while True:
-            t = now or time.time()
-            if _fresh_compact_boundary(tp, t):
-                return False
-            if any(_fresh_compact_boundary(f, t) for f in active):
-                return True
-            if time.time() >= deadline:
-                return False
-            time.sleep(0.2)
+        if any(_fresh_compact_boundary(f, now0) for f in active):
+            return True
+        mt = _last_tokens(tp)
+        cands = [f for f in active if not pm or _last_model(f) == pm]
+        at = max([_last_tokens(f) or 0 for f in cands] or [0])
+        return bool(mt) and at >= mt * COMPACT_TOKEN_MARGIN
     except Exception:
         return False
 
@@ -1184,7 +1208,10 @@ def sg_last_turn(transcript_path):
 # 同一天 main 列 6 種「沒測過的方法」全憑印象、沒標已查證／未查證；又在含研究結論的回覆末尾加「不含待查證事實」跳過守門）。
 # ①回覆提出建議／方案（不論問句與否）卻沒有逐項標「已查證／未查證」→ 退回一次（core.md「先找現成做法」：每項建議標明已查證或未查證）。
 # ②「〔不含待查證事實〕」只給純概念或自己算的數字用；回覆有年份、或引用研究／論文／報告結論時不算數，照樣要「來源」段。
-SG_RECO = re.compile(r"我的建議|我建議|建議(?:你|改|採|用|做|先|把)|建議方向|(?:方案|選項)\s*[1-9一二三四五]|要照這個做嗎|下一輪(?:就|改|只)")
+# 0.24.0：「會誤建議你開新對話」「hook 會建議開新對話」「不建議改」這類敘述／否定句不是在提建議（2026-11-11 main 的收尾回覆被退回一次）。
+# 前面緊接「誤、不、會、曾、已、才、沒、未、被、的」的「建議X」不算；真的在提建議的「我會建議」另外列。
+SG_RECO = re.compile(r"我的建議|我建議|我會建議|(?<![誤不會曾已才沒未被的])建議(?:你|改|採|用|做|先|把)|(?<![誤不會曾已才沒未被的])建議方向"
+                     r"|(?:方案|選項)\s*[1-9一二三四五]|要照這個做嗎|下一輪(?:就|改|只)")
 SG_RECO_MARK = ("已查證", "未查證")
 SG_SKIP_MARK = "不含待查證事實"
 SG_CLAIM = re.compile(r"研究|論文|期刊|學者|文獻|報告指出|統計顯示|證實|實證")
