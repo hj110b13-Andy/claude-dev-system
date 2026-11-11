@@ -1,0 +1,67 @@
+name: tests
+
+# 平常 push 就跑單元測試（0.27.0 前只有打 tag 發布時才跑，壞掉要等到發布那一刻才知道）。
+# Python 3.10（宣稱的最低版本）、3.12（發布用）、3.14（開發機）各跑一次。
+on:
+  push:
+    branches:
+      - master
+      - "ci/**"   # 不想動 master 時推到 ci/<名稱> 就會跑；ci/all-os/<名稱> 另外加跑 ubuntu 與 macos
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      all_os:
+        description: "也在 ubuntu／macos 跑一次（這兩個平台還沒實機驗證，結果只供參考、失敗不擋）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  windows:
+    name: windows / py${{ matrix.python }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # 連 tag 一起抓：tests/test_release_hygiene.py 要看目前版本有沒有打過 tag（淺層 checkout 會略過那項）
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit tests
+        run: python -m unittest discover -s tests
+
+  other-os:
+    # macOS／Linux 在 config/compat.json 標「未驗證」：預設不跑；手動勾選或推到 ci/all-os/ 分支才跑，失敗不算整體失敗
+    if: (github.event_name == 'workflow_dispatch' && inputs.all_os) || startsWith(github.ref_name, 'ci/all-os/')
+    name: ${{ matrix.os }} / py3.12（未驗證平台）
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Unit tests
+        run: python -m unittest discover -s tests

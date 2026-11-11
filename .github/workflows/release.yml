@@ -2,11 +2,16 @@ name: release-exe
 
 on:
   push:
-    tags: ["v*"]
+    tags:
+      # 只認「v主.次.修」。exe 的更新檢查拿 tag 當版本比，v 開頭的其他 tag（例如 vtest）不可觸發發布。
+      # 樣式語法：docs.github.com workflow-syntax〈Filter pattern cheat sheet〉的例子 `v[12].[0-9]+.[0-9]+`（2026-11-12 查）
+      - "v[0-9]+.[0-9]+.[0-9]+"
   workflow_dispatch:
 
+# 預設唯讀，只有要建 Release 的 job 另外開寫入
+# （docs.github.com secure-use：「set the default permission for the GITHUB_TOKEN to read access only for repository contents」，2026-11-12 查）
 permissions:
-  contents: write
+  contents: read
 
 env:
   PYTHONUTF8: "1"
@@ -15,11 +20,23 @@ env:
 jobs:
   build-windows:
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false  # 這個 job 不需要 git push；不把權杖留給後面的 pip／測試／打包步驟
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      - name: tag 與 config/VERSION 要一致
+        # 不一致時 exe 內建版本會比 tag 舊，每次檢查更新都提示換 exe（換完還是舊）；手動觸發（沒有 tag）不檢查
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $ver = (Get-Content config/VERSION -Raw -Encoding UTF8).Trim()
+          if ("v$ver" -ne $env:GITHUB_REF_NAME) { throw "tag $env:GITHUB_REF_NAME 與 config/VERSION ($ver) 不一致，不發布" }
+          Write-Host "tag $env:GITHUB_REF_NAME = config/VERSION $ver"
       - name: Install PyInstaller
         run: python -m pip install --upgrade pip pyinstaller
       - name: Unit tests
@@ -42,15 +59,18 @@ jobs:
           $h = (Get-FileHash dist/claude-dev-system-settings.exe -Algorithm SHA256).Hash.ToLower()
           Set-Content -Path dist/claude-dev-system-settings.exe.sha256 -Value "$h  claude-dev-system-settings.exe" -NoNewline -Encoding ascii
           Get-Content dist/claude-dev-system-settings.exe.sha256
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: claude-dev-system-settings
           path: dist/claude-dev-system-settings.exe
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        # 第三方 action 釘在 commit SHA（docs.github.com secure-use：「Pin actions to a full-length commit SHA」）；
+        # 這個 SHA 是 v3.0.4（2026-11-05 發布，2026-11-12 用 gh api 查 tag 解出）。升版時 SHA 與這行註解一起改。
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3
         with:
           files: |
             dist/claude-dev-system-settings.exe
             dist/claude-dev-system-settings.exe.sha256
+          fail_on_unmatched_files: true  # 少任何一個附件就失敗，不發出沒有 exe 或沒有 .sha256 的 Release
           generate_release_notes: true
