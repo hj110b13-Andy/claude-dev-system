@@ -646,10 +646,17 @@ class SubagentReportGuard(unittest.TestCase):
         (self.mem / "MEMORY.md").write_text("- [a](a.md) — b", encoding="utf-8")
         self.agent("a7", "改程式", [("Read", {"file_path": str(self.mem / "MEMORY.md")})])
         self.assertIn("長期記憶", self.reason(self.call("a7", self.ZH)))
+        (self.mem / "a.md").write_text("內文", encoding="utf-8")
         self.agent("a8", "改程式", [("Read", {"file_path": str(self.mem / "a.md")})])
         self.assertIsNone(self.call("a8", self.ZH))
         self.agent("a9", "改程式", [])
         self.assertIsNone(self.call("a9", self.ZH + "記憶索引已看，無相關。"))
+        (self.mem / "a.md").write_text("內文", encoding="utf-8")
+        self.agent("a10", "改程式", [("Bash", {"command": 'cd "' + str(self.mem).replace(chr(92), "/") + '" && head -c 400 a.md'})])
+        self.assertIsNone(self.call("a10", self.ZH), "先 cd 到記憶資料夾再用相對檔名讀也算讀過")
+        self.agent("a11", "改程式", [])
+        out = self.call("a11", self.ZH + "記憶索引已看，與本工作有關的三條沒有衝突。")
+        self.assertIn("長期記憶", self.reason(out), "說有關卻沒讀內文，不可用一句話帶過")
 
     def test_commit_without_branch_in_prompt_blocked(self):
         self.agent("b1", "改完 commit", [("Bash", {"command": "git add a.py && git commit -m x -- a.py"})])

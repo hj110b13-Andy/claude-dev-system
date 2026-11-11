@@ -1252,6 +1252,7 @@ SUB_COMMIT = re.compile(r"\bgit\b[^\n|;&]*\bcommit\b")
 SUB_CODE_PATH = re.compile(r"[\w\-./\\]*[\w\-]\.(?:py|ts|tsx|js|jsx|mjs|cjs|sql|sh|ps1|yml|yaml|toml|html|css)\b")
 SUB_CJK_LANG = ("chinese", "中文", "繁體", "zh")
 SUB_GUARD_STATE = os.path.join(STATE_DIR, "subagent-guard.json")
+SUB_MEM_NONE = re.compile(r"記憶索引已看[，,、：:\s]*(?:都|全部|皆)?(?:無相關|沒有相關|與這份工作無關|都無關)")
 SUB_MIN_NUMS = 3  # 自己定的：少於 3 個帶單位數字的報告不查出處（短回報、進度句）
 
 
@@ -1311,12 +1312,18 @@ def subagent_report_judge(report, scan, lang, mem_dir):
     blob = chr(10).join(scan["reads"] + scan["cmds"])
     if any(SUB_WEB_TOOL.search(t) for t in scan["tools"]) and "web-quick" not in blob and "web-sources" not in blob:
         bad.append("上網查了資料卻沒有先讀 `~/.claude/claude-dev-system/rules/web-quick.md` → 現在 Read 它，照〈回覆格式〉核對報告裡查到的事實（來源網址、日期、原句短引），不足的補查。")
-    if mem_dir and os.path.isfile(os.path.join(mem_dir, "MEMORY.md")) and "記憶索引" not in report:
-        key = os.path.basename(os.path.dirname(mem_dir)) + "/memory/"
+    # 0.23.0（Stock-web 2026-11-11 兩個實例）：①先 cd 到記憶資料夾再用相對檔名讀也算讀過（原本只認完整路徑，誤擋一個讀過 4 條的 agent）
+    # ②報告寫「有關的三條沒有衝突」卻沒讀內文不算數——只有明寫「無相關」才可免讀（原本看到「記憶索引」四個字就放行）。
+    if mem_dir and os.path.isfile(os.path.join(mem_dir, "MEMORY.md")) and not SUB_MEM_NONE.search(report):
         norm = blob.replace(chr(92), "/")
-        if not re.search(re.escape(key) + r"(?!MEMORY\.md)[\w\-]+\.md", norm):
+        try:
+            names = [n for n in os.listdir(mem_dir) if n.lower().endswith(".md") and n != "MEMORY.md"]
+        except OSError:
+            names = []
+        key = os.path.basename(os.path.dirname(mem_dir)) + "/memory"
+        if not (key in norm and any(n in norm for n in names)):
             bad.append(f"沒有讀任何一條長期記憶的內文 → 看 context 裡的 MEMORY.md 索引，與這份工作有關的用 Read 讀內文（`{mem_dir}`）並照做、必要時修正成果；"
-                       "都無關就在報告加一行「記憶索引已看，無相關」。")
+                       "真的一條都無關才在報告加一行「記憶索引已看，無相關」（有關卻沒讀內文不算）。")
     if any(SUB_COMMIT.search(c) for c in scan["cmds"]) and not re.search(r"分支|branch", scan["prompt"], re.I) and not re.search(r"分支|branch", report, re.I):
         bad.append("派工說明沒有指定 commit 的分支，你卻 commit 了 → 不要自己 reset；在報告開頭寫明 commit hash、所在分支（`git branch --show-current`）與工作目錄，由 main 決定要不要搬。")
     return bad
