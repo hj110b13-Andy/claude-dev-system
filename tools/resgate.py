@@ -118,6 +118,37 @@ def save_jobs(d, path=None):
     os.replace(tmp, path)
 
 
+def project_root(path):
+    """往上找到 git 根目錄（含 worktree 的 .git 檔）；找不到就用原路徑。回正規化、小寫的絕對路徑。"""
+    p = os.path.abspath(path or os.getcwd())
+    d = p
+    while True:
+        if os.path.exists(os.path.join(d, ".git")):
+            p = d
+            break
+        up = os.path.dirname(d)
+        if up == d:
+            break
+        d = up
+    return os.path.normcase(os.path.normpath(p))
+
+
+def same_project(item_project, cwd):
+    """延後清單的一筆是不是「這個專案」的：登記的專案路徑與目前工作目錄的專案根相同，或一個在另一個底下
+    （worktree 在主 repo 的 .claude/worktrees/ 底下；`--project 名稱` 會被記成 cwd 底下的子路徑）。沒記專案的當成是。
+    0.26.1：清單是所有專案共用一份，原本提醒與 `next` 不分專案——2026-11-11 claude-dev-system 的對話被叫去跑
+    Stock-web 登記的 #15「11f/11g 腳本 tsc」。hook（usage_guard.py）也用這個函式。"""
+    if not item_project:
+        return True
+    a = os.path.normcase(os.path.normpath(os.path.abspath(item_project)))
+    b = project_root(cwd)
+    a_root = project_root(item_project) if os.path.exists(item_project) else a
+    for x, y in ((a, b), (a_root, b)):
+        if x == y or x.startswith(y + os.sep) or y.startswith(x + os.sep):
+            return True
+    return False
+
+
 def defer(project, desc, rerun, free=None, need=None, agent=None, path=None):
     d = load_jobs(path)
     n = int(d.get("nextId") or 1)
@@ -186,7 +217,9 @@ def main(argv=None) -> int:
         p.add_argument("--rerun", default="")
         p.add_argument("--agent", default="")
     sub.add_parser("list").add_argument("--json", action="store_true")
-    sub.add_parser("next")
+    nx = sub.add_parser("next")
+    nx.add_argument("--project", help="看哪個專案的延後工作（預設：目前資料夾所在的專案）")
+    nx.add_argument("--all", action="store_true", help="不分專案，照登記順序看整份清單")
     sub.add_parser("done").add_argument("id", type=int)
     argv = list(sys.argv[1:] if argv is None else argv)
     cmd = []
@@ -232,6 +265,13 @@ def main(argv=None) -> int:
         if not items:
             print("延後清單是空的")
             return 1
+        if not getattr(a, "all", False):
+            here = getattr(a, "project", None) or os.getcwd()
+            mine = [x for x in items if same_project(x.get("project"), here)]
+            if not mine:
+                print(f"這個專案沒有延後工作（另有 {len(items)} 項屬於其他專案，由那邊的對話處理；`resgate.py list` 可看）")
+                return 1
+            items = mine
         ok, free, need = enough(load_cfg(items[0].get("project") or None))
         if not ok:
             print(f"延後清單 {len(items)} 項，但可用記憶體 {_fmt(free)} < {need:g} GB，先不跑")

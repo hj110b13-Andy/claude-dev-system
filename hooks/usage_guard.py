@@ -1010,7 +1010,7 @@ def tool_reminders(payload):
             en, mins = _task_check(cwd)
             if en and not sess.get("patrol") and once("taskcheck|" + tid if tid else "taskcheck"):
                 out.append(f"【背景任務巡檢（hook）】剛派出背景任務，taskCheck.enabled=true → 先 `CronList`，這場對話還沒有巡檢排程就用 `CronCreate` 建每 {mins} 分鐘一次，"
-                           "prompt 用 core.md「背景任務巡檢」那句固定文字；全部結束就 `CronDelete`。子 agent 忽略此則。" + _deferred_hint())
+                           "prompt 用 core.md「背景任務巡檢」那句固定文字；全部結束就 `CronDelete`。子 agent 忽略此則。" + _deferred_hint(cwd))
         if name in ("Bash", "PowerShell"):
             m = _shared_dir_git_match(str(ti.get("command") or ""))
             if m and once("git|" + m.group(0)):
@@ -1076,8 +1076,24 @@ def _deferred_items():
         return []
 
 
-def _deferred_hint():
+def _deferred_mine(cwd):
+    """(這個專案的延後工作, 其他專案的筆數)。清單是所有專案共用一份；同專案判定用 tools/resgate.py 的 same_project（唯一來源）。
+    cwd 給 None、或載不到判定函式時不分專案（全部算這個專案的）。"""
     items = _deferred_items()
+    if not items or not cwd:
+        return items, 0
+    try:
+        sp = getattr(_tool_mod("resgate"), "same_project", None)
+    except Exception:
+        sp = None
+    if not sp:
+        return items, 0
+    mine = [x for x in items if sp(x.get("project"), cwd)]
+    return mine, len(items) - len(mine)
+
+
+def _deferred_hint(cwd=None):
+    items, _others = _deferred_mine(cwd)
     if not items:
         return ""
     first = items[0]
@@ -1088,7 +1104,7 @@ def _deferred_hint():
 def deferred_msg(cwd, session_id, st, now=None, every=600):
     """UserPromptSubmit（含 agent 完成通知那一輪）：延後清單有項目、而且現在記憶體夠 → 提醒依登記順序開跑。同一場對話最多每 10 分鐘一次。"""
     try:
-        items = _deferred_items()
+        items, others = _deferred_mine(cwd)  # 0.26.1：只提這個專案登記的；別的專案的由那邊的對話處理
         if not items:
             return None
         now = now or time.time()
@@ -1104,7 +1120,8 @@ def deferred_msg(cwd, session_id, st, now=None, every=600):
         return (f"【延後工作（hook）】延後清單有 {len(items)} 項之前「記憶體不足、沒有執行」的工作，現在可用記憶體 "
                 f"{'量不到' if free is None else f'{free:.1f} GB'} ≥ {need:g} GB → 依登記順序開跑第一項 #{x.get('id')}"
                 f"（{x.get('project', '')}：{x.get('desc', '')}；重跑：{x.get('rerun') or '見原派工'}）：重派或 SendMessage 喚回原 agent，"
-                f"開跑後 `resgate.py done {x.get('id')}`，跑一個再查一次記憶體。子 agent 忽略此則。")
+                f"開跑後 `resgate.py done {x.get('id')}`，跑一個再查一次記憶體。"
+                + (f"（清單另有 {others} 項屬於其他專案，不用處理。）" if others else "") + "子 agent 忽略此則。")
     except Exception:
         return None
 

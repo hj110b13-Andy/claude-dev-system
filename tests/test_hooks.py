@@ -400,6 +400,39 @@ class SessionUpkeep(unittest.TestCase):
         (self.proj / ".claude" / "dispatch-config.json").write_text(json.dumps({"procCheck": {"enabled": False}}), encoding="utf-8")
         self.assertIsNone(ug.proc_msg(str(self.proj), "s2", {}, now=5000.0), "可關閉")
 
+    def test_deferred_only_this_project(self):
+        # 0.26.1：延後清單所有專案共用，提醒只提這個專案登記的（claude-dev-system 的對話被叫去跑 Stock-web 的工作）
+        import importlib.util
+        import types
+        spec = importlib.util.spec_from_file_location("resgate_real", REPO / "tools" / "resgate.py")
+        rg = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(rg)
+        other = self.tmp / "other-proj"
+        other.mkdir()
+        (self.proj / ".git").mkdir(exist_ok=True)
+        wt = self.proj / ".claude" / "worktrees" / "agent-x"
+        wt.mkdir(parents=True)
+        Path(ug.DEFERRED).parent.mkdir(parents=True, exist_ok=True)
+        Path(ug.DEFERRED).write_text(json.dumps({"items": [
+            {"id": 1, "project": str(other), "desc": "別的專案的 tsc", "rerun": "npx tsc"},
+            {"id": 2, "project": str(wt), "desc": "這個專案 worktree 的回測", "rerun": "npm run bt"},
+            {"id": 3, "project": str(self.proj / "名稱被當成子路徑"), "desc": "用名稱登記的"}]}, ensure_ascii=False), encoding="utf-8")
+        ug._TOOL_CACHE["resgate"] = types.SimpleNamespace(load_cfg=lambda cwd: {"minFreeMemGB": 3.0}, enough=lambda cfg: (True, 4.0, 3.0),
+                                                          same_project=rg.same_project)
+        try:
+            m = ug.deferred_msg(str(self.proj), "s1", {}, now=10_000.0)
+            self.assertIn("#2", m)
+            self.assertNotIn("別的專案的 tsc", m)
+            self.assertIn("另有 1 項屬於其他專案", m)
+            self.assertIn("延後清單有 2 項", ug._deferred_hint(str(self.proj)))
+            self.assertIn("#1", ug.deferred_msg(str(other), "s2", {}, now=10_000.0))
+            lonely = self.tmp / "third"
+            lonely.mkdir()
+            self.assertIsNone(ug.deferred_msg(str(lonely), "s3", {}, now=10_000.0), "這個專案沒有登記的就不提醒")
+            self.assertEqual(ug._deferred_hint(str(lonely)), "")
+        finally:
+            ug._TOOL_CACHE.pop("resgate", None)
+
     def test_deferred_hint_and_msg(self):
         import types
         self.assertEqual(ug._deferred_hint(), "", "清單空的不提")
