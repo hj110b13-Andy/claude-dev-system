@@ -289,7 +289,7 @@ class App:
         env.columnconfigure(0, weight=1)
 
         # 核心
-        core = self._section("核心（規則、skill）——安裝後永遠啟用　共 4 項設定：用量守門、查證守門、門檻、背景任務巡檢")
+        core = self._section("核心（規則、skill）——安裝後永遠啟用　設定：用量守門、查證守門、用量門檻、背景任務巡檢、記憶體門檻、專案自動化與健康檢查")
         ttk.Label(core, text=f"{MARK[s['installed']]} {'已安裝' if s['installed'] else '尚未安裝（按套用會安裝）'}").pack(anchor="w")
         self.notes.append(ttk.Label(core, text=gm.TOOL_DESC["core"], foreground="#555", wraplength=900, justify="left")); self.notes[-1].pack(anchor="w")
         self.guard_var = tk.BooleanVar(value=f.usage_guard)
@@ -326,15 +326,28 @@ class App:
         self.mem_var.trace_add("write", lambda *a: self.update_diff())
         pa = f.project_auto
         paf = ttk.Frame(core); paf.pack(anchor="w", fill="x", pady=(4, 0))
-        self.pa_vars = {k: tk.BooleanVar(value=bool(pa.get(k))) for k in ("autoInit", "autoAudit", "autoRefactor")}
+        self.pa_vars = {k: tk.BooleanVar(value=bool(pa.get(k, gm.DEFAULT_PROJECT_AUTO[k]))) for k in gm.PA_BOOL_KEYS}
+        self.pa_int_vars = {k: tk.StringVar(value=str(int(pa.get(k, gm.DEFAULT_PROJECT_AUTO[k])))) for k in gm.PA_INT_KEYS}
         ttk.Label(paf, text="專案自動化：").pack(side="left")
         for k, txt in (("autoInit", "新專案自動立規矩"), ("autoAudit", "舊專案自動盤點"), ("autoRefactor", "達門檻不問直接重整（預設關，會問一次）")):
             ttk.Checkbutton(paf, text=txt, variable=self.pa_vars[k], command=self.update_diff).pack(side="left", padx=(0, 10))
         ttk.Label(paf, text="專案門檻：原始碼 ≥").pack(side="left")
-        self.pa_min_var = tk.StringVar(value=str(int(pa.get("minSourceFiles", 10))))
-        self._no_wheel_change(ttk.Spinbox(paf, from_=1, to=999, width=5, textvariable=self.pa_min_var, command=self.update_diff)).pack(side="left")
+        self._no_wheel_change(ttk.Spinbox(paf, from_=1, to=999, width=5, textvariable=self.pa_int_vars["minSourceFiles"], command=self.update_diff)).pack(side="left")
         ttk.Label(paf, text="個檔或是 git 專案才算").pack(side="left")
-        self.pa_min_var.trace_add("write", lambda *a: self.update_diff())
+        paf2 = ttk.Frame(core); paf2.pack(anchor="w", fill="x", pady=(2, 0))
+        ttk.Label(paf2, text="　　　　　　").pack(side="left")
+        for k, txt in (("alignOnUpdate", "全域系統升版後，第一則提示列出專案要配合的優化"), ("verifySkill", "有畫面的專案沒有驗證 skill 時提醒建立")):
+            ttk.Checkbutton(paf2, text=txt, variable=self.pa_vars[k], command=self.update_diff).pack(side="left", padx=(0, 10))
+        hcf = ttk.Frame(core); hcf.pack(anchor="w", fill="x", pady=(2, 0))
+        ttk.Label(hcf, text="專案健康檢查（0＝不檢查）：").pack(side="left")
+        for k, pre, post in (("staleFiles", "盤點後改過 >", "檔要重盤"), ("claudeMdMaxLines", "　CLAUDE.md >", "行"),
+                             ("claudeMdMaxKB", "或 >", "KB 要瘦身"), ("progressMaxLines", "　交接紀錄 >", "行"),
+                             ("progressMaxKB", "或 >", "KB"), ("newSessionAfterCompactions", "　壓縮滿", "次建議開新對話")):
+            ttk.Label(hcf, text=pre).pack(side="left")
+            self._no_wheel_change(ttk.Spinbox(hcf, from_=0, to=9999, width=5, textvariable=self.pa_int_vars[k], command=self.update_diff)).pack(side="left")
+            ttk.Label(hcf, text=post).pack(side="left")
+        for v in self.pa_int_vars.values():
+            v.trace_add("write", lambda *a: self.update_diff())
         self.notes.append(ttk.Label(core, text=gm.TOOL_DESC["project_auto"], foreground="#555", wraplength=900, justify="left")); self.notes[-1].pack(anchor="w")
         uf = ttk.Frame(core); uf.pack(anchor="w", fill="x", pady=(6, 0))
         self.usage_var = tk.StringVar(value=s.get("usage", {}).get("text", ""))
@@ -499,7 +512,8 @@ class App:
             f.mem_gb = float(self.state.get("mem_gb", gm.DEFAULT_MEM_GB))  # 超出範圍或不是數字：不套用
         try:
             f.project_auto = {k: v.get() for k, v in self.pa_vars.items()}
-            f.project_auto["minSourceFiles"] = max(1, int(self.pa_min_var.get()))
+            for k, v in self.pa_int_vars.items():
+                f.project_auto[k] = max(gm.PA_INT_MIN.get(k, 0), int(v.get()))
         except ValueError:
             f.project_auto = dict(self.state.get("project_auto") or gm.DEFAULT_PROJECT_AUTO)
         if self.state["chrome"]["default_enabled"] is not None:
@@ -938,7 +952,8 @@ class App:
         self.mem_var.set(f"{float(f.mem_gb):g}")
         for k, v in self.pa_vars.items():
             v.set(bool(f.project_auto.get(k, v.get())))
-        self.pa_min_var.set(str(int(f.project_auto.get("minSourceFiles", self.pa_min_var.get()))))
+        for k, v in self.pa_int_vars.items():
+            v.set(str(int(f.project_auto.get(k, v.get()))))
         self.dl_var.set(f.download_dir or "")
         self.five_var.set(str(f.thresholds.get("fiveHour", self.five_var.get())))
         self.seven_var.set(str(f.thresholds.get("sevenDay", self.seven_var.get())))

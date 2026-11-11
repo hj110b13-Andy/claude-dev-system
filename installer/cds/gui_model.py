@@ -373,7 +373,25 @@ def write_mem_gate(lay: Layout, gb: float) -> None:
     d["resourceGate"] = t
     d["updated"] = _dt.date.today().isoformat()
     write_json(p, d)
-DEFAULT_PROJECT_AUTO = {"autoInit": True, "autoAudit": True, "autoRefactor": False, "minSourceFiles": 10}
+# projectAutomation 的開關與數字。預設值必須與 hooks/usage_guard.py 的 _pa_config 及 config/dispatch-config.json 相同
+# （tests/test_gui_model.py 比對三處）。0.20.0 起健康檢查門檻也可在視窗改（使用者 2026-11-11：「好，補到設定視窗」）。
+PA_BOOL_KEYS = ("autoInit", "autoAudit", "autoRefactor", "alignOnUpdate", "verifySkill")
+PA_INT_KEYS = ("minSourceFiles", "staleFiles", "claudeMdMaxLines", "claudeMdMaxKB", "progressMaxLines", "progressMaxKB", "newSessionAfterCompactions")
+DEFAULT_PROJECT_AUTO = {"autoInit": True, "autoAudit": True, "autoRefactor": False, "alignOnUpdate": True, "verifySkill": True,
+                        "minSourceFiles": 10, "staleFiles": 20, "claudeMdMaxLines": 180, "claudeMdMaxKB": 20,
+                        "progressMaxLines": 600, "progressMaxKB": 100, "newSessionAfterCompactions": 3}
+PA_LABELS = {"autoInit": "新專案自動立規矩", "autoAudit": "舊專案自動盤點", "autoRefactor": "達門檻不問直接重整",
+             "alignOnUpdate": "全域升版後提示專案對照", "verifySkill": "提醒建驗證 skill",
+             "minSourceFiles": "專案門檻（原始碼檔數）", "staleFiles": "盤點過期（改過檔數）", "claudeMdMaxLines": "CLAUDE.md 行數上限",
+             "claudeMdMaxKB": "CLAUDE.md KB 上限", "progressMaxLines": "交接紀錄行數上限", "progressMaxKB": "交接紀錄 KB 上限",
+             "newSessionAfterCompactions": "壓縮幾次建議開新對話"}
+PA_INT_MIN = {"minSourceFiles": 1}  # 其餘數字 0＝不檢查（hook 同規則）
+
+
+def _pa_clean_int(k, v):
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or v < PA_INT_MIN.get(k, 0):
+        return None
+    return int(v)
 
 
 def read_project_auto(lay: Layout) -> dict:
@@ -383,21 +401,28 @@ def read_project_auto(lay: Layout) -> dict:
         t = read_json(p).get("projectAutomation") or {}
     except Exception:  # noqa: BLE001
         return out
-    for k in ("autoInit", "autoAudit", "autoRefactor"):
+    for k in PA_BOOL_KEYS:
         if isinstance(t.get(k), bool):
             out[k] = t[k]
-    if isinstance(t.get("minSourceFiles"), (int, float)) and t["minSourceFiles"] >= 1:
-        out["minSourceFiles"] = int(t["minSourceFiles"])
+    for k in PA_INT_KEYS:
+        v = _pa_clean_int(k, t.get(k))
+        if v is not None:
+            out[k] = v
     return out
 
 
 def write_project_auto(lay: Layout, auto: dict) -> None:
+    """只改視窗管的鍵；bigFileExceptions、各鍵的 $說明 等其他內容保留（0.20.0 前會整段重寫、刪掉其他鍵）。"""
     p = lay.payload / "config" / "dispatch-config.json"
     d = read_json(p) if p.exists() else {}
-    t = d.get("projectAutomation") if isinstance(d.get("projectAutomation"), dict) else {}
-    desc = t.get("$說明") or "專案自動化：autoInit 新專案自動立規矩；autoAudit 舊專案自動盤點；autoRefactor 達門檻不問直接重整；minSourceFiles 小於此數且非 git 就不當專案。"
-    d["projectAutomation"] = {"$說明": desc, "autoInit": bool(auto.get("autoInit", True)), "autoAudit": bool(auto.get("autoAudit", True)),
-                              "autoRefactor": bool(auto.get("autoRefactor", False)), "minSourceFiles": int(auto.get("minSourceFiles", 10))}
+    t = dict(d.get("projectAutomation")) if isinstance(d.get("projectAutomation"), dict) else {}
+    t.setdefault("$說明", "專案自動化：autoInit 新專案自動立規矩；autoAudit 舊專案自動盤點；autoRefactor 達門檻不問直接重整；minSourceFiles 小於此數且非 git 就不當專案。")
+    for k in PA_BOOL_KEYS:
+        t[k] = bool(auto.get(k, DEFAULT_PROJECT_AUTO[k]))
+    for k in PA_INT_KEYS:
+        v = _pa_clean_int(k, auto.get(k, DEFAULT_PROJECT_AUTO[k]))
+        t[k] = DEFAULT_PROJECT_AUTO[k] if v is None else v
+    d["projectAutomation"] = t
     d["updated"] = _dt.date.today().isoformat()
     write_json(p, d)
 
@@ -665,11 +690,10 @@ def diff(state: dict, form: Form) -> list[Change]:
         ch.append(Change("task_check", "背景任務巡檢 → " + (f"每 {int(form.task_check['minutes'])} 分鐘" if form.task_check.get("enabled") else "關閉")))
     if float(form.mem_gb) != float(state.get("mem_gb", DEFAULT_MEM_GB)):
         ch.append(Change("mem_gate", f"重型工作記憶體門檻：{float(state.get('mem_gb', DEFAULT_MEM_GB)):g} GB → {float(form.mem_gb):g} GB"))
-    pa0 = state.get("project_auto") or DEFAULT_PROJECT_AUTO
-    pa_changed = [k for k in ("autoInit", "autoAudit", "autoRefactor", "minSourceFiles") if form.project_auto.get(k, pa0[k]) != pa0[k]]
+    pa0 = {**DEFAULT_PROJECT_AUTO, **(state.get("project_auto") or {})}
+    pa_changed = [k for k in PA_BOOL_KEYS + PA_INT_KEYS if form.project_auto.get(k, pa0[k]) != pa0[k]]
     if pa_changed:
-        lab = {"autoInit": "新專案自動立規矩", "autoAudit": "舊專案自動盤點", "autoRefactor": "達門檻不問直接重整", "minSourceFiles": "專案門檻（原始碼檔數）"}
-        ch.append(Change("project_auto", "專案自動化 → " + "、".join(f"{lab[k]}={'開' if form.project_auto[k] is True else ('關' if form.project_auto[k] is False else form.project_auto[k])}" for k in pa_changed)))
+        ch.append(Change("project_auto", "專案自動化 → " + "、".join(f"{PA_LABELS[k]}={'開' if form.project_auto[k] is True else ('關' if form.project_auto[k] is False else form.project_auto[k])}" for k in pa_changed)))
     if (form.download_dir or "") != (state["video"]["download_dir"] or ""):
         ch.append(Change("download_dir", f"下載資料夾 → {form.download_dir or '~/Downloads（預設）'}"))
     if form.chrome_default_enabled is not None and form.chrome_default_enabled != state["chrome"]["default_enabled"]:

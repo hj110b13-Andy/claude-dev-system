@@ -405,7 +405,7 @@ class ReadAndDiff(Base):
         s = self.state()
         self.apply(gm.form_from_state(s), s)
         s = self.state()
-        self.assertEqual(s["project_auto"], {"autoInit": True, "autoAudit": True, "autoRefactor": False, "minSourceFiles": 10})
+        self.assertEqual(s["project_auto"], gm.DEFAULT_PROJECT_AUTO)
         f = gm.form_from_state(s)
         f.project_auto = {"autoInit": True, "autoAudit": False, "autoRefactor": True, "minSourceFiles": 25}
         texts = [c.text for c in gm.diff(s, f)]
@@ -418,6 +418,43 @@ class ReadAndDiff(Base):
         self.assertIn("taskCheck", d, "其他鍵保留")
         data = gm.export_profile(s, gm.form_from_state(s))
         self.assertEqual(data["project_auto"]["minSourceFiles"], 25)
+
+    def test_project_auto_health_keys_roundtrip_and_keep_other_keys(self):
+        # 0.20.0 使用者：「好，補到設定視窗」——健康檢查門檻可在視窗改；存檔不可刪掉 bigFileExceptions 等其他鍵
+        s = self.state()
+        self.apply(gm.form_from_state(s), s)
+        p = self.lay.payload / "config" / "dispatch-config.json"
+        d = json.loads(p.read_text(encoding="utf-8"))
+        d.setdefault("projectAutomation", {})["bigFileExceptions"] = {"a.ts": "一次性"}
+        p.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        s = self.state()
+        f = gm.form_from_state(s)
+        f.project_auto.update({"claudeMdMaxLines": 250, "staleFiles": 0, "verifySkill": False})
+        texts = [c.text for c in gm.diff(s, f)]
+        self.assertTrue(any("CLAUDE.md 行數上限=250" in t and "提醒建驗證 skill=關" in t for t in texts), texts)
+        self.assertEqual(self.apply(f, s), 0, chr(10).join(self.logs))
+        pa = json.loads(p.read_text(encoding="utf-8"))["projectAutomation"]
+        self.assertEqual(pa["bigFileExceptions"], {"a.ts": "一次性"}, "其他鍵保留")
+        self.assertEqual((pa["claudeMdMaxLines"], pa["staleFiles"], pa["verifySkill"]), (250, 0, False), "0＝不檢查要能存")
+        self.assertEqual(self.state()["project_auto"]["claudeMdMaxLines"], 250)
+
+    def test_project_auto_defaults_match_hook_and_shipped_config(self):
+        # 唯一來源守門：視窗預設、hook 內建預設、出廠設定檔三處數值相同
+        sys.path.insert(0, str(REPO / "hooks"))
+        try:
+            import usage_guard as ug
+        finally:
+            sys.path.pop(0)
+        old = ug.CONFIG
+        ug.CONFIG = str(REPO / "no-such.json")
+        try:
+            hook = ug._pa_config(tempfile.mkdtemp())
+        finally:
+            ug.CONFIG = old
+        self.assertEqual(tuple(ug.PA_INT_KEYS), gm.PA_INT_KEYS)
+        self.assertEqual({k: hook[k] for k in gm.DEFAULT_PROJECT_AUTO}, gm.DEFAULT_PROJECT_AUTO)
+        shipped = json.loads((REPO / "config" / "dispatch-config.json").read_text(encoding="utf-8"))["projectAutomation"]
+        self.assertEqual({k: shipped[k] for k in gm.DEFAULT_PROJECT_AUTO}, gm.DEFAULT_PROJECT_AUTO)
 
     def test_chrome_default_toggle_writes_claude_json_with_backup(self):
         p = web.user_config_path(self.lay)
