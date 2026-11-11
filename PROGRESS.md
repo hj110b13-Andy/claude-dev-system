@@ -1,5 +1,11 @@
 # claude-dev-system 交接紀錄
 
+## 2026-11-11：複查 0.17.0～0.19.0（Stock-web 對話 11/9～11/10 改的）
+
+- 0.17.0～0.19.0 都已在 master、本機安裝副本與 repo 內容一致（只差使用者自訂的 config/dispatch-config.json，update 保留，屬正常）；unittest 139 項通過（1 項略過）。細節與使用者原話在 CHANGELOG。
+- 缺口：0.19.0（`1caafcc`）已推 master 但沒打 tag、沒出 Release，其他裝置拿不到。11/11 補打 `v0.19.0` 並推送。
+- 這台 dispatch-config.json 是 11/1 的舊自訂版（fiveHour 95／sevenDay 99），沒有 0.12.0 起的健康檢查與 alignOnUpdate 鍵，hook 用內建預設；要不要換新版由使用者決定（會覆蓋自訂）。
+
 ## 2026-11-09：v0.16.2（查證守門收緊）
 
 - 使用者同意（「改」）：0.16.0 G 項只要有任一 .md／.json 檔名就算有來源，順口提 PROGRESS.md 就能放行憑印象的數字。改成工作文件與設定檔（`SG_LOCAL_GENERIC`）不算，回測報告等本機路徑照舊放行。舊程式／新程式對照與測試見 CHANGELOG 0.16.2。
