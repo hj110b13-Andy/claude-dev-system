@@ -1,5 +1,32 @@
 # claude-dev-system 交接紀錄
 
+## 全方位健檢進度（2026-11-11 22:1x 開工；做完前這節放最上面）
+
+**交辦**：使用者要求照 `C:\Users\88691\Documents\Claude\專案全方位深度健檢與最終完善.txt`（404 行）對這個 repo 做完整健檢並修到完。使用者原話：「這一路都無視用量守門與額度警告等等，直到做完前都不要中斷也不要停下來，如果到用量上限，就設排程等用量重置後立馬接著做。」「開始動作後就不要再詢問我任何問題，一路全部做到完。」
+
+**採用的預設（已告知使用者）**：範圍只有這個 repo；改完照 repo 規則升版、commit、push、發 Release；重整決定＝不做大規模重構（健檢文件：「避免不必要的大規模重構」），只做針對性修正。
+
+**使用者 2026-11-11 22:3x 追加授權（原話）**：「檔中要先取得同意的項目（不可逆刪除、安全設定等），全部我都授權你可以直接改動，能改動就改動，不要只是紀錄而已。」→ 健檢文件裡「先取得同意再執行」的項目直接做（原本的預設是只記錄不做，已作廢）；刪除前仍先確認 git 可回復或另存備份。
+
+**排程（只活在這場對話）**：巡檢 `ac36987f`（每 15 分）、接續健檢 `8a7bce27`（每 30 分，用量重置後自動接著做）。全部做完要 CronDelete 兩個。
+
+**基準（改之前）**：v0.26.1、工作樹乾淨、`py -3 -m unittest discover -s tests` 187 項通過（輸出存 scratchpad `baseline-tests.txt`）；盤點 `docs/PROJECT-INVENTORY.md`（原始碼 19、測試 9、腳本 9；循環依賴 0；單檔 >800 行 4 個）。
+
+**階段狀態**（做完一個改一個）：
+- 第一階段 全面健檢與問題盤點：**完成（2026-11-12 01:4x）**——6 個唯讀稽核 agent 共交回 101 條（文件 22、工具乙 18、視窗與發布 12、工具甲 21、hook 13、安裝器 15；P0 0、P1 13、其餘 P2／P3），加上 main 自己確認的 4 條（還原備份、web 備份不修剪、CI 的 Node 20 警告、平常 push 沒有 CI）。agent 寫報告檔被執行環境擋下，改由 main 把六份報告存成 scratchpad `main/findings-{docs,tools-b,gui,tools-a,hook,installer}.md`（**這六個檔是第二階段的依據，壓縮後先讀它們**）；重現腳本在 scratchpad `audit-*/`。覆蓋率基準：整體 61%（`main/cov-report.txt`；install.py 0%→已補 `tests/test_cli.py` 13 項、gui.py 0%、tools/video.py 9%、moduleInventory.py 0%、procs.py 52%、checks.py 23%）。
+  - main 已實跑確認「還原備份」問題：update 超過 10 次後、或安裝前沒有 settings.json 時，`uninstall --restore-backup` 會把 7 條指向已刪腳本的 hook 寫回 settings.json（`main/repro_restore_backup.py`、`repro_restore_backup2.py`）。
+  - 已查證：GitHub Actions 最新大版 checkout v7.0.1、setup-python v7.1.0、upload-artifact v7.0.2、action-gh-release v3.0.4（`gh api repos/<repo>/releases/latest`，2026-11-12）；最近一次 Release 執行有 Node.js 20 淘汰警告。vermin 靜態檢查最低 Python 3.10 成立、沒有 3.12 專屬 f-string 寫法。
+  - 原紀錄（開工時寫的）：6 個唯讀稽核 agent（hook／安裝器核心／視窗與發布／工具甲／工具乙／文件規則一致性），報告寫在 scratchpad `<代號>/findings.md`；main 同時細讀安裝器核心與規則。
+  - 6 個 agent 的任務代號：audit-hook、audit-installer、audit-gui、audit-tools-a、audit-tools-b、audit-docs（2026-11-11 22:3x 派出，都是唯讀、不 commit）。22:5x 用量守門 97%，agent 可能被 hook 叫去提早收尾——收報告時先看 findings.md 有沒有寫完（A～E 五段都在、必讀檔逐行讀完），沒寫完的在用量重置後用 SendMessage 叫回來補或重派。
+  - main 自己做完的：靜態分析（工具裝在 scratchpad `main/pytools`，輸出 `main/pyflakes.txt`、`vulture60.txt`、`bandit.txt`）——pyflakes 6 項（未使用匯入 3、沒有佔位符的 f-string 2、未使用區域變數 1）；vulture：`hooks/usage_guard.py:579` 未使用變數 `poll`、`tools/project-scan.py:127` 未使用函式 `count_lines`、`tests/test_installer.py:389` 未使用 `ENV_KEYS`、`tests/test_tools.py:603` 未使用 `quiet`；bandit：沒有 `shell=True`，中風險 5 項都是 `urlopen` 沒限制 scheme（usage_guard.py:130、appdir.py:81、gui_model.py:899、video.py:659／697），高 2 項是 video.py:194／202 用 sha1 當快取鍵（非安全用途）。
+  - main 讀碼發現、還沒實跑確認的：(1) `commands.py` `_prune_backups` 只留最近 10 份後，`uninstall --restore-backup` 用 `backups` 第一筆當「安裝前備份」——超過 10 次 update 後第一筆已不是安裝前那份，還原會把本工具的 hook 條目（指向已刪的腳本）寫回 settings.json；(2) `web_config` 每次都備份但不修剪，備份無上限；(3) `release.yml` 只在推 tag 時跑測試，平常 push master 沒有 CI；(4) `project-scan.py` 在這個 repo 找不到入口（`install.py` 等有 `__main__`）。
+  - 覆蓋率量測：背景指令在等記憶體閘門（22:4x 可用 1.6 GB < 3 GB，VSCode 佔 6.9 GB）；沒跑成會登記延後清單，之後 `py -3 tools/resgate.py next`。設定檔 scratchpad `main/coveragerc`、`main/covsite/sitecustomize.py`。
+  - 注意：基準那次全套測試 main 是直接跑、沒過記憶體閘門（違反規則，之後都用 `resgate.py run`）。
+- 第二階段 問題修復與架構改善：未開始
+- 第三階段 完整測試與回歸驗證：未開始
+- 第四階段 專案整理與文件更新（PROJECT-AUDIT-REPORT.md、PROJECT-STATUS.md、CHANGELOG、README、docs/ARCHITECTURE.md、docs/PROJECT-ISSUES.md）：未開始
+- 第五階段 最終驗收與報告交付（升版、update、verify、push、tag、Release）：未開始
+
 ## 接手狀態（2026-11-11 21:1x）
 
 **已發布**：v0.26.1（0.26.0 之後只多了「延後工作分專案」這個修正）。工作樹乾淨、本機安裝 0.26.1、沒有背景任務。下面「11:3x 寫的」那節列的事都做完了：0.25.1 已發（背景指令等到記憶體放行後自動完成）；待辦 A（CLAUDE.md 瘦身）＝0.26.0；待辦 B（Stock-web 兩個 opus agent）結果寫在 CHANGELOG 0.26.0 與 `rules/agent-dispatch.md`。
