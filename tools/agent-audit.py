@@ -31,7 +31,7 @@ LANG_RATIO = 0.3  # 同 usage_guard.subagent_report_judge 的門檻
 # ---- 以下是 usage_guard.py 沒有的判定（本工具自己的）----
 RE_MEMORY = re.compile(r"memory[\\/](?!MEMORY\.md)[\w\-]+\.md")
 RE_ADD_ALL = re.compile(r"\bgit\s+add\s+(?:-A|--all|\.)(?:\s|$)")
-RE_STASH = re.compile(r"\bgit\s+(?:stash|reset\s+--hard|checkout\s+--)")
+RE_STASH = re.compile(r"\bgit\s+(?:stash(?!\s+(?:list|show)\b)|reset\s+--hard|checkout\s+--)")
 RE_KILL = re.compile(r"taskkill\s+/(?:F\s+/)?IM|Stop-Process\s+-Name|\bpkill\b|\bkillall\b", re.I)
 # 重型工作：回測、全套測試、build（規則見全域 CLAUDE.md〈重型工作記憶體閘門〉）；指令本身含 resgate 的不算重型
 RE_HEAVY = re.compile(r"backtest|npm\s+(?:run\s+)?(?:test|build)|vitest|next\s+build|unittest\s+discover|pytest|build_exe", re.I)
