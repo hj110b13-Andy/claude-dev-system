@@ -1093,10 +1093,61 @@ def sg_judge(prompt, answer):
     return f"含 {len(years)} 個年份、{len(nums)} 個帶單位數字"
 
 
+# 0.23.0：這一輪不一定是使用者打字觸發的——agent 交回的報告、背景任務完成通知、排程（CronCreate）都會以「使用者訊息」的形式進來。
+# 2026-11-11 09:32 main 在等 3 個 agent 時回一句進度就被退回，紀錄裡的「問」是 agent 的報告（裡面剛好有問號）。
+# 做法照官方 Stop 輸入欄位：background_tasks「let hooks distinguish "session is done" from "session is paused waiting for
+# background work to wake it back up"」（code.claude.com/docs/en/hooks〈Stop input〉）。
+SG_AUTO_MARK = ("Another Claude session sent a message", "<task-notification>", "[SYSTEM NOTIFICATION - NOT USER INPUT]",
+                "<agent-message ", "Stop hook feedback:")
+SG_WAIT_TYPES = {"subagent", "workflow", "teammate", "cloud session"}  # shell／monitor 可能是常駐的伺服器或監看，不算「還在等結果」
+
+
+def sg_is_auto(prompt, crons=None):
+    """這則「使用者訊息」是不是系統／agent／排程送進來的（不是使用者打的字）。"""
+    if not prompt:
+        return False
+    head = prompt.lstrip()[:400]
+    if any(m in head for m in SG_AUTO_MARK):
+        return True
+    for c in crons or []:
+        cp = str((c or {}).get("prompt") or "").strip()
+        if len(cp) >= 12 and head.startswith(cp[:200].rstrip(" …")[:60]):
+            return True
+    return False
+
+
+def sg_last_human(transcript_path, crons=None):
+    """最後一則真的由使用者打的提示（跳過 agent 訊息、完成通知、排程）。讀不到回 None。"""
+    last = None
+    try:
+        with open(transcript_path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if '"type":"user"' not in line and '"type": "user"' not in line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                if d.get("type") != "user" or d.get("isSidechain"):
+                    continue
+                t = _sg_text((d.get("message") or {}).get("content"))
+                if t is not None and t.strip() and not sg_is_auto(t, crons):
+                    last = t
+    except Exception:
+        return None
+    return last
+
+
 def source_guard(payload):
     if payload.get("stop_hook_active") or not sg_enabled():
         return None
     prompt, answer = sg_last_turn(payload.get("transcript_path") or "")
+    crons = payload.get("session_crons") if isinstance(payload.get("session_crons"), list) else []
+    if sg_is_auto(prompt, crons):
+        waiting = [t for t in payload.get("background_tasks") or [] if isinstance(t, dict) and t.get("type") in SG_WAIT_TYPES]
+        if waiting:
+            return None  # 還有 agent／workflow 在跑：這則是中途進度，不是答案
+        prompt = sg_last_human(payload.get("transcript_path") or "", crons)  # 背景工作都結束了：這則就是答案，問題是使用者最後打的那句
     reco = sg_reco_judge(answer)
     if reco:
         try:
@@ -1187,7 +1238,7 @@ def subagent_brief(payload):
                    f"（`{mem}` 底下同名檔），照內文做；一條都無關就在報告寫「記憶索引已看，無相關」。")
     out.append("- 規則：全域與專案 CLAUDE.md 對你同樣適用，派工單沒重寫不代表免除；兩者衝突時照派工單。主對話有 hook 會退回不合規的回覆，你沒有，交報告前自己逐項核對："
                "①上網查資料前先 Read `~/.claude/claude-dev-system/rules/web-quick.md` ②報告裡每個關鍵數字附出處（檔案路徑＋行或網址），推論另外標明 "
-               "③回測、全套測試、build 開跑前先過 `resgate.py wait` ④只 `git add <自己改的檔>`，不 `add -A`、不 stash／reset 別人的變更 "
+               "③回測、全套測試、build 用 `py -3 ~/.claude/claude-dev-system/tools/resgate.py run --desc \"<工作>\" -- <指令>` 開跑（記憶體不足它不會執行；不可在後面接管線） ④只 `git add <自己改的檔>`，不 `add -A`、不 stash／reset 別人的變更 "
                "⑤自己開的背景程序全部結束（依 PID 或埠號）。做不到的項目寫進報告，不可略過不提。"
                + ("交報告（SubagentHandback）時 hook 會核對語言、①、②、記憶與 commit 分支，不合格退回一次。" if cfg["guard"] else ""))
     return chr(10).join(out)
@@ -1269,6 +1320,63 @@ def subagent_report_judge(report, scan, lang, mem_dir):
     if any(SUB_COMMIT.search(c) for c in scan["cmds"]) and not re.search(r"分支|branch", scan["prompt"], re.I) and not re.search(r"分支|branch", report, re.I):
         bad.append("派工說明沒有指定 commit 的分支，你卻 commit 了 → 不要自己 reset；在報告開頭寫明 commit hash、所在分支（`git branch --show-current`）與工作目錄，由 main 決定要不要搬。")
     return bad
+
+
+SUB_LANG_STATE = os.path.join(STATE_DIR, "subagent-lang.json")
+SUB_LANG_TAIL = 60000  # 只讀 agent 對話紀錄最後這麼多位元組
+
+
+def subagent_lang_nudge(payload):
+    """PostToolUse 在 agent 裡觸發時：它最近寫的說明文字不是使用者的語言就提醒，同一個 agent 只提醒一次。
+    2026-11-11 實派 3 個 agent：最終報告都是中文，但工具呼叫之間的說明文字 6 則裡 3 則英文
+    （Stock-web 2026-09-14 使用者原話：「這個過程都還是英文，要用繁體中文」）。任何例外都不提醒。"""
+    try:
+        aid = str(payload.get("agent_id") or "")
+        lang = _settings_language()
+        if not aid or payload.get("agent_type") in SUB_LIGHT_TYPES or not lang or not any(k in lang.lower() for k in SUB_CJK_LANG):
+            return None
+        if not _sub_cfg(payload.get("cwd"))["enabled"]:
+            return None
+        tp = _sub_transcript(payload)
+        if not tp:
+            return None
+        try:
+            with open(SUB_LANG_STATE, encoding="utf-8") as f:
+                seen = json.load(f) or {}
+        except Exception:
+            seen = {}
+        if aid in seen:
+            return None
+        with open(tp, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - SUB_LANG_TAIL))
+            tail = f.read().decode("utf-8", errors="replace")
+        hit = None
+        for line in tail.splitlines()[1 if size > SUB_LANG_TAIL else 0:]:
+            if '"assistant"' not in line:
+                continue
+            try:
+                d = json.loads(line)
+            except Exception:
+                continue
+            for b in (d.get("message") or {}).get("content") or [] if d.get("type") == "assistant" else []:
+                if isinstance(b, dict) and b.get("type") == "text":
+                    t = (b.get("text") or "").strip()
+                    if len(t) > 40 and _sub_cjk_ratio(t) < 0.3:
+                        hit = t
+        if not hit:
+            return None
+        now = time.time()
+        seen = {k: v for k, v in seen.items() if now - float(v) < 3 * 86400}
+        seen[aid] = now
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(SUB_LANG_STATE, "w", encoding="utf-8") as f:
+            json.dump(seen, f)
+        return (f"【語言（hook）】你剛才在工具呼叫之間寫的說明文字不是使用者設定的語言（{lang}）：「{hit[:50]}…」。"
+                "使用者會看這些過程文字：從現在起，說明文字與最終報告都用該語言（與全域 CLAUDE.md 同一種文字）；指令、程式碼、檔名照原樣。只提醒這一次。")
+    except Exception:
+        return None
 
 
 def _sub_guard_reason(payload, report, scan, how):
@@ -1437,6 +1545,9 @@ def main():
         msgs.extend(m for m in extra if m)
     if event == "PostToolUse":  # 0.14.0：改安裝副本、背景任務巡檢、波及範圍、共用目錄 git
         msgs.extend(tool_reminders(payload))
+        nudge = subagent_lang_nudge(payload)  # 0.23.0：只在 agent 裡、只一次
+        if nudge:
+            msgs.append(nudge)
     stale = stale_agents()
     key = "|".join(sorted(stale))
     if stale and (key != s.get("stale_key") or now - s.get("stale_alerted_at", 0) >= STALE_REPEAT):

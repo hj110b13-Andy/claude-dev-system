@@ -462,7 +462,7 @@ class SubagentBrief(unittest.TestCase):
         self.assertIn("chinese", msg)
         self.assertIn(str(self.cwd), msg)
         self.assertIn(str(self.proj / "memory"), msg)
-        for key in ("web-quick.md", "resgate.py wait", "git branch --show-current", "背景程序"):
+        for key in ("web-quick.md", "resgate.py run", "git branch --show-current", "背景程序"):
             self.assertIn(key, msg)
 
     def test_readonly_agents_get_language_only(self):
@@ -487,6 +487,97 @@ class SubagentBrief(unittest.TestCase):
         self.assertIn(("SubagentStart", None), settings_ops.HOOK_SPECS)
         s, rec = settings_ops.add_hooks({}, "py -3 x.py # claude-dev-system")
         self.assertEqual(len(s["hooks"]["SubagentStart"]), 1)
+
+
+class AutoTurnGuard(unittest.TestCase):
+    """0.23.0：agent 報告／完成通知／排程觸發的那一輪——還在等背景工作就不查；都結束了用使用者最後打的那句當問題。"""
+    AGENT = 'Another Claude session sent a message:\n<agent-message from="a1">報告：改好了嗎？是的，共 3 項。</agent-message>'
+    ANS = "三個 agent 都交報告了，正在核對。" * 12 + "目前可用記憶體 1.8 GB。"
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.t = self.tmp / "t.jsonl"
+        self.old = (ug.SG_LOCAL, ug.STATE_DIR)
+        ug.SG_LOCAL = str(self.tmp / "local.json")
+        ug.STATE_DIR = str(self.tmp / "state")
+
+    def tearDown(self):
+        ug.SG_LOCAL, ug.STATE_DIR = self.old
+
+    def run_guard(self, tasks=(), crons=()):
+        return ug.source_guard({"transcript_path": str(self.t), "stop_hook_active": False,
+                                "background_tasks": list(tasks), "session_crons": list(crons)})
+
+    def test_progress_note_while_agents_running_is_not_blocked(self):
+        transcript(self.t, [("user", "幫我查台灣現在的基本工資是多少？"), ("assistant", "先派 agent。"), ("user", self.AGENT), ("assistant", self.ANS)])
+        self.assertIsNone(self.run_guard(tasks=[{"id": "x", "type": "subagent", "status": "running"}]))
+
+    def test_final_answer_after_background_done_uses_last_human_question(self):
+        transcript(self.t, [("user", "幫我查台灣現在的基本工資是多少？"), ("assistant", "先派 agent。"), ("user", self.AGENT), ("assistant", self.ANS)])
+        out = self.run_guard()
+        self.assertEqual(out["decision"], "block", "背景工作都結束＝這則是答案，使用者問的是問句")
+        transcript(self.t, [("user", "都做，額度不用擔心"), ("assistant", "好。"), ("user", self.AGENT), ("assistant", self.ANS)])
+        self.assertIsNone(self.run_guard(), "使用者最後打的不是問句：agent 報告裡的問號不算")
+
+    def test_long_running_shell_or_monitor_does_not_disable_guard(self):
+        transcript(self.t, [("user", "幫我查台灣現在的基本工資是多少？"), ("assistant", "先派 agent。"), ("user", self.AGENT), ("assistant", self.ANS)])
+        self.assertEqual(self.run_guard(tasks=[{"id": "s", "type": "shell", "status": "running", "command": "npm run dev"}])["decision"], "block")
+
+    def test_cron_prompt_and_notification_are_auto(self):
+        cron = "巡檢：列出所有進行中的背景任務與 agent，逐一讀最新輸出"
+        self.assertTrue(ug.sg_is_auto(cron + "；已結束的立刻處理", [{"prompt": cron}]))
+        self.assertTrue(ug.sg_is_auto("<task-notification>\n<task-id>x</task-id>"))
+        self.assertTrue(ug.sg_is_auto("[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated"))
+        self.assertFalse(ug.sg_is_auto("還有甚麼要做或優化的嗎?", [{"prompt": cron}]))
+        transcript(self.t, [("user", "現在 5 小時用量是多少？"), ("assistant", "查了。"), ("user", cron), ("assistant", self.ANS)])
+        self.assertEqual(ug.sg_last_human(str(self.t), [{"prompt": cron}]), "現在 5 小時用量是多少？")
+
+
+class SubagentLangNudge(unittest.TestCase):
+    """0.23.0：agent 的中途說明文字不是使用者的語言時，在它下一次工具呼叫後提醒一次。"""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.old = (ug.HOME, ug.CONFIG, ug.STATE_DIR, ug.SUB_LANG_STATE)
+        ug.HOME = str(self.tmp / "home")
+        ug.CONFIG = str(self.tmp / "home" / "nope.json")
+        ug.STATE_DIR = str(self.tmp / "state")
+        ug.SUB_LANG_STATE = str(self.tmp / "state" / "subagent-lang.json")
+        (self.tmp / "home").mkdir()
+        (self.tmp / "home" / "settings.json").write_text(json.dumps({"language": "chinese"}), encoding="utf-8")
+        self.sub = self.tmp / "projects" / "slug" / "sess" / "subagents"
+        self.sub.mkdir(parents=True)
+
+    def tearDown(self):
+        ug.HOME, ug.CONFIG, ug.STATE_DIR, ug.SUB_LANG_STATE = self.old
+
+    def agent(self, aid, texts):
+        rows = [{"type": "user", "message": {"role": "user", "content": "做事"}}]
+        for x in texts:
+            rows.append({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": x}, {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}]}})
+        (self.sub / f"agent-{aid}.jsonl").write_text(chr(10).join(json.dumps(r, ensure_ascii=False) for r in rows) + chr(10), encoding="utf-8")
+
+    def call(self, aid, agent_type="general-purpose"):
+        return ug.subagent_lang_nudge({"hook_event_name": "PostToolUse", "tool_name": "Bash", "agent_id": aid, "agent_type": agent_type,
+                                       "session_id": "sess", "cwd": str(self.tmp), "transcript_path": str(self.tmp / "projects" / "slug" / "sess.jsonl")})
+
+    def test_english_mid_text_nudged_once(self):
+        self.agent("e1", ["Now I will inspect the repository layout and then run the complete test suite."])
+        msg = self.call("e1")
+        self.assertIn("【語言（hook）】", msg)
+        self.assertIn("chinese", msg)
+        self.assertIsNone(self.call("e1"), "同一個 agent 只提醒一次")
+
+    def test_chinese_or_short_or_code_text_not_nudged(self):
+        self.agent("e2", ["我先看一下資料夾結構，再跑全套測試確認沒有壞。", "OK", "跑 `py -3 -m unittest discover -s tests` 確認全部通過，再看 git status 有沒有殘留。"])
+        self.assertIsNone(self.call("e2"))
+
+    def test_main_session_readonly_agent_and_other_language_skipped(self):
+        self.agent("e3", ["Now I will inspect the repository layout and then run the complete test suite."])
+        self.assertIsNone(self.call(""), "主對話沒有 agent_id")
+        self.assertIsNone(self.call("e3", "Explore"))
+        (self.tmp / "home" / "settings.json").write_text(json.dumps({"language": "english"}), encoding="utf-8")
+        self.assertIsNone(self.call("e3"))
 
 
 class SubagentReportGuard(unittest.TestCase):
