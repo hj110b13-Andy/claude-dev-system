@@ -1061,6 +1061,67 @@ def source_guard(payload):
                       "若這些數字不是事實宣稱（例如純概念舉例、你自己算的），在回覆末尾加一行「〔不含待查證事實〕」即可，不必重寫。只補這一次，之後不會再退回。"}
 
 
+# 0.21.0 派工補充（SubagentStart）。使用者 2026-11-11：「它派出去的agent常常都不會遵守該專案裡的規則與長期記憶等等，還有連全域優化系統的規則
+# 它也不不遵守，不知道是不遵守還是不會看」。查 Stock-web 81 份 agent 對話紀錄＋官方文件（code.claude.com/docs/en/sub-agents、hooks）：
+# agent 有載入 CLAUDE.md 與 MEMORY.md 索引，但①回覆語言設定不傳 ②記憶內文不載入（81 個裡 0 個去讀）③UserPromptSubmit／Stop 的守門
+# 不對 agent 觸發 ④工作目錄繼承主對話當下位置（11/10 有 agent 因此 commit 到部署分支）。官方做法：SubagentStart 的 additionalContext。
+SUB_LIGHT_TYPES = {"Explore", "Plan", "claude-code-guide", "statusline-setup", "web-fetch"}  # 唯讀／單一用途，只補語言
+
+
+def _settings_language():
+    try:
+        with open(os.path.join(HOME, "settings.json"), encoding="utf-8") as f:
+            v = (json.load(f) or {}).get("language")
+        return v.strip() if isinstance(v, str) and v.strip() else None
+    except Exception:
+        return None
+
+
+def _git_branch(cwd):
+    try:
+        import subprocess
+        r = subprocess.run(["git", "-C", cwd, "branch", "--show-current"], capture_output=True, text=True, timeout=1.5,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return r.stdout.strip() or None
+    except Exception:
+        return None
+
+
+def subagent_brief(payload):
+    """回要注入給剛派出的 agent 的字串或 None。設定：dispatch-config.json 的 subagentBrief.enabled（預設 true，專案優先）。"""
+    cwd = payload.get("cwd") or os.getcwd()
+    enabled = True
+    for path in (CONFIG, os.path.join(cwd, PROJECT_CONFIG_REL)):
+        try:
+            with open(path, encoding="utf-8") as f:
+                v = ((json.load(f) or {}).get("subagentBrief") or {}).get("enabled")
+            if isinstance(v, bool):
+                enabled = v
+        except Exception:
+            continue
+    if not enabled:
+        return None
+    out = ["【派工補充（hook）】你是被派出的 agent。下面幾件事主對話有、但不會自動傳給你："]
+    lang = _settings_language()
+    if lang:
+        out.append(f"- 語言：使用者的回覆語言設定是「{lang}」。中途文字與最終報告都用這個語言，寫法與全域 CLAUDE.md 相同（它是繁體中文就用繁體中文）。")
+    if payload.get("agent_type") in SUB_LIGHT_TYPES:
+        return chr(10).join(out) if len(out) > 1 else None
+    br = _git_branch(cwd)
+    out.append(f"- 工作目錄：開工時是 `{cwd}`" + (f"（git 分支 `{br}`）" if br else "") + "，這是繼承主對話當下的位置，不一定是這份工作該在的地方。"
+               "派工單指定了目錄或分支就照派工單；要 commit 時先 `git branch --show-current`，分支不是派工單寫的那個、或派工單沒寫 commit 到哪個分支，"
+               "就不 commit，改存 patch 並在報告寫明路徑與原因。")
+    mem = os.path.normpath(os.path.join(os.path.dirname(payload.get("transcript_path") or ""), "memory"))
+    if os.path.isfile(os.path.join(mem, "MEMORY.md")):
+        out.append(f"- 長期記憶：你的 context 只有 MEMORY.md 索引（每行一條使用者給過的指示），內文沒有載入。開工前把索引裡與這份工作有關的每一條用 Read 讀內文"
+                   f"（`{mem}` 底下同名檔），照內文做；一條都無關就在報告寫「記憶索引已看，無相關」。")
+    out.append("- 規則：全域與專案 CLAUDE.md 對你同樣適用，派工單沒重寫不代表免除；兩者衝突時照派工單。主對話有 hook 會退回不合規的回覆，你沒有，交報告前自己逐項核對："
+               "①上網查資料前先 Read `~/.claude/claude-dev-system/rules/web-quick.md` ②報告裡每個關鍵數字附出處（檔案路徑＋行或網址），推論另外標明 "
+               "③回測、全套測試、build 開跑前先過 `resgate.py wait` ④只 `git add <自己改的檔>`，不 `add -A`、不 stash／reset 別人的變更 "
+               "⑤自己開的背景程序全部結束（依 PID 或埠號）。做不到的項目寫進報告，不可略過不提。")
+    return chr(10).join(out)
+
+
 def main():
     printing = "--print" in sys.argv
     event = ""
@@ -1075,6 +1136,11 @@ def main():
         out = source_guard(payload)
         if out:
             print(json.dumps(out, ensure_ascii=True))
+        return
+    if event == "SubagentStart":  # 0.21.0：把不會自動傳給 agent 的東西補進去
+        msg = subagent_brief(payload)
+        if msg:
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": msg}}, ensure_ascii=True))
         return
     if event == "SessionStart":  # 0.12.0：壓縮或接續後重新開工；新對話（startup）由 UserPromptSubmit 的專案自動化處理
         if payload.get("source") in ("compact", "resume"):

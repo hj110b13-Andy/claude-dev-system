@@ -2,6 +2,21 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.21.0（2026-11-11，視窗會自動換 exe）
+
+使用者（2026-11-11）：「我現在有發現一個問題，在Stock-web有發生過……它派出去的agent常常都不會遵守該專案裡的規則與長期記憶等等，還有連全域優化系統的規則它也不不遵守，不知道是不遵守還是不會看，你幫我確認看看。」
+
+查證（Stock-web 對話 `02c8fbcc` 的 81 份 agent 對話紀錄、官方文件 code.claude.com/docs/en/sub-agents 與 /hooks、這場對話實派一個探測 agent）：
+- agent **看得到** 全域與專案 CLAUDE.md、AGENTS.md、MEMORY.md 索引（81／81 的紀錄都有；探測 agent 逐字抄得出）。
+- agent **拿不到**：回覆語言設定（0／81 有）、記憶檔內文（0／81 去讀）、UserPromptSubmit 與 Stop hook 的守門（紀錄裡只有 PostToolUse）；工作目錄繼承主對話當下位置（11/10 有 agent 因此 commit 到 `claude/edgeone-trial` 部署分支，派工單沒寫分支；這次探測 agent 也繼承到主對話剛 cd 過去的資料夾）。
+- 寫進派工單的規則幾乎都照做（「繁體中文」81 份都寫，最終報告都是中文；resgate 28 份有寫 28 份有跑）；只在 CLAUDE.md 的常被略過（上網前先讀 web-quick.md：9 個上網的只有 2 個讀）。
+
+- **新 hook 事件 SubagentStart（`hooks/usage_guard.py` 的 `subagent_brief`）**：agent 開工時自動補上回覆語言、工作目錄與分支（分支不對或派工單沒寫就不 commit、改交 patch）、記憶內文路徑（有關的先讀）、五項自我核對清單。Explore、Plan 等唯讀 agent 只補語言。開關 `dispatch-config.json` 的 `subagentBrief.enabled`（預設開，專案設定優先）。做法來源：官方 hooks 文件「SubagentStart hooks can't block subagent creation, but they can inject context into the subagent」。
+- **安裝器**：`HOOK_SPECS` 加 SubagentStart；update 會寫進 settings.json。
+- **派工規則**：`agent-dispatch.md` 固定條款加第 4 條（寫明工作目錄與 commit 分支）與新節〈agent 開工時實際拿到什麼〉；core.md 與 skill `cds-agent-dispatch` 同步——一定要守的規則與相關記憶逐條寫進派工說明、agent 的結論由 main 核對後才轉給使用者。
+- 沒做：SubagentStop 守門（退回不合規的 agent 報告）。官方支援，但這次的紀錄沒有量到能用程式判定的違規樣式，先不加。
+- 驗證：tests/test_hooks.py 新增 SubagentBrief 4 項；unittest 全過；本機 update 後實派 agent 確認注入內容有到（見 PROGRESS）。
+
 ## 0.20.0（2026-11-11，視窗會自動換 exe）
 
 使用者（2026-11-11，問到這台 dispatch-config.json 缺 0.12.0 起的健康檢查鍵）：「甚麼意思?所以我是白設定了嗎?」→ 確認門檻 95／99 有生效、缺的鍵用內建預設 → 「好，補到設定視窗」。

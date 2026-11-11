@@ -1,5 +1,13 @@
 # claude-dev-system 交接紀錄
 
+## 2026-11-11：v0.21.0（agent 不守規則的查證與保底）
+
+- 使用者原話：「它派出去的agent常常都不會遵守該專案裡的規則與長期記憶等等，還有連全域優化系統的規則它也不不遵守，不知道是不遵守還是不會看，你幫我確認看看。」
+- 結論：兩者都有。agent 看得到 CLAUDE.md 與 MEMORY.md 索引，但拿不到回覆語言設定、記憶內文、UserPromptSubmit／Stop 守門，工作目錄繼承主對話當下位置；寫進派工單的規則幾乎都照做，只在 CLAUDE.md 的常被略過。數字與來源在 CHANGELOG 0.21.0、`rules/agent-dispatch.md`〈agent 開工時實際拿到什麼〉。
+- 做了：SubagentStart hook 自動補語言、工作目錄與分支、記憶路徑、自我核對清單（`subagentBrief.enabled`，預設開）；派工固定條款第 4 條；core.md、skill 同步。
+- 驗證：unittest 145 項通過（1 項略過）；update 後 verify 全部通過；實派一個 general-purpose agent（不准用工具）逐字抄出【派工補充（hook）】全文，工作目錄與分支正確。
+- 沒做／待觀察：①SubagentStop 守門沒加（沒有量到可用程式判定的違規樣式）；②保底清單送到了，但 agent 會不會照做還沒有實際工作的數據——下次任何專案派 agent 後，看它有沒有讀記憶內文、上網前有沒有讀 web-quick.md；③Stock-web 的記憶 `do-it-yourself-no-agents`（11/10 使用者要 main 全部自己做）仍有效，要不要恢復派工由使用者在那邊決定；④設定視窗沒有 `subagentBrief` 開關，要關只能改設定檔。
+
 ## 2026-11-11：複查 0.17.0～0.19.0（Stock-web 對話 11/9～11/10 改的）
 
 - 0.17.0～0.19.0 都已在 master、本機安裝副本與 repo 內容一致（只差使用者自訂的 config/dispatch-config.json，update 保留，屬正常）；unittest 139 項通過（1 項略過）。細節與使用者原話在 CHANGELOG。

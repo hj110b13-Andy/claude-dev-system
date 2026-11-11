@@ -17,6 +17,16 @@
 3. **暫存檔用自己的子資料夾**：scratchpad 底下先建 `<agent 名稱或任務代號>/` 再寫檔，不直接寫在 scratchpad 根目錄。
    （2026-11-08 Stock-web：session scratchpad 與其他 agent 共用，覆蓋了別人的 head.md／tail.md；2026-11-09 這個 repo 的派工也在共用 scratchpad 撞到別人的 re.py。）
 
+4. **寫明工作目錄與 commit 的分支**（0.21.0）：agent 的工作目錄繼承主對話派工當下的位置（主對話在 worktree 裡，agent 就在那個 worktree、那個分支）。派工說明寫「在 `<絕對路徑>` 工作，commit 到分支 `<名稱>`」或「不 commit，只交 patch」；派工前自己先 `git branch --show-current` 確認。
+   （2026-11-10 Stock-web：main 當時在 EdgeOne 試用 worktree，派出的研究 agent 照派工單 commit，結果進了部署分支 `claude/edgeone-trial`，派工單沒寫分支。）
+
+## agent 開工時實際拿到什麼（0.21.0，2026-11-11 查 Stock-web 81 份 agent 紀錄＋官方文件 code.claude.com/docs/en/sub-agents）
+- 有：全域與專案 CLAUDE.md、AGENTS.md、MEMORY.md 索引、skill 清單、git 狀態快照、派工說明。Explore、Plan 連 CLAUDE.md 都沒有。
+- 沒有：主對話的對話內容、回覆語言設定、記憶檔內文、主對話讀過的檔、UserPromptSubmit 與 Stop hook 的守門（查證守門、建議守門、專案自動化都不對 agent 觸發；PostToolUse 會）。
+- 實測遵守率：寫進派工說明的規則幾乎都照做（「繁體中文」81 份都寫、最終報告都是中文；`resgate` 28 份有寫、28 份有跑）；只在 CLAUDE.md、沒寫進派工說明的常被略過（上網前先讀 web-quick.md：9 個上網的只有 2 個讀；記憶內文：81 個都沒讀）。
+- 所以：**這份工作一定要守的規則，逐條寫進派工說明**（官方文件同一結論："If a rule must [reach the subagent]... restate it in the prompt you give Claude when delegating"）；與這份工作有關的記憶，把內文重點或檔案路徑寫進派工說明。SubagentStart hook 會自動補語言、工作目錄與分支、記憶路徑、自我核對清單（`subagentBrief.enabled`，預設開），但那是保底，不取代派工說明。
+- 收報告時 main 要自己核對：agent 的結論不經查證不可直接轉給使用者（數字對回它寫的檔、判定標準是不是看到結果後才定的、commit 在哪個分支）。
+
 ## 重型工作與延後清單（0.16.0；使用者 2026-11-09 決定）
 - 使用者原話：「等 10 分鐘還不夠就不跑：直接回報「記憶體不足、沒有執行」，由我決定之後再跑。不會卡住，也不會硬跑出問題，只是那個工作會延後。我選這個，但要寫清楚規則當有其他agent完成時，要確認記憶體是否足夠了，並開始跑「記憶體不足、沒有執行」的任務。然後先設固定 3GB就好，提醒就不用了，記憶體門檻要用成視窗可更改的。」
 - 門檻唯一來源：`dispatch-config.json` 的 `resourceGate`（`minFreeMemGB` 3、`waitMinutes` 10、`pollSeconds` 60；專案 `.claude/dispatch-config.json` 優先；設定視窗可改 `minFreeMemGB`，1～32）。

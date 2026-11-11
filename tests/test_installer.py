@@ -178,6 +178,7 @@ class Preservation(Base):
         s["hooks"]["PostToolUse"].append({"matcher": "Bash", "hooks": [{"type": "command", "command": "py -3 C:/x/usage_guard.py"}]})
         s["hooks"]["Stop"] = [{"hooks": [{"type": "command", "command": "py -3 C:/x/usage_guard.py"}]}]
         s["hooks"]["SessionStart"] = [{"hooks": [{"type": "command", "command": "py -3 C:/x/usage_guard.py"}]}]
+        s["hooks"]["SubagentStart"] = [{"hooks": [{"type": "command", "command": "py -3 C:/x/usage_guard.py"}]}]
         raw = json.dumps(s, indent=2)
         self.write_settings(None, raw)
         self.install()

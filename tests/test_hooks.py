@@ -419,6 +419,61 @@ class SessionUpkeep(unittest.TestCase):
         self.assertTrue((root / "abc" / "s1" / "big.bin").exists(), "只提醒不刪")
 
 
+class SubagentBrief(unittest.TestCase):
+    """0.21.0：agent 開工時補語言、工作目錄與分支、記憶路徑、自我核對清單（使用者：agent「不知道是不遵守還是不會看」）。"""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.old = (ug.HOME, ug.CONFIG)
+        ug.HOME = str(self.tmp / "home")
+        ug.CONFIG = str(self.tmp / "home" / "claude-dev-system" / "config" / "dispatch-config.json")
+        (self.tmp / "home").mkdir()
+        (self.tmp / "home" / "settings.json").write_text(json.dumps({"language": "chinese"}), encoding="utf-8")
+        self.proj = self.tmp / "projects" / "slug"
+        (self.proj / "memory").mkdir(parents=True)
+        (self.proj / "memory" / "MEMORY.md").write_text("- [x](x.md) — y", encoding="utf-8")
+        self.cwd = self.tmp / "work"
+        self.cwd.mkdir()
+
+    def tearDown(self):
+        ug.HOME, ug.CONFIG = self.old
+
+    def payload(self, agent_type="general-purpose"):
+        return {"hook_event_name": "SubagentStart", "cwd": str(self.cwd), "agent_type": agent_type,
+                "transcript_path": str(self.proj / "s.jsonl")}
+
+    def test_full_brief_has_language_cwd_memory_and_checklist(self):
+        msg = ug.subagent_brief(self.payload())
+        self.assertIn("chinese", msg)
+        self.assertIn(str(self.cwd), msg)
+        self.assertIn(str(self.proj / "memory"), msg)
+        for key in ("web-quick.md", "resgate.py wait", "git branch --show-current", "背景程序"):
+            self.assertIn(key, msg)
+
+    def test_readonly_agents_get_language_only(self):
+        msg = ug.subagent_brief(self.payload("Explore"))
+        self.assertIn("chinese", msg)
+        self.assertNotIn("工作目錄", msg)
+        self.assertNotIn("長期記憶", msg)
+
+    def test_no_memory_index_no_memory_line_and_can_disable(self):
+        (self.proj / "memory" / "MEMORY.md").unlink()
+        self.assertNotIn("長期記憶", ug.subagent_brief(self.payload()))
+        (self.cwd / ".claude").mkdir()
+        (self.cwd / ".claude" / "dispatch-config.json").write_text(json.dumps({"subagentBrief": {"enabled": False}}), encoding="utf-8")
+        self.assertIsNone(ug.subagent_brief(self.payload()))
+
+    def test_installer_registers_subagent_start(self):
+        sys.path.insert(0, str(REPO / "installer"))
+        try:
+            from cds import settings_ops
+        finally:
+            sys.path.pop(0)
+        self.assertIn(("SubagentStart", None), settings_ops.HOOK_SPECS)
+        s, rec = settings_ops.add_hooks({}, "py -3 x.py # claude-dev-system")
+        self.assertEqual(len(s["hooks"]["SubagentStart"]), 1)
+
+
 class RecoGuard(unittest.TestCase):
     """0.19.0：建議沒標已查證／未查證要退回；「不含待查證事實」不能蓋過研究結論。"""
     LONG = "說明" * 120
