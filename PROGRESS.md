@@ -4,7 +4,7 @@
 
 - 0.17.0～0.19.0 都已在 master、本機安裝副本與 repo 內容一致（只差使用者自訂的 config/dispatch-config.json，update 保留，屬正常）；unittest 139 項通過（1 項略過）。細節與使用者原話在 CHANGELOG。
 - 缺口：0.19.0（`1caafcc`）已推 master 但沒打 tag、沒出 Release，其他裝置拿不到。11/11 補打 `v0.19.0` 並推送。
-- 這台 dispatch-config.json 是 11/1 的舊自訂版（fiveHour 95／sevenDay 99），沒有 0.12.0 起的健康檢查與 alignOnUpdate 鍵，hook 用內建預設；要不要換新版由使用者決定（會覆蓋自訂）。
+- 這台 dispatch-config.json 是 11/1 的舊自訂版（fiveHour 95／sevenDay 99），沒有 0.12.0 起的健康檢查與 alignOnUpdate 鍵，hook 用內建預設（與出廠值相同）。使用者說「好，補到設定視窗」→ v0.20.0：視窗可改這些健康檢查門檻與開關（不改的話不寫入），並修正存「專案自動化」會刪掉其他鍵；Release 兩個附件已確認。
 
 ## 2026-11-09：v0.16.2（查證守門收緊）
 
