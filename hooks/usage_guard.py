@@ -514,38 +514,75 @@ COMPACT_ACTIVE_SEC = 180  # 自己定的：agent 紀錄這麼久內有寫入才�
 COMPACT_TOKEN_MARGIN = 1.1  # 自己定的：模型相同時，agent 最後一次請求的 context 要比主對話大一成以上才判定是它在壓縮
 
 
+COMPACT_CHARS_PER_TOKEN = 4  # 自己定的粗估：最後一次請求之後才寫進紀錄的內容，每 4 個字元算 1 token
+
+
+def _tail_lines(path):
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        f.seek(max(0, size - COMPACT_TAIL))
+        tail = f.read().decode("utf-8", errors="replace")
+    lines = tail.splitlines()
+    return lines[1:] if size > COMPACT_TAIL else lines
+
+
 def _last_tokens(path):
-    """這份對話紀錄最後一次請求送出的 context 大小（input＋cache 讀寫，token）。讀不到回 None。"""
+    """這份對話紀錄目前大約有多少 context：最後一次請求的大小（input＋cache 讀寫）＋那之後才加進來的內容（工具結果等）的粗估。
+    只看最後一次請求會低估——agent 一次呼叫好幾個工具時，結果要到下一次請求才算進去（2026-11-11 實跑第二次壓縮因此判錯）。"""
     try:
-        with open(path, "rb") as f:
-            f.seek(0, 2)
-            size = f.tell()
-            f.seek(max(0, size - COMPACT_TAIL))
-            tail = f.read().decode("utf-8", errors="replace")
-        for line in reversed(tail.splitlines()):
-            if '"usage"' not in line:
+        lines = _tail_lines(path)
+        for i in range(len(lines) - 1, -1, -1):
+            if '"usage"' not in lines[i]:
                 continue
             try:
-                d = json.loads(line)
+                d = json.loads(lines[i])
             except Exception:
                 continue
             u = (d.get("message") or {}).get("usage") if d.get("type") == "assistant" else None
             if u:
                 n = int(u.get("input_tokens") or 0) + int(u.get("cache_read_input_tokens") or 0) + int(u.get("cache_creation_input_tokens") or 0)
                 if n:
-                    return n
+                    return n + sum(len(x) for x in lines[i + 1:]) // COMPACT_CHARS_PER_TOKEN
         return None
     except Exception:
         return None
 
 
+def _waiting_on_tool(path):
+    """主對話是不是正卡在等工具結果（最後一則助理訊息呼叫了工具，結果還沒回來）。這時它不會送請求，也就不可能是它在壓縮。"""
+    try:
+        pending = set()
+        for line in _tail_lines(path):
+            if '"tool_use"' not in line and '"tool_result"' not in line and '"assistant"' not in line:
+                continue
+            try:
+                d = json.loads(line)
+            except Exception:
+                continue
+            if d.get("isSidechain"):
+                continue
+            c = (d.get("message") or {}).get("content")
+            if not isinstance(c, list):
+                continue
+            if d.get("type") == "assistant":
+                ids = {x.get("id") for x in c if isinstance(x, dict) and x.get("type") == "tool_use"}
+                pending = ids if ids else set()
+            elif d.get("type") == "user":
+                pending -= {x.get("tool_use_id") for x in c if isinstance(x, dict) and x.get("type") == "tool_result"}
+        return bool(pending)
+    except Exception:
+        return False
+
+
 def compact_from_subagent(payload, now=None, poll=None):
     """SessionStart(compact) 是不是某個 agent 自己壓縮觸發的（不是主對話）。有明確證據才回 True，判不出來回 False（照舊注入）。
     2026-11-11 實測（hook-debug）：hook 執行當下 compact_boundary 還沒寫進檔（非同步，等 2 秒也沒有），prompt_id 主對話與 agent 共用，
-    都不能用；可用的是 payload 的 model＝正在壓縮那一方的模型，以及各紀錄最後一次請求的 context 大小。
-    ①payload.model ≠ 主對話最後一則助理訊息的模型，且＝某個正在跑的 agent 的模型 → agent（實跑：壓縮 2 次、注入 0 次）。
-    ②模型相同：壓縮的是 context 較滿的那一方——某個正在跑的 agent 最後一次請求的 context ≥ 主對話的 COMPACT_TOKEN_MARGIN 倍 → agent。
-    poll 參數保留給測試呼叫相容，沒有作用。"""
+    都不能用。依序用這三個依據（前提都是有正在跑的 agent）：
+    ①payload.model（正在壓縮那一方的模型）≠ 主對話最後一則助理訊息的模型，且＝某個正在跑的 agent 的模型 → agent。
+    ②主對話正卡在等工具結果（例如前景 agent）→ 它不可能在壓縮 → agent。
+    ③模型相同、主對話沒在等工具：比 context 大小，agent 的估計值 ≥ 主對話的 COMPACT_TOKEN_MARGIN 倍 → agent。
+    poll 參數保留給舊呼叫相容，沒有作用。"""
     try:
         tp = payload.get("transcript_path") or ""
         sid = str(payload.get("session_id") or "")
@@ -566,6 +603,8 @@ def compact_from_subagent(payload, now=None, poll=None):
         if pm and mm and pm != mm:
             return any(_last_model(f) == pm for f in active)
         if any(_fresh_compact_boundary(f, now0) for f in active):
+            return True
+        if _waiting_on_tool(tp):
             return True
         mt = _last_tokens(tp)
         cands = [f for f in active if not pm or _last_model(f) == pm]

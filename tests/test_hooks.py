@@ -510,6 +510,22 @@ class SubagentCompaction(unittest.TestCase):
         return json.dumps({"type": "assistant", "message": {"role": "assistant", "model": model, "usage": {"input_tokens": tokens},
                                                              "content": [{"type": "text", "text": "x"}]}})
 
+    def test_main_blocked_on_tool_means_agent_is_compacting(self):
+        call = json.dumps({"type": "assistant", "message": {"role": "assistant", "model": "claude-opus-5-5", "usage": {"input_tokens": 160000},
+                                                             "content": [{"type": "tool_use", "id": "t1", "name": "Agent", "input": {}}]}})
+        done = json.dumps({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}})
+        (self.sub / "agent-a1.jsonl").write_text(self.msg("claude-opus-5-5", 20000) + chr(10), encoding="utf-8")
+        self.main.write_text(call + chr(10), encoding="utf-8")
+        self.assertTrue(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5")), "主對話在等前景 agent：不可能是它在壓縮")
+        self.main.write_text(call + chr(10) + done + chr(10), encoding="utf-8")
+        self.assertFalse(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5")), "工具結果回來了、主對話比較滿：照舊注入")
+
+    def test_context_estimate_counts_results_added_after_last_request(self):
+        big = json.dumps({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "x", "content": "y" * 400000}]}})
+        self.main.write_text(self.msg("claude-opus-5-5", 60000) + chr(10), encoding="utf-8")
+        (self.sub / "agent-a1.jsonl").write_text(self.msg("claude-opus-5-5", 20000) + chr(10) + big + chr(10), encoding="utf-8")
+        self.assertTrue(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5")), "agent 最後一次請求很小，但之後加進來一大批工具結果")
+
     def test_same_model_decided_by_context_size(self):
         # 2026-11-11 實跑：主對話與 agent 同模型時 boundary 等 2 秒也沒落檔，改比最後一次請求的 context 大小
         self.main.write_text(self.msg("claude-opus-5-5", 60000) + chr(10), encoding="utf-8")
