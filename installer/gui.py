@@ -232,6 +232,39 @@ class App:
         f.pack(fill="x", pady=(6, 4))
         return f
 
+    def _flow(self, parent, pady):
+        """一橫列放不下就自動換行的容器：items 是一組一組不可拆開的元件（每組是一個 Frame 或單一元件），
+        寬度不夠就把整組移到下一列，不會被視窗右邊切掉。回傳容器；用 flow_add(容器, 元件) 加入。"""
+        f = ttk.Frame(parent); f.pack(anchor="w", fill="x", pady=pady)
+        f._flow_items, f._flow_layout = [], None
+        f.bind("<Configure>", lambda e, fr=f: self._reflow(fr))
+        return f
+
+    def _flow_add(self, f, w):
+        f._flow_items.append(w)
+        f._flow_layout = None
+        f.after_idle(lambda: self._reflow(f))
+        return w
+
+    def _reflow(self, f):
+        width = f.winfo_width()
+        if width <= 1:
+            return
+        sizes = [(w.winfo_reqwidth() + 10, w.winfo_reqheight()) for w in f._flow_items]
+        pos, x, y, rowh = [], 0, 0, 0
+        for need, h in sizes:
+            if x and x + need > width:
+                y, x, rowh = y + rowh + 2, 0, 0
+            pos.append((x, y)); x += need; rowh = max(rowh, h)
+        total_h = y + rowh
+        key = (tuple(pos), total_h)
+        if key == f._flow_layout:
+            return
+        f._flow_layout = key
+        for w, (px, py) in zip(f._flow_items, pos):  # 用 place 絕對定位：grid 的欄寬會被不同列互相撐開
+            w.place(x=px, y=py)
+        f.configure(height=total_h)
+
     def _no_wheel_change(self, w):
         """下拉選單與數字框：滾輪只捲頁面，不改值（使用者回饋：滾輪會不小心改設定）。"""
         w.bind("<MouseWheel>", lambda e: (self.canvas.yview_scroll(-int(e.delta / 120), "units"), "break")[1])
@@ -316,12 +349,12 @@ class App:
         self._no_wheel_change(ttk.Spinbox(tcf, from_=1, to=120, width=5, textvariable=self.tc_min_var, command=self.update_diff)).pack(side="left")
         ttk.Label(tcf, text="分鐘自動檢查一次所有任務（結束或出錯就處理；全部結束就停；沒有任務時不會跑）").pack(side="left")
         self.tc_min_var.trace_add("write", lambda *a: self.update_diff())
-        sbf = ttk.Frame(core); sbf.pack(anchor="w", pady=4)
-        ttk.Label(sbf, text="派出的 agent：").pack(side="left")
+        sbf = self._flow(core, 4)
+        self._flow_add(sbf, ttk.Label(sbf, text="派出的 agent："))
         self.sb_vars = {k: tk.BooleanVar(value=bool(f.sub_brief.get(k, gm.DEFAULT_SUB_BRIEF[k]))) for k in gm.DEFAULT_SUB_BRIEF}
         for k, txt in (("enabled", "開工時自動補上語言、工作目錄與分支、記憶路徑、核對清單"),
                        ("guard", "交報告時核對（語言、數字出處、記憶、分支），不合格退回一次")):
-            ttk.Checkbutton(sbf, text=txt, variable=self.sb_vars[k], command=self.update_diff).pack(side="left", padx=(0, 10))
+            self._flow_add(sbf, ttk.Checkbutton(sbf, text=txt, variable=self.sb_vars[k], command=self.update_diff))
         mgf = ttk.Frame(core); mgf.pack(anchor="w", pady=4)
         ttk.Label(mgf, text="重型工作記憶體門檻（GB）：").pack(side="left")
         self.mem_var = tk.StringVar(value=f"{float(f.mem_gb):g}")
@@ -331,27 +364,31 @@ class App:
                   foreground="#555").pack(side="left")
         self.mem_var.trace_add("write", lambda *a: self.update_diff())
         pa = f.project_auto
-        paf = ttk.Frame(core); paf.pack(anchor="w", fill="x", pady=(4, 0))
+        paf = self._flow(core, (4, 0))
         self.pa_vars = {k: tk.BooleanVar(value=bool(pa.get(k, gm.DEFAULT_PROJECT_AUTO[k]))) for k in gm.PA_BOOL_KEYS}
         self.pa_int_vars = {k: tk.StringVar(value=str(int(pa.get(k, gm.DEFAULT_PROJECT_AUTO[k])))) for k in gm.PA_INT_KEYS}
-        ttk.Label(paf, text="專案自動化：").pack(side="left")
+        self._flow_add(paf, ttk.Label(paf, text="專案自動化："))
         for k, txt in (("autoInit", "新專案自動立規矩"), ("autoAudit", "舊專案自動盤點"), ("autoRefactor", "達門檻不問直接重整（預設關，會問一次）")):
-            ttk.Checkbutton(paf, text=txt, variable=self.pa_vars[k], command=self.update_diff).pack(side="left", padx=(0, 10))
-        ttk.Label(paf, text="專案門檻：原始碼 ≥").pack(side="left")
-        self._no_wheel_change(ttk.Spinbox(paf, from_=1, to=999, width=5, textvariable=self.pa_int_vars["minSourceFiles"], command=self.update_diff)).pack(side="left")
-        ttk.Label(paf, text="個檔或是 git 專案才算").pack(side="left")
-        paf2 = ttk.Frame(core); paf2.pack(anchor="w", fill="x", pady=(2, 0))
-        ttk.Label(paf2, text="　　　　　　").pack(side="left")
+            self._flow_add(paf, ttk.Checkbutton(paf, text=txt, variable=self.pa_vars[k], command=self.update_diff))
+        thr = ttk.Frame(paf)
+        ttk.Label(thr, text="專案門檻：原始碼 ≥").pack(side="left")
+        self._no_wheel_change(ttk.Spinbox(thr, from_=1, to=999, width=5, textvariable=self.pa_int_vars["minSourceFiles"], command=self.update_diff)).pack(side="left")
+        ttk.Label(thr, text="個檔或是 git 專案才算").pack(side="left")
+        self._flow_add(paf, thr)
+        paf2 = self._flow(core, (2, 0))
+        self._flow_add(paf2, ttk.Label(paf2, text="　　　　　　"))
         for k, txt in (("alignOnUpdate", "全域系統升版後，第一則提示列出專案要配合的優化"), ("verifySkill", "有畫面的專案沒有驗證 skill 時提醒建立")):
-            ttk.Checkbutton(paf2, text=txt, variable=self.pa_vars[k], command=self.update_diff).pack(side="left", padx=(0, 10))
-        hcf = ttk.Frame(core); hcf.pack(anchor="w", fill="x", pady=(2, 0))
-        ttk.Label(hcf, text="專案健康檢查（0＝不檢查）：").pack(side="left")
+            self._flow_add(paf2, ttk.Checkbutton(paf2, text=txt, variable=self.pa_vars[k], command=self.update_diff))
+        hcf = self._flow(core, (2, 0))
+        self._flow_add(hcf, ttk.Label(hcf, text="專案健康檢查（0＝不檢查）："))
         for k, pre, post in (("staleFiles", "盤點後改過 >", "檔要重盤"), ("claudeMdMaxLines", "　CLAUDE.md >", "行"),
                              ("claudeMdMaxKB", "或 >", "KB 要瘦身"), ("progressMaxLines", "　交接紀錄 >", "行"),
                              ("progressMaxKB", "或 >", "KB"), ("newSessionAfterCompactions", "　壓縮滿", "次建議開新對話")):
-            ttk.Label(hcf, text=pre).pack(side="left")
-            self._no_wheel_change(ttk.Spinbox(hcf, from_=0, to=9999, width=5, textvariable=self.pa_int_vars[k], command=self.update_diff)).pack(side="left")
-            ttk.Label(hcf, text=post).pack(side="left")
+            grp = ttk.Frame(hcf)
+            ttk.Label(grp, text=pre).pack(side="left")
+            self._no_wheel_change(ttk.Spinbox(grp, from_=0, to=9999, width=5, textvariable=self.pa_int_vars[k], command=self.update_diff)).pack(side="left")
+            ttk.Label(grp, text=post).pack(side="left")
+            self._flow_add(hcf, grp)
         for v in self.pa_int_vars.values():
             v.trace_add("write", lambda *a: self.update_diff())
         self.notes.append(ttk.Label(core, text=gm.TOOL_DESC["project_auto"], foreground="#555", wraplength=900, justify="left")); self.notes[-1].pack(anchor="w")
