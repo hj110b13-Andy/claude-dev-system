@@ -1,5 +1,42 @@
 # claude-dev-system 交接紀錄
 
+## 接手狀態（2026-11-11 11:3x，這場對話收尾時寫；開新對話先讀這節）
+
+**為什麼換對話**：這場對話從早上做到 0.25.1，內容非常長，每回一次都要重讀全部；5 小時用量 11:3x 到 98%（門檻 95%）。使用者說過有重置券不用擔心額度，但繼續在這場做瘦身會很貴又可能被切斷。
+
+**進行中、會自己完成的**：背景指令（這場對話的工作階段）在等記憶體閘門，最多 5 輪、每輪 10 分鐘：放行→全套測試→通過才 update、verify、push、打 tag v0.25.1、等 Release。11:3x 可用記憶體 2.1 GB（門檻 3 GB），佔用的是 Stock-web 兩個 opus agent 的回測。
+- 接手先查：`git tag -l v0.25.1`、`git status -sb`、`gh release view v0.25.1`。
+- **沒發成功時**（本機 master 比 origin 多 commit、沒有 tag）：`py -3 tools/resgate.py run --project claude-dev-system --desc "0.25.1 全套測試" -- py -3 -m unittest discover -s tests`（輸出導檔、exit code 存變數，不接管線），exit 0 才 `install.py update --with-web --with-video`、`verify`、`git push`、`git tag v0.25.1 && git push origin v0.25.1`、`gh release view v0.25.1` 確認兩個附件。0.25.1 只改 `tools/agent-audit.py` 與它的測試（7 項已單獨通過）。
+- 延後清單可能留著幾筆「0.25.1 全套測試」：跑完後 `py -3 tools/resgate.py list`、`done <編號>` 清掉。
+
+**使用者 2026-11-11 的三個決定**（原話：「1.維持現況 2.照你安排做 3.不換」）：
+1. 免金鑰版與金鑰版的 MCP 說明重複（約 8 KB）：**維持現況**，不動。
+2. 全域 CLAUDE.md 瘦身：**照 main 安排做**——見下方待辦 A，還沒開工。
+3. tavily 金鑰（出現在那場對話的工具輸出）：**不換**。
+
+### 待辦 A：全域 CLAUDE.md（rules/core.md）瘦身（使用者已同意，未開工）
+
+- 現況（2026-11-11 量）：`rules/core.md` 27 行、14,327 位元組；合併進 `~/.claude/CLAUDE.md` 後約 6,602 字，每個專案每次請求都帶著。最長的幾條：「上網查資料」「背景任務巡檢」「影片」「教使用者操作任何網站或軟體前」「先找現成做法」「隨時可接手」「專案自動化」。
+- 目標：長條文只留「什麼情況觸發＋必做的那一步＋細節看哪個檔哪一節」，細節搬到 `rules/` 細則檔（web-quick.md、web-sources.md、workflow.md、agent-dispatch.md 多半已有對應段落，先確認細則檔已含同樣內容再刪 core.md 的重複，不要兩邊各留一份不同版本）。
+- **不可搬走的**（自己定的原則，依據是 2026-11-11 的實測「只在細則檔、沒寫在眼前的規則常被略過」：上網前先讀 web-quick.md，9 個上網的 agent 只有 2 個讀）：每一條的觸發條件與硬性動作要留在 core.md；使用者原話與日期只能移位置不能刪（repo 規則）；hook 會點名的標籤（【改到安裝副本】【背景任務巡檢】等）在 core.md 要找得到對應條文。
+- 做法：一次只改 2～3 條；每次改完用 `python ~/.claude/claude-dev-system/tools/progress-diff.py` 逐句比對，確認被移走的句子在細則檔找得到；skill `cds-doc-governance` 有流程。全部改完跑全套測試（有測試檢查 core.md 的內容與長度，改之前先 `grep -rn "core.md" tests/` 看有哪些）。
+- 驗收：core.md 位元組數與字數的改前改後；progress-diff 的輸出證明沒有句子遺失；全套測試通過；update 後 `~/.claude/CLAUDE.md` 的區塊確實變短；開一場新對話（或 `claude -p`）量第一次請求的 context 改前改後（量法見 CHANGELOG 0.24.0：讀該對話紀錄第一則助理訊息的 usage）。
+- 風險與回復：瘦身後規則被略過變多。上線後用 `tools/agent-audit.py` 與 `~/.claude/state/source-guard.log` 看一週；有退步就 `git revert` 那個 commit 再發一版。
+- 版本：次版號（改規則）。同一天不要再連發多版（【全域系統對照】已改成一天一次，但仍盡量併版）。
+
+### 待辦 B：Stock-web 兩個 opus agent 的結果（等它們交報告）
+
+- 2026-11-11 10:35 派的 `a51c3d97`（A2 除權息停損研究續做）、`a96d7f54`（急跌跌深放寬持股上限研究），11:3x 仍在跑。到 11:1x 為止兩個都上網查了資料但沒有先讀 web-quick.md，也還沒讀記憶內文；照設計交報告時會被守門退回一次。
+- 看法：`py -3 tools/agent-audit.py C:\Users\88691\Documents\Claude\Stock-web --since 2026-11-11 --detail`（0.25.1 裝好後「重型工作」才不會把讀檔算進去）。要回報使用者：有沒有被退回、退回後有沒有真的補讀（看退回之後的工具呼叫，不是只看報告怎麼寫）、opus 是不是只靠守門兜底。
+- 這是第一份 opus 長時間研究型＋守門的樣本；結果寫回本檔與 `rules/agent-dispatch.md`〈agent 開工時實際拿到什麼〉的實測段。
+
+### 其他還沒做的（都記過，列在一起方便接手）
+
+- 背景 agent＋與主對話同模型＋主對話沒在等工具時的壓縮判定沒有實跑（CHANGELOG 0.24.0）。
+- 【全域系統對照】一天一次只有單元測試，隔天看 Stock-web 第一則提示有沒有只出現一次。
+- 新裝置端對端確認（本檔〈待辦 2〉，等使用者在另一台測）。
+- Stock-web 那場對話已壓縮 9 次以上，要重開才吃得到 0.24.0 省下的固定開銷（由使用者在那邊決定）。
+
 ## 2026-11-11：v0.25.0（兩個提示的雜訊）
 
 - 使用者原話：「照你建議做」（main 建議的兩項：【全域系統對照】太頻繁、【背景任務巡檢】重複提醒）。做法與數字在 CHANGELOG 0.25.0。
