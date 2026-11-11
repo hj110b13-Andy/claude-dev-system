@@ -16,8 +16,8 @@
 - **SubagentStop 後備守門實跑通過（第 5 項）**：無頭模式（`claude -p --permission-mode default`）派 agent 交英文報告，agent 紀錄有 `hook_blocking_error SubagentStop`【報告守門】，agent 改寫成中文，主對話收到的是中文版。0.22.0 時這條只有單元測試。
 - **Stock-web 專案版派工 skill 已對齊（第 6 項）**：讀過該檔，11/11 的條文已含「派工單寫明工作目錄與 commit 分支、必守規則與相關記憶逐條寫進去，報告的結論／數字／分支由 main 核對」，沒有改。
 - **agent 中途文字語言提醒（第 7 項，`subagent_lang_nudge`，PostToolUse）**：agent 在工具呼叫之間寫的說明文字不是使用者的語言時，下一次工具呼叫後提醒一次（同一個 agent 只一次）。實測：探針第 1 句英文→收到提醒→第 2 句改中文。起因：0.22.0 實派 3 個 agent 的中途文字 6 則裡 3 則英文；Stock-web 2026-09-14 使用者原話「這個過程都還是英文，要用繁體中文」。
-- **agent 自己壓縮時不再被塞主對話的開工清單（第 8 項）**：anthropics/claude-code#91910（open）——agent 壓縮也會觸發 SessionStart(compact)，payload 不帶 agent 欄位。在這台重現：用 `autoCompactWindow: 100000` 的探針 agent 讀大檔，壓縮 3 次，3 次【壓縮後重新開工】都注入到 agent 裡、主對話壓縮計數被加到 3（滿 3 次會誤建議開新對話）。修法：壓縮完成時該紀錄會先寫一筆 `compact_boundary`（實測比 hook 注入早約 0.2 秒）；主對話紀錄沒有 15 秒內的 boundary 而某個 agent 紀錄有→判定是 agent 的壓縮，不注入、不計數；判不出來一律照舊注入。修後重跑同一實驗的結果見 PROGRESS。
-- 驗證：新增測試 AutoTurnGuard 4 項、SubagentLangNudge 3 項、SubagentCompaction 2 項、ResGate run 3 項、agent-audit 6 項；全套結果見 PROGRESS。
+- **agent 自己壓縮時不再被塞主對話的開工清單（第 8 項）**：anthropics/claude-code#91910（open）——agent 壓縮也會觸發 SessionStart(compact)，payload 不帶 agent 欄位。在這台重現：用 `autoCompactWindow: 100000` 的探針 agent 讀大檔，壓縮 3 次，3 次【壓縮後重新開工】都注入到 agent 裡、主對話壓縮計數被加到 3（滿 3 次會誤建議開新對話）。修法試了兩版：第一版看 `compact_boundary` 有沒有落檔，實測無效——hook 執行當下 boundary 還沒寫進檔（非同步寫入；診斷紀錄顯示 agent 紀錄尾端沒有 boundary）；`prompt_id` 主對話與 agent 共用，也不能用。第二版（現行，`compact_from_subagent`）：payload 的 `model` 是正在壓縮那一方的模型——與主對話最後一則助理訊息的模型不同、且等於某個 180 秒內有寫入的 agent 的模型→判定是 agent 的壓縮，不注入、不計數；模型相同時最多等 2 秒，看 boundary 先落在主對話還是 agent 的紀錄；沒有正在跑的 agent 或判不出來一律照舊注入。**修後重跑同一實驗：agent 壓縮 2 次、注入 0 次、主對話壓縮計數沒有被加，判定花 0.0 秒。「模型相同」那條路只有單元測試，沒有實跑。** 另加診斷開關：`~/.claude/state/hook-debug.on` 存在時把 SessionStart 的 payload 與檔案狀態寫到 `hook-debug.jsonl`（平常不存在、不做事）。
+- 驗證：新增測試 AutoTurnGuard 4 項、SubagentLangNudge 3 項、SubagentCompaction 3 項、ResGate run 3 項、agent-audit 6 項；全套結果見 PROGRESS。
 
 ## 0.22.0（2026-11-11，視窗會自動換 exe）
 

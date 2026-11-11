@@ -9,6 +9,7 @@
 - 重現方法（之後要再驗）：在一個暫存資料夾放 `.claude/agents/compact-probe.md`（tools: Read、model: haiku、autoCompactWindow: 100000）與一個約 29 萬位元組的大檔，`claude -p "Use the Agent tool … subagent_type compact-probe … 分 9 次各讀 500 行" --model sonnet --permission-mode default --allowedTools Agent Read --output-format json`，再看 `~/.claude/projects/<該資料夾>/<session>/subagents/*.jsonl` 裡 `compact_boundary` 次數與 `hook_additional_context`（hookEvent SessionStart）次數。
 - 用量：做到一半 5 小時用量 97%（門檻 95%）。使用者已說有重置券不用擔心額度，所以沒停工，但之後沒有再派新的工作 agent。
 - 沒做：第 9 項新裝置端對端確認；「模型相同」時的壓縮判定沒有實跑；opus 長時間研究型 agent 的樣本仍只有 1 個。
+- 第二版實跑結果（2026-11-11，主對話 sonnet、探針 haiku）：agent 壓縮 2 次、注入 0 次、主對話壓縮計數沒有被加；hook 診斷紀錄兩次都是 from_subagent=True、判定 0.0 秒。全套 unittest 177 項通過（1 項略過），用 `resgate.py run` 經閘門放行（可用 4.0 GB）。
 
 ## 2026-11-11：v0.22.0（0.21.0 留下的四項全做完）
 
