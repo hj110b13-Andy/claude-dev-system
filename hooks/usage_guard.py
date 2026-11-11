@@ -598,6 +598,60 @@ def _stale_rules_text(c):
 REMIND_GIT = re.compile(r"\bgit\s+(?:add\s+(?:-A\b|--all\b|\.(?=\s|$|[;&|)]))|stash(?!\s+(?:list|show)\b)|reset\s+--hard\b"
                         r"|clean\s+-[a-zA-Z]*f|checkout\s+--\s+\.(?=\s|$|[;&|)]))")
 REMIND_KEEP_SESSIONS = 30
+_HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][\w-]*)\1")
+
+
+def _command_segments(cmd):
+    """把 shell 指令切成「真的會被執行的子指令」：引號內的 ; & | 不切，heredoc 內文整段丟掉，換行與 ; & | ( ) 為分隔。
+    純字元掃描，不呼叫外部程式。"""
+    segs, cur, tags = [], [], []
+    i, n, q = 0, len(cmd), ""
+    while i < n:
+        c = cmd[i]
+        if q:
+            cur.append(c)
+            if c == "\\" and q == '"' and i + 1 < n:
+                cur.append(cmd[i + 1])
+                i += 1
+            elif c == q:
+                q = ""
+        elif c in "'\"":
+            q = c
+            cur.append(c)
+        elif c == "\\" and i + 1 < n:
+            cur.append(c + cmd[i + 1])
+            i += 1
+        elif c == "<" and cmd.startswith("<<", i) and not cmd.startswith("<<<", i) and _HEREDOC.match(cmd, i):
+            hm = _HEREDOC.match(cmd, i)
+            tags.append(hm.group(2))
+            cur.append(hm.group(0))
+            i = hm.end() - 1
+        elif c in ";&|()\n":
+            segs.append("".join(cur))
+            cur = []
+            if c == "\n" and tags:  # heredoc 內文：略過到結尾標記那一行
+                i += 1
+                while i < n and tags:
+                    j = cmd.find("\n", i)
+                    line = cmd[i:n if j < 0 else j]
+                    if line.strip() == tags[0]:
+                        tags.pop(0)
+                    i = n if j < 0 else j + 1
+                continue
+        else:
+            cur.append(c)
+        i += 1
+    segs.append("".join(cur))
+    return [s.strip() for s in segs if s.strip()]
+
+
+def _shared_dir_git_match(cmd):
+    """REMIND_GIT 只認「在指令位置」的 git（子指令開頭），grep／echo／commit 訊息／heredoc 內文／-c 字串裡的字樣不算。"""
+    for seg in _command_segments(cmd):
+        m = REMIND_GIT.match(seg)
+        if m:
+            return m
+    return None
 
 
 def _task_check(cwd):
@@ -716,7 +770,7 @@ def tool_reminders(payload):
                 out.append(f"【背景任務巡檢（hook）】剛派出背景任務，taskCheck.enabled=true → 先 `CronList`，這場對話還沒有巡檢排程就用 `CronCreate` 建每 {mins} 分鐘一次，"
                            "prompt 用 core.md「背景任務巡檢」那句固定文字；全部結束就 `CronDelete`。子 agent 忽略此則。" + _deferred_hint())
         if name in ("Bash", "PowerShell"):
-            m = REMIND_GIT.search(str(ti.get("command") or ""))
+            m = _shared_dir_git_match(str(ti.get("command") or ""))
             if m and once("git|" + m.group(0)):
                 out.append(f"【共用工作目錄（hook）】剛執行 `{m.group(0)}`：多個 agent／對話共用這個工作目錄時不可用（會一起加入、藏起或丟掉別人的未提交變更）"
                            "→ 用 `git status` 確認沒動到別人的檔，之後改用 `git add <自己改的檔>`、`git commit -- <路徑>`。確定只有你在這個目錄工作就忽略。")

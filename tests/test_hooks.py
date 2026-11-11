@@ -306,6 +306,21 @@ class ToolReminders(unittest.TestCase):
         for cmd in ("git add src/a.ts", "git stash list", "git status", "git add ./src/a.ts", "git commit -- a.py"):
             self.assertEqual(self.r("Bash", sid=cmd, command=cmd), [], cmd)
 
+    SHARED_YES = ("git add -A", "cd x && git add -A", "git add . && git commit -m x", "git stash", "foo; git reset --hard HEAD~1",
+                  "git add -A; git commit -m x", "echo hi\ngit add -A", "cat <<'EOF'\nx\nEOF\ngit stash")
+    SHARED_NO = ("grep -n \"git add -A\" file", "echo 'git add -A'", "git commit -m \"不要用 git add -A\"",
+                 "cat > x.py <<'EOF'\nre.search(r'git add (-A|--all|\\.)(\\s|$)', s)\ngit add -A\nEOF\npy -3 x.py",
+                 "py -3 - <<EOF\nprint('git stash')\nEOF", "py -3 -c \"print('git stash')\"", "git log --grep=\"git reset --hard\"",
+                 "git stash list", "git stash show -p", "git commit -m \"a; git stash\"")
+
+    def test_shared_dir_git_only_when_executed(self):
+        """只有真的被 shell 當指令執行才提醒；字樣出現在 grep／echo／commit 訊息／heredoc 內文／-c 字串不算。"""
+        for cmd in self.SHARED_YES:
+            self.assertTrue(any("共用工作目錄" in x for x in self.r("Bash", sid=cmd, command=cmd)), cmd)
+        for cmd in self.SHARED_NO:
+            self.assertEqual(self.r("Bash", sid=cmd, command=cmd), [], cmd)
+        self.assertTrue(any("共用工作目錄" in x for x in self.r("PowerShell", sid="ps", command="git add -A; git commit -m x")))
+
     def test_main_still_reminds_when_usage_fetch_fails(self):
         import io
         import contextlib
