@@ -1,5 +1,11 @@
 # claude-dev-system 交接紀錄
 
+## 2026-11-11：v0.25.0（兩個提示的雜訊）
+
+- 使用者原話：「照你建議做」（main 建議的兩項：【全域系統對照】太頻繁、【背景任務巡檢】重複提醒）。做法與數字在 CHANGELOG 0.25.0。
+- 驗證：全套 unittest 185 項通過（1 項略過，經 `resgate.py run` 放行）；update 後 settings.json 的 PostToolUse matcher 已含 `CronCreate|CronDelete`；這場對話實跑——建巡檢排程後派背景指令沒有提醒，刪掉排程後再派有提醒。【全域系統對照】一天一次只有單元測試（要隔天才看得到實際行為）。
+- 待觀察：Stock-web 10:35 派的 3 個 agent（opus 研究型 2、sonnet 1）交報告後的遵守情況，用 `py -3 tools/agent-audit.py <Stock-web 路徑> --since 2026-11-11 --detail` 看；結果寫在本節下一行。
+
 ## 2026-11-11：v0.24.0（修完剩下兩項＋觀察 Stock-web）
 
 - 使用者原話：「繼續全部修好，然後Stock-web也有持續在動作，你可以關注看看改的全域優化系統對它的影響如何」。
