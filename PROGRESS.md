@@ -13,6 +13,7 @@
   - agent 的中途文字仍有一半是英文（最終報告都是中文）；守門只查最終報告。
   - anthropics/claude-code#91910：subagent 自己壓縮時 SessionStart(compact) 不帶 agent 欄位，「壓縮後重新開工」清單可能注入到 agent；payload 分不出來，沒處理。
   - 設定視窗在 980 寬時「用量守門」「查證守門」兩個長勾選框是單一元件，沒有超出但也不會換行。
+- 結果：全套 unittest 158 項通過（1 項發版衛生在打 tag 前略過）；update 後 verify 全部通過；v0.22.0 Release 的 exe 與 .sha256 都在。**閘門失誤**：main 的指令寫成 `resgate.py wait … | tail -3 && unittest`，管線把 resgate 的 exit 1 蓋成 0，所以記憶體不足（1.9 GB < 3 GB）時全套測試還是跑了（22 秒，沒有出問題）。之後閘門指令不可接管線，用 `resgate.py wait … && <工作>` 或先單獨跑閘門看 exit code。
 - 驗證方式：`py -3 -m unittest discover -s tests`、`py -3 installer/install.py verify`；派一個要它交英文報告的 agent，應被【報告守門（hook）】退回一次。
 
 ## 2026-11-11：v0.21.0（agent 不守規則的查證與保底）
