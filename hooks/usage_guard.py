@@ -457,22 +457,96 @@ def _fresh_compact_boundary(path, now=None):
         return False
 
 
-def compact_from_subagent(payload, now=None):
-    """SessionStart(compact) 是不是某個 agent 自己壓縮觸發的（不是主對話）。有明確證據才回 True。"""
+def _hook_debug(tag, payload):
+    """診斷用：<CLAUDE_HOME>/state/hook-debug.on 存在時，把 hook 收到的 payload 與當下看到的檔案狀態附加到 hook-debug.jsonl。
+    平常不存在這個檔，完全不做事。"""
+    try:
+        if not os.path.exists(os.path.join(STATE_DIR, "hook-debug.on")):
+            return
+        now = time.time()
+        tp = payload.get("transcript_path") or ""
+        sub = os.path.join(os.path.dirname(tp), str(payload.get("session_id") or ""), "subagents")
+        files = []
+        for base, names in ((os.path.dirname(tp), [os.path.basename(tp)]), (sub, os.listdir(sub) if os.path.isdir(sub) else [])):
+            for n in names:
+                fp = os.path.join(base, n)
+                if n.endswith(".jsonl") and os.path.isfile(fp):
+                    with open(fp, "rb") as f:
+                        f.seek(0, 2)
+                        size = f.tell()
+                        f.seek(max(0, size - COMPACT_TAIL))
+                        tail = f.read().decode("utf-8", errors="replace")
+                    ts = [json.loads(x).get("timestamp") for x in tail.splitlines() if '"compact_boundary"' in x and x.lstrip().startswith("{")]
+                    files.append({"file": n, "size": size, "mtime_age": round(now - os.path.getmtime(fp), 2), "boundaries": ts[-3:],
+                                  "fresh": _fresh_compact_boundary(fp, now)})
+        with open(os.path.join(STATE_DIR, "hook-debug.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps({"tag": tag, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "now": now,
+                                "payload": {k: (v if not isinstance(v, str) or len(v) < 300 else v[:300]) for k, v in payload.items()},
+                                "files": files}, ensure_ascii=False) + chr(10))
+    except Exception:
+        pass
+
+
+def _last_model(path):
+    """這份對話紀錄最後一則助理訊息用的模型（讀尾端）。讀不到回 None。"""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - COMPACT_TAIL))
+            tail = f.read().decode("utf-8", errors="replace")
+        for line in reversed(tail.splitlines()):
+            if '"assistant"' not in line or '"model"' not in line:
+                continue
+            try:
+                d = json.loads(line)
+            except Exception:
+                continue
+            m = (d.get("message") or {}).get("model") if d.get("type") == "assistant" else None
+            if m and not str(m).startswith("<"):
+                return str(m)
+        return None
+    except Exception:
+        return None
+
+
+COMPACT_ACTIVE_SEC = 180  # 自己定的：agent 紀錄這麼久內有寫入才算「正在跑」（壓縮本身實測 11～22 秒沒有寫入）
+COMPACT_POLL_SEC = 2.0    # 自己定的：模型相同時最多等這麼久看 compact_boundary 落在哪一份紀錄
+
+
+def compact_from_subagent(payload, now=None, poll=None):
+    """SessionStart(compact) 是不是某個 agent 自己壓縮觸發的（不是主對話）。有明確證據才回 True，判不出來回 False（照舊注入）。
+    2026-11-11 實測（hook-debug）：hook 執行當下 compact_boundary 還沒寫進檔（非同步），prompt_id 主對話與 agent 共用，都不能用；
+    可用的是 payload 的 model＝正在壓縮那一方的模型。
+    ①payload.model ≠ 主對話最後一則助理訊息的模型，且＝某個正在跑的 agent 的模型 → agent。
+    ②模型相同：最多等 COMPACT_POLL_SEC 秒，compact_boundary 先出現在主對話紀錄 → 主對話；只出現在 agent 紀錄 → agent。"""
     try:
         tp = payload.get("transcript_path") or ""
         sid = str(payload.get("session_id") or "")
         if not tp or not sid:
             return False
-        now = now or time.time()
-        if _fresh_compact_boundary(tp, now):
-            return False  # 主對話自己剛壓縮
+        now0 = now or time.time()
         sub = os.path.join(os.path.dirname(tp), sid, "subagents")
-        for name in os.listdir(sub):
-            p = os.path.join(sub, name)
-            if name.endswith(".jsonl") and now - os.path.getmtime(p) <= COMPACT_FRESH_SEC + 5 and _fresh_compact_boundary(p, now):
+        try:
+            active = [os.path.join(sub, n) for n in os.listdir(sub)
+                      if n.endswith(".jsonl") and now0 - os.path.getmtime(os.path.join(sub, n)) <= COMPACT_ACTIVE_SEC]
+        except OSError:
+            active = []
+        if not active:
+            return False  # 沒有正在跑的 agent：一定是主對話
+        pm, mm = str(payload.get("model") or ""), _last_model(tp)
+        if pm and mm and pm != mm:
+            return any(_last_model(f) == pm for f in active)
+        deadline = time.time() + (COMPACT_POLL_SEC if poll is None else poll)
+        while True:
+            t = now or time.time()
+            if _fresh_compact_boundary(tp, t):
+                return False
+            if any(_fresh_compact_boundary(f, t) for f in active):
                 return True
-        return False
+            if time.time() >= deadline:
+                return False
+            time.sleep(0.2)
     except Exception:
         return False
 
@@ -1231,7 +1305,7 @@ def source_guard(payload):
 
 # 0.21.0 派工補充（SubagentStart）。使用者 2026-11-11：「它派出去的agent常常都不會遵守該專案裡的規則與長期記憶等等，還有連全域優化系統的規則
 # 它也不不遵守，不知道是不遵守還是不會看」。查 Stock-web 81 份 agent 對話紀錄＋官方文件（code.claude.com/docs/en/sub-agents、hooks）：
-# agent 有載入 CLAUDE.md 與 MEMORY.md 索引，但①回覆語言設定不傳 ②記憶內文不載入（81 個裡 0 個去讀）③UserPromptSubmit／Stop 的守門
+# agent 有載入 CLAUDE.md 與 MEMORY.md 索引，但①回覆語言設定不傳 ②記憶內文不載入（81 個裡只有 1 個用指令讀過一條）③UserPromptSubmit／Stop 的守門
 # 不對 agent 觸發 ④工作目錄繼承主對話當下位置（11/10 有 agent 因此 commit 到部署分支）。官方做法：SubagentStart 的 additionalContext。
 SUB_LIGHT_TYPES = {"Explore", "Plan", "claude-code-guide", "statusline-setup", "web-fetch"}  # 唯讀／單一用途，只補語言
 
@@ -1541,8 +1615,12 @@ def main():
             print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": msg}}, ensure_ascii=True))
         return
     if event == "SessionStart":  # 0.12.0：壓縮或接續後重新開工；新對話（startup）由 UserPromptSubmit 的專案自動化處理
-        if payload.get("source") == "compact" and compact_from_subagent(payload):
-            return  # agent 自己的壓縮：不把主對話的開工清單塞給它，也不算進主對話的壓縮次數
+        if payload.get("source") == "compact":
+            t0 = time.time()
+            from_sub = compact_from_subagent(payload)
+            _hook_debug("SessionStart", dict(payload, _from_subagent=from_sub, _decide_sec=round(time.time() - t0, 2)))
+            if from_sub:
+                return  # agent 自己的壓縮：不把主對話的開工清單塞給它，也不算進主對話的壓縮次數
         if payload.get("source") in ("compact", "resume"):
             msg = compact_msg(payload.get("cwd"), payload.get("session_id"))
             if msg:

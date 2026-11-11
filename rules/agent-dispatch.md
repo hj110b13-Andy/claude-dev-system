@@ -23,10 +23,11 @@
 ## agent 開工時實際拿到什麼（0.21.0，2026-11-11 查 Stock-web 81 份 agent 紀錄＋官方文件 code.claude.com/docs/en/sub-agents）
 - 有：全域與專案 CLAUDE.md、AGENTS.md、MEMORY.md 索引、skill 清單、git 狀態快照、派工說明。Explore、Plan 連 CLAUDE.md 都沒有。
 - 沒有：主對話的對話內容、回覆語言設定、記憶檔內文、主對話讀過的檔、UserPromptSubmit 與 Stop hook 的守門（查證守門、建議守門、專案自動化都不對 agent 觸發；PostToolUse 會）。
-- 實測遵守率：寫進派工說明的規則幾乎都照做（「繁體中文」81 份都寫、最終報告都是中文；`resgate` 28 份有寫、28 份有跑）；只在 CLAUDE.md、沒寫進派工說明的常被略過（上網前先讀 web-quick.md：9 個上網的只有 2 個讀；記憶內文：81 個都沒讀）。
+- 實測遵守率：寫進派工說明的規則幾乎都照做（「繁體中文」81 份都寫、最終報告都是中文；`resgate` 28 份有寫、28 份有跑）；只在 CLAUDE.md、沒寫進派工說明的常被略過（上網前先讀 web-quick.md：9 個上網的只有 2 個讀；記憶內文：81 個裡只有 1 個讀過（用指令讀了一條的前 15 行；0.23.0 用 agent-audit.py 重算後更正，原寫 81 個都沒讀））。
 - 所以：**這份工作一定要守的規則，逐條寫進派工說明**（官方文件同一結論："If a rule must [reach the subagent]... restate it in the prompt you give Claude when delegating"）；與這份工作有關的記憶，把內文重點或檔案路徑寫進派工說明。SubagentStart hook 會自動補語言、工作目錄與分支、記憶路徑、自我核對清單（`subagentBrief.enabled`，預設開），但那是保底，不取代派工說明。
 - 收報告時 main 要自己核對：agent 的結論不經查證不可直接轉給使用者（數字對回它寫的檔、判定標準是不是看到結果後才定的、commit 在哪個分支）。
 - **交報告守門（0.22.0，`subagentBrief.guard`，預設開）**：agent 呼叫 `SubagentHandback` 交報告時 hook 核對語言、數字出處、上網前有沒有讀 web-quick.md、有沒有讀相關記憶內文、沒寫分支卻 commit 有沒有交代；不合格退回一次。只有 auto mode、非 fork、Claude Code 2.1.271 以上才有這個工具；其他情況由 SubagentStop 後備核對最後一則訊息（後備沒有實跑驗證過）。守門只查程式能判定的五項，**判定標準是不是事後才定、結論有沒有過度簡化仍要 main 自己看**。
+- **派完看遵守情況（0.23.0）**：`py -3 ~/.claude/claude-dev-system/tools/agent-audit.py <專案路徑> --latest 1`（加 `--detail` 看每個 agent 依序做了什麼）。Stock-web 恢復派工後第一批 3 個（opus 研究型 1、sonnet 2）：讀記憶內文 2／3、上網前先讀 web-quick 2／2、報告中文 3／3、重型工作過閘門 3／3、被守門退回 1 個並補交。
 - 0.22.0 實派結果（hook 全開、派工單沒寫語言／記憶／上網規則，3 個 sonnet agent）：讀相關記憶內文 3／3、上網前先讀 web-quick.md 1／1、最終報告中文 3／3、commit 分支有交代 3／3、記憶體不足時照閘門不跑 2／2。樣本只有 3 個、都是 sonnet；opus 與長時間研究型工作還沒有數據。
 
 ## 重型工作與延後清單（0.16.0；使用者 2026-11-09 決定）

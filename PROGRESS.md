@@ -1,5 +1,15 @@
 # claude-dev-system 交接紀錄
 
+## 2026-11-11：v0.23.0（使用者：「都做，我有重置卷所以不用擔心額度」）
+
+- 起因：使用者問「還有甚麼要做或優化的嗎?」，main 列 9 項；第 9 項（新裝置端對端確認）等使用者在另一台測，其餘 8 項的做法、數字、來源在 CHANGELOG 0.23.0。
+- 做完並驗證過：①`resgate.py run` ②查證守門分清觸發來源 ③`tools/agent-audit.py`（更正 0.21.0 的 0／81→1／81）④Stock-web 第一批 3 個 agent 的數據，順帶修守門誤擋與漏洞 ⑤SubagentStop 後備在無頭模式實跑通過 ⑥Stock-web 專案版 skill 已對齊、沒改 ⑦agent 中途文字語言提醒，實測有效。
+- ⑧agent 自己壓縮被注入主對話開工清單：**已重現**（探針 agent 用 `autoCompactWindow: 100000` 讀大檔；壓縮 2～3 次都被注入、主對話壓縮計數被加）。第一版修法（看 compact_boundary 有沒有落檔）實測無效——hook 執行當下 boundary 還沒寫進檔（非同步；診斷紀錄 mtime_age 14 秒、boundaries 空）。第二版：payload 的 `model`≠主對話模型且＝正在跑的 agent 的模型→agent；模型相同才等最多 2 秒看 boundary 落在哪。**第二版的實跑結果寫在本節最後一行；「模型相同」那條路只有單元測試。**
+- 診斷開關：`~/.claude/state/hook-debug.on` 存在時，SessionStart 的 payload 與檔案狀態寫到 `hook-debug.jsonl`；平常不存在。實驗結束已刪。
+- 重現方法（之後要再驗）：在一個暫存資料夾放 `.claude/agents/compact-probe.md`（tools: Read、model: haiku、autoCompactWindow: 100000）與一個約 29 萬位元組的大檔，`claude -p "Use the Agent tool … subagent_type compact-probe … 分 9 次各讀 500 行" --model sonnet --permission-mode default --allowedTools Agent Read --output-format json`，再看 `~/.claude/projects/<該資料夾>/<session>/subagents/*.jsonl` 裡 `compact_boundary` 次數與 `hook_additional_context`（hookEvent SessionStart）次數。
+- 用量：做到一半 5 小時用量 97%（門檻 95%）。使用者已說有重置券不用擔心額度，所以沒停工，但之後沒有再派新的工作 agent。
+- 沒做：第 9 項新裝置端對端確認；「模型相同」時的壓縮判定沒有實跑；opus 長時間研究型 agent 的樣本仍只有 1 個。
+
 ## 2026-11-11：v0.22.0（0.21.0 留下的四項全做完）
 
 - 使用者原話：「還沒解決的繼續全都做完。」「你的任務本身也可以派給agent，順便測試效果怎麼樣。如果不衝突的話，能並行處理就並行處理加快速度。」中途問：「然後你現在優化完了嗎?我可以叫Stock-web派agent了嗎?」

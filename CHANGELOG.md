@@ -2,6 +2,23 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.23.0（2026-11-11，視窗會自動換 exe）
+
+使用者（2026-11-11）問「還有甚麼要做或優化的嗎?」，main 列 9 項後：「都做，我有重置卷所以不用擔心額度」。第 9 項（新裝置端對端確認）要等使用者在另一台測，其餘 8 項如下。
+
+- **`resgate.py run`（第 1 項）**：`resgate.py run --desc "<工作>" -- <指令>`＝閘門通過才執行、exit code 透傳；不足不執行、登記延後清單。起因：當天 main 把 `resgate.py wait … | tail -3 && unittest` 接了管線，閘門 exit 1（1.9 GB < 3 GB）被蓋成 0，全套測試照跑。core.md、agent-dispatch.md、skill、派工補充都改成優先用 `run`；`wait` 保留但註明後面不可接管線。
+- **查證守門不再把 agent 報告當成使用者的提問（第 2 項）**：agent 交回的報告、背景任務完成通知、排程（CronCreate）都會以「使用者訊息」進來。新判定：這一輪若是它們觸發的——還有 agent／workflow 在跑＝中途進度，不查；背景工作都結束＝這則是答案，改用使用者最後親自打的那句當問題。常駐的 shell／monitor 不算「還在等」，避免一個開發伺服器讓守門整場失效。依據：官方 Stop 輸入欄位 `background_tasks`「let hooks distinguish "session is done" from "session is paused waiting for background work to wake it back up"」（code.claude.com/docs/en/hooks〈Stop input〉）。起因：當天 09:32 main 等 3 個 agent 時回一句進度被退回，紀錄裡的「問」是 agent 的報告。
+- **`tools/agent-audit.py`（第 3 項）**：`py -3 agent-audit.py <專案路徑> [--session／--latest N／--since] [--detail] [--json]`，一行看一場對話派出的 agent：補充送達、讀記憶內文、上網前先讀 web-quick、報告語言、中途文字英文則數、commit 與分支交代、重型工作與記憶體閘門、`git add -A`／stash／整批結束程序、被守門退回與補交。判定規則匯入 `hooks/usage_guard.py`（`SUB_WEB_TOOL`、`SUB_COMMIT`、`_sub_scan`、`_sub_cjk_ratio`、`sub_memory_read`、`SUB_LANG_MIN_RATIO`），不另寫一份。
+  - **更正 0.21.0 的數字**：當時寫 Stock-web 81 個 agent「0／81 讀記憶內文」。工具查出是 **1／81**——有 1 個用 PowerShell `Get-Content …\memory\delete-merged-cloud-branches.md -TotalCount 15` 讀過一條的前 15 行；用 Read 工具讀的是 0。「9 個上網的只有 2 個先讀 web-quick」對得上。
+- **Stock-web 恢復派工後的實際數據（第 4 項，對話 `4fa52886`，3 個 agent：opus／high 研究型 1、sonnet／medium 2）**：補充送達 3／3；讀記憶內文 2／3；上網前先讀 web-quick 2／2；最終報告中文 3／3；commit 有交代分支 2／2；重型工作有過記憶體閘門 3／3；被守門退回 1 個並補交。opus 研究型那個讀了 5 條記憶內文、報告附來源。從這批抓到守門兩個問題並修掉：
+  - **誤擋**：先 `cd` 到記憶資料夾再用相對檔名讀（`head -c 600 xxx.md`）原本不算讀過；現在認「路徑含 <專案>/memory 且出現實際存在的記憶檔名」。
+  - **漏洞**：報告寫「與本工作有關的三條沒有衝突」卻沒讀內文，原本看到「記憶索引」四個字就放行；現在只有明寫「記憶索引已看，無相關」才可免讀。
+- **SubagentStop 後備守門實跑通過（第 5 項）**：無頭模式（`claude -p --permission-mode default`）派 agent 交英文報告，agent 紀錄有 `hook_blocking_error SubagentStop`【報告守門】，agent 改寫成中文，主對話收到的是中文版。0.22.0 時這條只有單元測試。
+- **Stock-web 專案版派工 skill 已對齊（第 6 項）**：讀過該檔，11/11 的條文已含「派工單寫明工作目錄與 commit 分支、必守規則與相關記憶逐條寫進去，報告的結論／數字／分支由 main 核對」，沒有改。
+- **agent 中途文字語言提醒（第 7 項，`subagent_lang_nudge`，PostToolUse）**：agent 在工具呼叫之間寫的說明文字不是使用者的語言時，下一次工具呼叫後提醒一次（同一個 agent 只一次）。實測：探針第 1 句英文→收到提醒→第 2 句改中文。起因：0.22.0 實派 3 個 agent 的中途文字 6 則裡 3 則英文；Stock-web 2026-09-14 使用者原話「這個過程都還是英文，要用繁體中文」。
+- **agent 自己壓縮時不再被塞主對話的開工清單（第 8 項）**：anthropics/claude-code#91910（open）——agent 壓縮也會觸發 SessionStart(compact)，payload 不帶 agent 欄位。在這台重現：用 `autoCompactWindow: 100000` 的探針 agent 讀大檔，壓縮 3 次，3 次【壓縮後重新開工】都注入到 agent 裡、主對話壓縮計數被加到 3（滿 3 次會誤建議開新對話）。修法：壓縮完成時該紀錄會先寫一筆 `compact_boundary`（實測比 hook 注入早約 0.2 秒）；主對話紀錄沒有 15 秒內的 boundary 而某個 agent 紀錄有→判定是 agent 的壓縮，不注入、不計數；判不出來一律照舊注入。修後重跑同一實驗的結果見 PROGRESS。
+- 驗證：新增測試 AutoTurnGuard 4 項、SubagentLangNudge 3 項、SubagentCompaction 2 項、ResGate run 3 項、agent-audit 6 項；全套結果見 PROGRESS。
+
 ## 0.22.0（2026-11-11，視窗會自動換 exe）
 
 使用者（2026-11-11，看完 0.21.0 的「還沒解決的」四項）：「還沒解決的繼續全都做完。」「你的任務本身也可以派給agent，順便測試效果怎麼樣。如果不衝突的話，能並行處理就並行處理加快速度。」

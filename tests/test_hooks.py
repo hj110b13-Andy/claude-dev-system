@@ -506,19 +506,28 @@ class SubagentCompaction(unittest.TestCase):
         ts = self.dt.datetime.fromtimestamp(time.time() - ago, self.dt.timezone.utc).isoformat().replace("+00:00", "Z")
         return json.dumps({"type": "system", "subtype": "compact_boundary", "timestamp": ts})
 
-    def test_subagent_compaction_detected(self):
-        self.main.write_text(json.dumps({"type": "user", "message": {"content": "hi"}}) + chr(10), encoding="utf-8")
-        (self.sub / "agent-a1.jsonl").write_text(self.boundary(0.3) + chr(10), encoding="utf-8")
-        self.assertTrue(ug.compact_from_subagent(self.payload))
+    def msg(self, model):
+        return json.dumps({"type": "assistant", "message": {"role": "assistant", "model": model, "content": [{"type": "text", "text": "x"}]}})
 
-    def test_main_compaction_or_stale_or_missing_is_not_subagent(self):
-        self.main.write_text(self.boundary(0.3) + chr(10), encoding="utf-8")
-        (self.sub / "agent-a1.jsonl").write_text(self.boundary(0.3) + chr(10), encoding="utf-8")
-        self.assertFalse(ug.compact_from_subagent(self.payload), "主對話自己剛壓縮：照舊注入")
-        self.main.write_text("{}" + chr(10), encoding="utf-8")
-        (self.sub / "agent-a1.jsonl").write_text(self.boundary(600) + chr(10), encoding="utf-8")
-        self.assertFalse(ug.compact_from_subagent(self.payload), "agent 的壓縮是很久以前的：不能當證據")
-        self.assertFalse(ug.compact_from_subagent({"source": "compact", "session_id": "none", "transcript_path": str(self.tmp / "x.jsonl")}), "讀不到就照舊")
+    def test_different_model_matching_active_agent_is_subagent(self):
+        self.main.write_text(self.msg("claude-sonnet-5-5") + chr(10), encoding="utf-8")
+        (self.sub / "agent-a1.jsonl").write_text(self.msg("claude-haiku-5-5") + chr(10), encoding="utf-8")
+        self.assertTrue(ug.compact_from_subagent(dict(self.payload, model="claude-haiku-5-5"), poll=0))
+        self.assertFalse(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5"), poll=0), "模型對不上任何正在跑的 agent：不當證據")
+
+    def test_same_model_decided_by_where_boundary_lands(self):
+        self.main.write_text(self.msg("claude-opus-5-5") + chr(10), encoding="utf-8")
+        (self.sub / "agent-a1.jsonl").write_text(self.msg("claude-opus-5-5") + chr(10) + self.boundary(0.3) + chr(10), encoding="utf-8")
+        self.assertTrue(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5"), poll=0))
+        self.main.write_text(self.msg("claude-opus-5-5") + chr(10) + self.boundary(0.3) + chr(10), encoding="utf-8")
+        self.assertFalse(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5"), poll=0), "主對話自己剛壓縮：照舊注入")
+
+    def test_no_active_agent_or_no_evidence_keeps_injecting(self):
+        self.main.write_text(self.msg("claude-opus-5-5") + chr(10), encoding="utf-8")
+        self.assertFalse(ug.compact_from_subagent(dict(self.payload, model="claude-haiku-5-5"), poll=0), "沒有正在跑的 agent")
+        (self.sub / "agent-a1.jsonl").write_text(self.msg("claude-opus-5-5") + chr(10) + self.boundary(600) + chr(10), encoding="utf-8")
+        self.assertFalse(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5"), poll=0), "模型相同又沒有新的壓縮標記：判不出來就照舊")
+        self.assertFalse(ug.compact_from_subagent({"source": "compact", "session_id": "none", "transcript_path": str(self.tmp / "x.jsonl")}, poll=0))
 
 
 class AutoTurnGuard(unittest.TestCase):
