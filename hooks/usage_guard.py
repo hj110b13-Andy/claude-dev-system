@@ -428,7 +428,7 @@ def health_msg(cwd, force=False, session_id=None):
 # 分辨方式：壓縮完成時該對話紀錄會先寫一筆 compact_boundary（實測比 hook 注入早約 0.2 秒）。主對話紀錄沒有剛寫的 boundary、
 # 而某個 agent 紀錄有 → 是 agent 的壓縮，不注入、不計數。讀不到或判不出來一律照舊注入（寧可多注入，不可讓主對話漏掉重新開工）。
 COMPACT_FRESH_SEC = 15  # 自己定的：實測間隔 0.2 秒，留寫檔延遲的餘裕
-COMPACT_TAIL = 400000
+COMPACT_TAIL = 2000000  # 只讀紀錄尾端這麼多位元組（agent 一次讀好幾段大檔時，最後一次請求之後可能加進數百 KB）
 
 
 def _fresh_compact_boundary(path, now=None):
@@ -544,7 +544,8 @@ def _last_tokens(path):
                 n = int(u.get("input_tokens") or 0) + int(u.get("cache_read_input_tokens") or 0) + int(u.get("cache_creation_input_tokens") or 0)
                 if n:
                     return n + sum(len(x) for x in lines[i + 1:]) // COMPACT_CHARS_PER_TOKEN
-        return None
+        # 尾端整段都沒有請求紀錄（之後加進來的內容比讀取範圍還大）：至少有尾端這麼多
+        return (sum(len(x) for x in lines) // COMPACT_CHARS_PER_TOKEN) or None
     except Exception:
         return None
 
