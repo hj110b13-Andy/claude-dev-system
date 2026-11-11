@@ -19,6 +19,31 @@
 **全域只放通用能力**；業務規則、資料模型、專案命令留在各專案 CLAUDE.md（規格 10.1）。專案規則與全域規則衝突時以專案為準。
 本工具**不宣稱**靠 CLAUDE.md 就能控制所有行為：CLAUDE.md 區塊只是載入給模型的指引；真正自動執行的只有 hook（用量守門）。
 
+## agent 開工補充與交報告守門：版本需求與已知限制
+
+0.21.0／0.22.0 加了兩個 hook（`hooks/usage_guard.py`）：`SubagentStart`（agent 開工時用 `additionalContext` 補語言、工作目錄與分支、記憶路徑、自我核對清單）與 `PreToolUse`（matcher `SubagentHandback`，agent 交報告時核對，不合格用 `permissionDecision: "deny"` 退回一次）。核對日期 2026-11-11；下列版本號都對得回官方 changelog（https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md）與官方文件（https://code.claude.com/docs/en/hooks.md、https://code.claude.com/docs/en/tools-reference.md）原文。
+
+| 功能 | 最低 Claude Code 版本 | 依據 |
+|---|---|---|
+| `SubagentStart` hook 事件 | 2.0.43 | changelog 2.0.43：「Added the `SubagentStart` hook event」 |
+| `SubagentStart` 的 `additionalContext` 注入 | **查不到起始版本**（changelog 沒有單獨一條） | 官方文件 hooks.md〈SubagentStart〉現行寫明可回傳；GitHub issue #23885（2026-02-07）已把它當既有能力；issue #52628 在 2.1.119 實測可用。2.1.265 修過「resume 的 subagent 把 SubagentStart context 移出 prompt 前綴、破壞 cache」 |
+| PreToolUse／PostToolUse 等 hook 在 subagent 內觸發時帶 `agent_id`、`agent_type` | 2.1.69 | changelog 2.1.69：「Added `agent_id` (for subagents) and `agent_type` (for subagents and `--agent`) to hook events」 |
+| `SubagentHandback` 工具（agent 交報告經這個工具，PreToolUse 才攔得到） | **2.1.271** | tools-reference.md：「Requires Claude Code v2.1.271 or later」；changelog 2.1.271：auto mode 下 subagent 改用專屬 hand-back 呼叫交報告 |
+
+**`SubagentHandback` 只在這些情況存在**（tools-reference.md）：**auto mode**、subagent 由 Agent 工具在本機執行且**不是 fork**（`subagent_type: "fork"`）。不是 auto mode、或是 fork，agent 就用一般文字交報告，PreToolUse 守門不會觸發。官方文件沒有說明有 structured output schema 的 agent 會不會用這個工具，這點**查不到**，不要假設。
+
+**低於最低版本會怎樣**
+- 低於 2.0.43：沒有 `SubagentStart` 事件，開工補充不會執行；不會壞，只是 agent 沒被補充。
+- 2.0.43 以上但低於 2.1.271：開工補充照常；交報告守門永遠不會觸發（沒有 `SubagentHandback` 工具），**會漏擋、不會壞**。
+- 2.1.271 以上但不是 auto mode：同上，守門不觸發。
+- 守門靠 payload 的 `agent_id`（2.1.69 起才有）；低於 2.1.69 的版本沒有 `SubagentHandback`，到不了這一步（我的推論，非官方原文）。
+- 2.1.296 是這台實測兩個 hook 都有觸發的版本（`config/compat.json` 的 `tested`）。
+
+**已知限制**
+- 守門退回上限：官方文件 hooks.md 寫「up to three times」，之後 agent 會不經這個工具結束、主對話收到一則說明；我們自己只擋同一個 agent 一次。
+- `SubagentStart` 的 `additionalContext` 受 hook 輸出約 50 KB 上限影響（issue #52628 在 2.1.119 實測，超過會存檔只留預覽）；我們注入的內容遠小於此。
+- 相關 GitHub issue 現況（2026-11-11 查）：#86569（SubagentStop 的 block 在有 structured output schema 時被丟棄）已 closed／not planned，我們不用 SubagentStop 擋，**不影響**；#85917（SubagentStop 的 additionalContext 到不了 agent）已 closed／not planned，我們用的是 SubagentStart，**不影響**；#87065（SubagentStop matcher 在 `agent_type` 為空時被繞過）仍 open，我們不用 SubagentStop，**不影響**（changelog 2.1.275 另已修）；#91910（subagent 自己 auto-compact 時，PreCompact／PostCompact／SessionStart(compact) 不帶 agent 欄位，2.1.322 仍在）仍 open，**不影響這兩個 hook，但會影響既有的「壓縮後重新開工」hook**（它可能對 subagent 的壓縮也注入主對話清單）。
+
 ## 必要條件
 
 - Python ≥ 3.10（安裝器、hook、工具都只用標準庫；選用的影片來源例外，`--with-video` 會 pip 裝 yt-dlp 等）
