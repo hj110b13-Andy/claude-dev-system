@@ -12,8 +12,8 @@
 ## 派工固定條款（0.16.0 起每份派工都附，原文照抄進派工說明）
 1. **交最終報告前確認自己開的背景程序全部結束**：含 `until`／`while` 等待迴圈、`tail -f`、回測、測試、開發伺服器；依自己記下的 PID 或埠號結束，不可整批結束 node／bash；結束不了的寫進報告（PID＋命令）。
    （2026-11-08 Stock-web：agent 留下 `until [ $(grep -c "FULL" …run-s1.log) -ge 13 ] … do sleep 10; done` 與 tail.exe，交報告後從 21:02 空轉到隔天，使用者自己看到才問。）
-2. **重型程序（回測、全套測試、build、影片轉逐字稿）開跑前先過記憶體閘門**：`py -3 ~/.claude/claude-dev-system/tools/resgate.py wait --project <專案> --desc "<工作>" --rerun "<怎麼重跑>"`
-   （Bash 工具前景跑 timeout 設 600000）。exit 0 才開跑；exit 1＝等滿 10 分鐘仍不足，**不跑**，報告寫「記憶體不足、沒有執行」（已自動登記延後清單）。門檻只在 dispatch-config.json 的 `resourceGate.minFreeMemGB`（預設 3 GB），派工說明不另寫數字。
+2. **重型程序（回測、全套測試、build、影片轉逐字稿）開跑前先過記憶體閘門**：`py -3 ~/.claude/claude-dev-system/tools/resgate.py run --project <專案> --desc "<工作>" -- <要跑的指令>`
+   （優先用 `run`：閘門與工作是同一個指令，記憶體夠才執行、exit code 透傳，不足就不執行；`wait` 仍可用，但後面不可接管線，例如 `wait … | tail && 工作` 會讓閘門的 exit 1 被 `tail` 的 0 蓋掉而硬跑，2026-11-11 全套測試就這樣在 1.9 GB < 3 GB 時跑了。Bash 工具前景跑 timeout 設 600000）。`run` 夠了就跑並以工作的 exit code 結束；`wait` 的 exit 0 才開跑；exit 1＝等滿 10 分鐘仍不足，**不跑**，報告寫「記憶體不足、沒有執行」（已自動登記延後清單）。門檻只在 dispatch-config.json 的 `resourceGate.minFreeMemGB`（預設 3 GB），派工說明不另寫數字。
 3. **暫存檔用自己的子資料夾**：scratchpad 底下先建 `<agent 名稱或任務代號>/` 再寫檔，不直接寫在 scratchpad 根目錄。
    （2026-11-08 Stock-web：session scratchpad 與其他 agent 共用，覆蓋了別人的 head.md／tail.md；2026-11-09 這個 repo 的派工也在共用 scratchpad 撞到別人的 re.py。）
 
@@ -32,7 +32,7 @@
 ## 重型工作與延後清單（0.16.0；使用者 2026-11-09 決定）
 - 使用者原話：「等 10 分鐘還不夠就不跑：直接回報「記憶體不足、沒有執行」，由我決定之後再跑。不會卡住，也不會硬跑出問題，只是那個工作會延後。我選這個，但要寫清楚規則當有其他agent完成時，要確認記憶體是否足夠了，並開始跑「記憶體不足、沒有執行」的任務。然後先設固定 3GB就好，提醒就不用了，記憶體門檻要用成視窗可更改的。」
 - 門檻唯一來源：`dispatch-config.json` 的 `resourceGate`（`minFreeMemGB` 3、`waitMinutes` 10、`pollSeconds` 60；專案 `.claude/dispatch-config.json` 優先；設定視窗可改 `minFreeMemGB`，1～32）。
-- 閘門：`resgate.py wait` 可用實體記憶體 < 門檻就每 60 秒看一次、最多 10 分鐘；仍不足 exit 1、印「記憶體不足、沒有執行」並登記延後清單。只想查不想等用 `resgate.py check`。
+- 閘門：`resgate.py run --desc "<工作>" -- <指令>`（優先；與 `wait` 共用同一段等待，夠才執行並透傳 exit code，不足不執行、`--rerun` 沒給就用指令字串登記）；`resgate.py wait` 可用實體記憶體 < 門檻就每 60 秒看一次、最多 10 分鐘；仍不足 exit 1、印「記憶體不足、沒有執行」並登記延後清單。只想查不想等用 `resgate.py check`。
 - 延後清單唯一一份：`<CLAUDE_HOME>/state/deferred-jobs.json`（全部專案共用，每筆記專案、工作描述、怎麼重跑、登記時間、當時可用記憶體）；`resgate.py list` 看、`resgate.py done <編號>` 開跑後移除。
 - **主對話的規則**：每當有 agent／背景任務完成（收到完成通知、巡檢發現結束），先跑 `resgate.py next`：記憶體 ≥ 門檻就依登記順序開跑第一項（重派，或 SendMessage 喚回原 agent 接著跑），`done` 移除後再查一次，夠再開下一項；不夠就等下一個完成事件。hook 在延後清單有項目且記憶體夠時注入【延後工作（hook）】，派背景任務時的巡檢提醒也會帶上清單項數。
 - 不做「同時 N 個重型」的提醒（使用者：「提醒就不用了」）。

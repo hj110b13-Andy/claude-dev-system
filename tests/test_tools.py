@@ -600,6 +600,41 @@ class ResGate(unittest.TestCase):
         self.assertFalse(self.rg.enough({"minFreeMemGB": 3.0}, free=2.9)[0])
         self.assertTrue(self.rg.enough({"minFreeMemGB": 3.0}, free=3.0)[0])
 
+    def _run(self, enough, args, quiet=True):
+        """替換 wait（不真的等、不讀真實記憶體）後呼叫 main(['run', …])；回 (exit code, 標記檔是否存在)。"""
+        marker = self.home / "ran.txt"
+        self.rg.wait = lambda cfg: (True, 8.0, 0.0) if enough else (False, 1.9, 585.0)
+        code = "import sys; open(r'%s','w').write('x'); sys.exit(%s)" % (marker, "%d")
+        return marker, code
+
+    def test_run_executes_and_passes_exit_code(self):
+        for want in (0, 7):
+            marker, code = self._run(True, None)
+            if marker.exists():
+                marker.unlink()
+            rc = self.rg.main(["run", "--desc", "t", "--project", str(self.home), "--", sys.executable, "-c", code % want])
+            self.assertEqual(rc, want, "exit code 透傳")
+            self.assertTrue(marker.exists(), "記憶體夠要執行")
+        self.assertEqual(self.rg.load_jobs()["items"], [], "夠就不登記延後清單")
+
+    def test_run_insufficient_does_not_execute_and_defers(self):
+        marker, code = self._run(False, None)
+        rc = self.rg.main(["run", "--desc", "全套測試", "--project", str(self.home), "--", sys.executable, "-c", code % 0])
+        self.assertNotEqual(rc, 0)
+        self.assertFalse(marker.exists(), "記憶體不足不可執行")
+        items = self.rg.load_jobs()["items"]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["desc"], "全套測試")
+        self.assertIn("-c", items[0]["rerun"], "沒給 --rerun 時用 -- 後面的指令當重跑方式")
+        wait_rc = self.rg.main(["wait", "--desc", "w", "--project", str(self.home)])
+        self.assertEqual(wait_rc, rc, "不足時 exit code 與 wait 相同")
+
+    def test_run_without_command_fails(self):
+        marker, _ = self._run(True, None)
+        self.assertNotEqual(self.rg.main(["run", "--desc", "t", "--project", str(self.home), "--"]), 0)
+        self.assertNotEqual(self.rg.main(["run", "--desc", "t", "--project", str(self.home)]), 0)
+        self.assertEqual(self.rg.load_jobs()["items"], [])
+
 
 class Procs(unittest.TestCase):
     """0.16.0 C：Stock-web 11/8 agent 留下 until … sleep 10 迴圈＋tail.exe，交報告後空轉到隔天，巡檢沒抓到。"""

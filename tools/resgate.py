@@ -12,6 +12,9 @@
   python resgate.py wait --project <路徑> --desc "<工作>" --rerun "<怎麼重跑>"
         # 不足就每 pollSeconds 秒看一次、最多等 waitMinutes 分鐘；夠了 exit 0 開跑；仍不足 exit 1、印「記憶體不足、沒有執行」並登記延後清單
         # （Bash 工具前景跑要 timeout 600000；最後一次檢查在 waitMinutes 前 15 秒，不會被 10 分鐘上限砍掉）
+  python resgate.py run --desc "<工作>" [--project <路徑>] [--rerun "<怎麼重跑>"] -- <指令> [參數…]
+        # 優先用這個：先做與 wait 相同的等待；夠了就執行 -- 後面的指令並以它的 exit code 結束；不足就不執行、登記延後清單、exit 1
+        # （wait 仍可用，但後面不可接管線：管線的 exit code 是最後一個指令的，閘門 exit 1 會被蓋掉）
   python resgate.py list                                    # 延後清單（依登記順序）
   python resgate.py next                                    # 記憶體夠且清單有項目：印最早一筆 exit 0；否則 exit 1
   python resgate.py done <編號>                              # 開始重跑後從清單移除
@@ -21,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 
@@ -152,6 +156,20 @@ def _fmt(x):
     return "量不到" if x is None else f"{x:.1f} GB"
 
 
+def gate(a, cfg, rerun=None):
+    """wait 與 run 共用：等記憶體；夠回 0，不足印「記憶體不足、沒有執行」、登記延後清單並回 1。"""
+    ok, free, waited = wait(cfg)
+    if ok:
+        print(f"可用記憶體 {_fmt(free)} ≥ {cfg['minFreeMemGB']:g} GB，可以開跑（等了 {waited / 60:.0f} 分）")
+        return 0
+    msg = f"記憶體不足、沒有執行（可用 {_fmt(free)} < {cfg['minFreeMemGB']:g} GB，已等 {waited / 60:.0f} 分）"
+    if a.desc:
+        it = defer(a.project, a.desc, rerun if rerun is not None else a.rerun, free, cfg["minFreeMemGB"], a.agent)
+        msg += f"；已登記延後清單 #{it['id']}（{deferred_path()}）"
+    print(msg)
+    return 1
+
+
 def main(argv=None) -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -161,7 +179,8 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("check")
     w = sub.add_parser("wait")
-    for p in (w, sub.add_parser("defer")):
+    r = sub.add_parser("run")
+    for p in (w, r, sub.add_parser("defer")):
         p.add_argument("--project", default=os.getcwd())
         p.add_argument("--desc", required=p is not w)
         p.add_argument("--rerun", default="")
@@ -169,6 +188,11 @@ def main(argv=None) -> int:
     sub.add_parser("list").add_argument("--json", action="store_true")
     sub.add_parser("next")
     sub.add_parser("done").add_argument("id", type=int)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    cmd = []
+    if "run" in argv and "--" in argv:
+        i = argv.index("--")
+        argv, cmd = argv[:i], argv[i + 1:]
     a = ap.parse_args(argv)
     cfg = load_cfg(getattr(a, "project", None))
     if a.cmd == "check":
@@ -176,16 +200,19 @@ def main(argv=None) -> int:
         print(f"可用記憶體 {_fmt(free)}，門檻 {need:g} GB → {'可以開跑' if ok else '不足'}")
         return 0 if ok else 1
     if a.cmd == "wait":
-        ok, free, waited = wait(cfg)
-        if ok:
-            print(f"可用記憶體 {_fmt(free)} ≥ {cfg['minFreeMemGB']:g} GB，可以開跑（等了 {waited / 60:.0f} 分）")
-            return 0
-        msg = f"記憶體不足、沒有執行（可用 {_fmt(free)} < {cfg['minFreeMemGB']:g} GB，已等 {waited / 60:.0f} 分）"
-        if a.desc:
-            it = defer(a.project, a.desc, a.rerun, free, cfg["minFreeMemGB"], a.agent)
-            msg += f"；已登記延後清單 #{it['id']}（{deferred_path()}）"
-        print(msg)
-        return 1
+        return gate(a, cfg)
+    if a.cmd == "run":
+        if not cmd:
+            print("用法：resgate.py run --desc \"<工作>\" -- <指令> [參數…]（-- 後面沒有指令，沒有執行）", file=sys.stderr)
+            return 2
+        rc = gate(a, cfg, a.rerun or subprocess.list2cmdline(cmd))
+        if rc:
+            return rc
+        try:
+            return subprocess.call(cmd)
+        except OSError as e:
+            print(f"指令無法啟動：{e}", file=sys.stderr)
+            return 127
     if a.cmd == "defer":
         it = defer(a.project, a.desc, a.rerun, free_gb(), cfg["minFreeMemGB"], a.agent)
         print(f"已登記延後清單 #{it['id']}：{it['desc']}")
