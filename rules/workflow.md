@@ -20,7 +20,7 @@
 ## 用量收尾（配合 hooks/usage_guard.py）
 - 門檻（預設 5 小時 ≥85% 或 7 天 ≥97%，數值在 `dispatch-config.json` 的 `usageThresholdPct`，專案 `.claude/dispatch-config.json` 優先於全域；0.7.0 起直接是兩個數字、沒有方案概念，沒到門檻不提示也不動作）觸發時：不再派新 agent、不開新待辦；能在上限前做完的讓它做完，做不完的通知 agent 收尾（commit、存 patch、交報告）；更新交接紀錄；推送。
 - 7 天門檻觸發要寫「詳細版」交接：每個待辦寫到不看對話也能做（背景、原話、根因、檔案、下一步指令、驗收標準）。
-- 開始大任務前先 `python ~/.claude/claude-dev-system/hooks/usage_guard.py --print` 估夠不夠，不夠先告訴使用者選項。
+- 開始大任務前先 `python ~/.claude/claude-dev-system/hooks/usage_guard.py --print` 估夠不夠，不夠先告訴使用者選項（「不夠」的判定：目前百分比加上這個任務的預估消耗會達到收尾門檻；預估以近期同類工作的實際消耗為準，估不出來就照實說估不出來）。
 
 ## 背景等待
 - 等背景工作時定期主動回報（帶實際進度數字），不整段沉默；agent 交完最終報告就停掉它。
@@ -29,6 +29,27 @@
   hook 每 `procCheck.everyMinutes`（預設 10）分鐘最多查一次（約 10～30 ms），新出現的才注入【殘留程序（hook）】。
   （2026-11-08 Stock-web：`until [ $(grep -c "FULL" …run-s1.log) -ge 13 ] … do sleep 10; done` 與 tail.exe 從 21:02 空轉到隔天，巡檢沒抓到，使用者自己看到才問。）
 - **延後清單**：有 agent／背景任務完成時先 `resgate.py next`（規則與使用者原話在 `agent-dispatch.md`〈重型工作與延後清單〉）。
+
+## hook 標籤對照（0.27.0；看到哪個標籤、照哪裡做）
+`hooks/usage_guard.py` 會輸出的標籤全部列在這裡（`tests/test_docs_consistency.py` 會核對：程式裡每個標籤這張表都要有）。「退回」＝這則回覆或報告被擋下一次、補完再送。
+
+| 標籤 | 什麼時候出現 | 照哪裡做 |
+|---|---|---|
+| 【用量守門（自動）】 | 5 小時或 7 天用量達門檻；每則使用者提示都提醒，工具呼叫後每 10 分鐘最多一次 | 本檔〈用量收尾〉 |
+| 【專案自動化（hook）】 | 對話第一則提示：資料夾算專案但沒有 CLAUDE.md 或沒有盤點索引 | `core-detail.md`〈專案自動化〉、skill `cds-project-init`／`cds-project-audit` |
+| 【全域系統對照（hook）】 | 這套系統的主.次版號變了；每個專案每天一次 | `core.md`「專案自動化」條 |
+| 【專案健康檢查（hook）】 | 盤點過期、CLAUDE.md 或交接紀錄過大、該有驗證 skill 卻沒有 | `core.md`「長對話」「工具後提醒」條、`doc-governance.md` |
+| 【壓縮後重新開工（hook）】【壓縮後重新開工】【建議開新對話（hook）】 | 對話被壓縮或接續後；壓縮滿 3 次加上開新對話的建議 | `core.md`「長對話」條 |
+| 【改到安裝副本（hook）】【波及範圍（hook）】【共用工作目錄（hook）】【背景任務巡檢（hook）】 | 工具呼叫之後（改到 `~/.claude/claude-dev-system/`、改到被多處引用的檔、多個 agent 共用目錄時下 git 指令、派出背景任務） | `core.md`「工具後提醒」條與各自的條文 |
+| 【殘留程序（hook）】 | 這場對話的工具指令開出、跑太久的程序新出現時 | 本檔〈背景等待〉 |
+| 【延後工作（hook）】 | 延後清單有這個專案登記的工作、而且記憶體已經夠 | `agent-dispatch.md`〈重型工作與延後清單〉 |
+| 【磁碟清理（hook）】 | Claude 對話暫存超過門檻；每 7 天最多一次 | 本檔〈磁碟清理〉 |
+| 【查證守門（hook）】 | 回覆結束時：問答題的回覆含年份或帶單位的數字、卻沒有「來源」段 → 退回 | `web-quick.md`「回覆格式提醒」、`web-sources.md` 第 7 節 |
+| 【建議守門（hook）】 | 回覆結束時：提出了建議、方法或方向，卻沒有逐項標「已查證（附來源）／未查證」→ 退回 | `core.md`「先找現成做法」條 |
+| 【派工補充（hook）】 | agent 開工時補語言、工作目錄與分支、記憶路徑、自我核對清單 | `agent-dispatch.md`〈agent 開工時實際拿到什麼〉 |
+| 【報告守門（hook）】 | agent 交報告時五項核對不合格 → 退回 | `agent-dispatch.md`〈agent 開工時實際拿到什麼〉的「交報告守門」 |
+| 【語言（hook）】 | agent 中途寫的文字不是使用者的回覆語言 | 同上（語言提醒） |
+| 【看板逾時提醒（自動）】 | `~/.claude/state/task-board.md` 存在、而且上面有 agent 超過預估時間沒回報（任務看板屬 Stock-web 專案，這個 repo 不附；沒有這個檔就不會出現） | 用 SendMessage 追問那個 agent |
 
 ## 推送前同步（0.16.0）
 - 判定：`git log --merges --oneline @{u}..HEAD` 有輸出（本機有還沒推的 merge commit，例如剛合併 agent 分支）→ 用 `git pull --no-rebase`（或 `git pull --rebase=merges`）；沒有輸出才可用 `git pull --rebase`。
@@ -89,7 +110,7 @@
 - **7 天達收尾門檻的詳細版**（現行值讀設定檔 `dispatch-config.json` 的 `usageThresholdPct`，不寫死數字；2026-10-18 稽核更正：原寫死「97%」）（下次可能隔好幾天才接手，避免遺失脈絡）：除上述外，「接手狀態」每個待辦都要寫到「不看對話也能做」：背景與使用者原話、已查證的根因與證據、相關檔案／函式／commit、做到哪一步、下一步具體指令、驗收標準；另列「進行中的觀察」（例如回補進度、待驗證的上線項目）與其檢查方法；確認工作樹乾淨或 patch 已存。
 
 **未達門檻時也要先評估用量夠不夠（2026-10-11 使用者要求）**：
-- 開始任何新任務前（我自己接著做下一批、或使用者交代某項工作），先讀用量（`python ~/.claude/claude-dev-system/hooks/usage_guard.py --print`），估這個任務約要花多少 5 小時 % 與 7 天 %，對照「離收尾門檻（`dispatch-config.json` 的 `usageThresholdPct`，預設 80%／97%）還剩多少」與重置時間。
+- 開始任何新任務前（我自己接著做下一批、或使用者交代某項工作），先讀用量（`python ~/.claude/claude-dev-system/hooks/usage_guard.py --print`），估這個任務約要花多少 5 小時 % 與 7 天 %，對照「離收尾門檻（`dispatch-config.json` 的 `usageThresholdPct`，預設 85%／97%；2026-11-12 稽核更正：原寫「預設 80%／97%」，與本檔上方〈用量收尾〉、設定檔及 `usage_guard.py` 的預設 85 不符）還剩多少」與重置時間。
 - **夠**：照排隊清單自動接下一批（或照使用者要求開工），開工時一句話說明預估用量。**不夠或很勉強**：開工前先告訴使用者——預估需要多少、目前剩多少、重置時間；提出選項（只做能完成的部分、先做最重要的細項、或等重置後再做），由使用者決定；不可做到一半才因額度中斷。多個 agent 平行時把預估相加；平行越多越容易一起撞上限。
 - **收尾後若使用者再交代工作**：先依目前用量（usage.json／`--print`）與重置時間分析剩餘額度夠不夠做完、或能做完哪些部分（以近期同類工作的消耗估算），列給使用者決定，**不要直接開工**。
 

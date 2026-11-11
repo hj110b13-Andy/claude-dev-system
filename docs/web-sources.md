@@ -3,8 +3,8 @@
 讓每台電腦的 Claude Code 查資料更不容易「查不到」或「查到一半停掉」，而不多花每場對話的 token。預設**不啟用**；啟用後做四件事：
 
 1. 寫入 `settings.json` 的 `env`：放寬內建 `WebSearch` 的次數上限（官方預設每場 200 次、每小時補 100 次 → `config/web-sources.json` 的 600／300；需 Claude Code ≥2.1.290），以及 `PYTHONUTF8=1`、`PYTHONIOENCODING=utf-8`（Windows 碼頁 950 下 Python 子程序中文輸出不再亂碼）。
-2. 用官方 `claude mcp add --scope user` 註冊免金鑰 MCP：預設搜尋 `parallel`、`exa` 與文件 `context7`（程式庫文件）、`deepwiki`（GitHub repo）、`mslearn`（微軟文件）；選用 `tavily`、`firecrawl`。
-3. 規則：`rules/core.md` 多一條「上網查資料」優先序；細則 `rules/web-sources.md` 列出 2026-10-26 實測過的免金鑰開放 API（天氣、匯率、台股、假日、百科、地理編碼、航班位置）與金鑰位置。這兩項隨一般 `install`／`update` 安裝，不需 `--with-web`。
+2. 用官方 `claude mcp add --scope user` 註冊免金鑰 MCP：預設搜尋 `parallel`、`exa` 與文件 `context7`（程式庫文件）、`deepwiki`（GitHub repo）、`mslearn`（微軟文件），以及 `firecrawl`（0.7.0 起預設開，只當讀整頁的第三步；這裡原把它列在選用）；選用 `tavily`。哪些預設開以 `config/web-sources.json` 各項的 `default` 為準。
+3. 規則：`rules/core.md` 有一條「上網查資料」（只留觸發條件），工具優先序在速查 `rules/web-quick.md` A 段（這裡原寫優先序在 core.md）；細則 `rules/web-sources.md` 列出 2026-10-26 實測過的免金鑰開放 API（天氣、匯率、台股、假日、百科、地理編碼、航班位置）與金鑰位置。這兩項隨一般 `install`／`update` 安裝，不需 `--with-web`。
 4. 需要金鑰的來源（中央氣象署、Tavily、Exa）金鑰只存本機 `<CLAUDE_HOME>/claude-dev-system/config/local.json`，不進 repo。
 
 ## 啟用
@@ -26,9 +26,11 @@ python installer/install.py web --enable firecrawl                  # 免金鑰
 python installer/install.py web --disable exa                       # 關掉某個預設
 python installer/install.py web --env CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=1000   # 覆寫 env 值
 python installer/install.py web --off                               # 關閉：移除本工具加的 MCP 與 env，保留 local.json
-python installer/install.py web --usage-guard off                   # 關閉用量守門 hook（update 時移除；on 開回）
+python installer/install.py web --usage-guard off                   # 關掉整支 hook（7 個事件都不註冊，立即生效；on 開回）
 ```
-每次 `web` 都會先備份 settings.json，改完立即套用並更新安裝紀錄。金鑰在安裝器所有輸出中都遮成 `***`，也不會寫進 manifest；但**必然以明文**存在 `local.json`、`~/.claude.json` 的 MCP URL（Tavily）或 header（Exa），以及當下執行的 `claude mcp add` 命令列——這兩個檔請勿分享或 commit。`claude` 不在 PATH 或註冊失敗時，`install`／`update --with-web` 會印 ❌ 並以結束碼 1 結束（其他部分仍已套用，修好後重跑即可補齊）。
+**`--usage-guard off` 關的是整支 `hooks/usage_guard.py`**，不只用量提醒：查證守門、專案自動化、壓縮後重新開工、agent 開工補充與交報告守門、工具後提醒都會一起停（規則文字仍在）。只是不想被用量提醒打斷，改調 `dispatch-config.json` 的 `usageThresholdPct` 就好。
+
+聯網來源**已啟用**時，每次 `web` 都會先備份 settings.json，改完立即套用並更新安裝紀錄。聯網來源**還沒啟用**時（0.27.0 起）：只帶 `--key`／`--env`／`--key-mode`／`--usage-guard` 就只把偏好存進 `local.json`，不會順便註冊 MCP、不動 `env`（之前存一把 YouTube 金鑰就會註冊 6 個 MCP）；不帶任何參數的 `install.py web`、或帶 `--enable`／`--disable` 才是啟用。金鑰在安裝器所有輸出中都遮成 `***`，也不會寫進 manifest；但**必然以明文**存在 `local.json`、`~/.claude.json` 的 MCP URL（Tavily）或 header（Exa），以及當下執行的 `claude mcp add` 命令列——這兩個檔請勿分享或 commit。`claude` 不在 PATH 或註冊失敗時，`install`／`update --with-web` 會印 ❌ 並以結束碼 1 結束（其他部分仍已套用，修好後重跑即可補齊）。
 
 註冊方式：
 - **中央氣象署**：https://opendata.cwa.gov.tw/ 加入會員 → 登入 → 開發指南 →「API 授權碼」→ 取得（`CWA-` 開頭）。免費；一般會員 24 小時內 2 萬次、每日 2 GB（2026-11-01 於會員「使用統計」頁實看）。

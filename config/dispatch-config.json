@@ -1,5 +1,5 @@
 {
-  "$說明": "用量門檻與派工模型／努力程度表的單一來源。讀取順序：專案 .claude/dispatch-config.json（cwd 往上找）→ 本檔 → 內建預設 85／97。0.7.0 起沒有「訂閱方案」概念：usageThresholdPct 直接給兩個數字，沒到門檻完全不動也不提示；GUI／執行檔可直接改。安裝後複製到 <CLAUDE_HOME>/claude-dev-system/config/，可直接改；update 偵測到改過會保留並把新版放 .new。",
+  "$說明": "用量門檻與派工模型／努力程度表的單一來源。讀取順序：專案 .claude/dispatch-config.json（cwd 往上找）→ 本檔 → 內建預設 85／97。0.7.0 起沒有「訂閱方案」概念：usageThresholdPct 直接給兩個數字，沒到門檻完全不動也不提示；GUI／執行檔可直接改。安裝後複製到 <CLAUDE_HOME>/claude-dev-system/config/，可直接改；update 偵測到改過會保留你的值、只補上新版新增的頂層鍵，不生 .new（0.9.6 起；這句原寫「會保留並把新版放 .new」）。",
   "version": 2,
   "updated": "2026-11-09",
   "usageThresholdPct": {

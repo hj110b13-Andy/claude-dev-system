@@ -22,7 +22,15 @@
   - main 讀碼發現、還沒實跑確認的：(1) `commands.py` `_prune_backups` 只留最近 10 份後，`uninstall --restore-backup` 用 `backups` 第一筆當「安裝前備份」——超過 10 次 update 後第一筆已不是安裝前那份，還原會把本工具的 hook 條目（指向已刪的腳本）寫回 settings.json；(2) `web_config` 每次都備份但不修剪，備份無上限；(3) `release.yml` 只在推 tag 時跑測試，平常 push master 沒有 CI；(4) `project-scan.py` 在這個 repo 找不到入口（`install.py` 等有 `__main__`）。
   - 覆蓋率量測：背景指令在等記憶體閘門（22:4x 可用 1.6 GB < 3 GB，VSCode 佔 6.9 GB）；沒跑成會登記延後清單，之後 `py -3 tools/resgate.py next`。設定檔 scratchpad `main/coveragerc`、`main/covsite/sitecustomize.py`。
   - 注意：基準那次全套測試 main 是直接跑、沒過記憶體閘門（違反規則，之後都用 `resgate.py run`）。
-- 第二階段 問題修復與架構改善：未開始
+- 第二階段 問題修復與架構改善：**進行中（2026-11-12 02:0x 派出）**
+  - 基準 commit `4ed2108`（master，本機、還沒 push）：VERSION 0.27.0、`tests/test_cli.py`、CHANGELOG 開頭。
+  - 5 個修正 agent（opus／high）各在 main 用 `git worktree add` 建的 worktree 裡改、commit 到自己的分支、不 push：`.claude/worktrees/fix-installer`→`audit/fix-installer`（commands、web、fsio、paths、claudemd、manifest、checks、install.py）；`fix-gui`→`audit/fix-gui`（gui.py、gui_model.py、appdir.py）；`fix-hook`→`audit/fix-hook`（hooks/usage_guard.py）；`fix-tools-a`→`audit/fix-tools-a`（resgate、procs、cleanup、video）；`fix-tools-b`→`audit/fix-tools-b`（project-scan、depgraph、moduleInventory、agent-audit、progress-diff＋兩個 skill 的閘門寫法）。每份派工的逐條做法寫在派工說明裡（對應六份 findings 檔的編號）。
+  - **2026-11-12 06:1x 現況**：02:1x 五個 agent 才開工就撞 5 小時上限（06:10 重置）。重置後 hook、安裝器用 SendMessage 叫回原 agent（opus）接著做；視窗、工具甲、工具乙改派 sonnet／high 新 agent 接手同一個 worktree（規格從舊 agent 的紀錄取出存成 scratchpad `main/spec-fix-{gui,tools-a,tools-b}.md`；理由：規格已逐條寫死、兩度把 5 小時額度用盡）。7 天用量 06:12 是 56%。
+  - main 已做完並提交（本機）：`ff2c45f` CI（tests.yml 新增、release.yml 升 action 大版＋tag 對 VERSION 檢查）。正在做：文件不一致（README 已改、docs／rules 進行中，改前版本備份在 scratchpad `main/docs-before/` 供 progress-diff 比對）。
+  - （Agent 工具內建的 worktree 隔離在這台被拒絕：它把 `c:` 與 `C:` 當成路徑不一致；留下的 5 個空 worktree 與分支已確認沒有改動後移除。）
+  - agent 交回後 main 要做：逐條分支看 diff → `git merge --squash` 進 master（一個模組一個 commit）→ 全套測試 → 重跑 scratchpad `audit-*/` 的重現腳本確認壞行為消失 → `git worktree remove`＋刪分支。
+  - 決策：2026-11-12｜「安裝前備份」用備份紀錄的選用鍵 `preInstall`，**不升 `MANIFEST_SCHEMA`**｜舊版 exe 的 `gui_model.read_state` 直接呼叫 `mf.load`、讀到較新的 schema 會丟 RuntimeError（還沒換新的 exe 會整個讀不了狀態）；選用鍵舊程式忽略即可、被舊程式修剪掉時新程式只會拒絕還原（安全）｜`installer/cds/gui_model.py:541`、`manifest.py:60`。
+  - main 自己做（不跟 agent 的檔衝突）：`.github/workflows/`（release.yml 升 action 大版、加 tag 對 VERSION 的檢查；新增平常 push 就跑的 tests.yml）、文件與規則的不一致（findings-docs 的 DC-01～22、IN-14、TA-03 的規則句子）、合併後才能做的跨模組項目（HK-10 Monitor matcher 在 `settings_ops.py`、TB-07 hook 改呼叫 project-scan 的計數函式、TA-20 三份設定讀取要不要合併）、`docs/ARCHITECTURE.md`、`docs/PROJECT-ISSUES.md`、依賴閘門測試。
 - 第三階段 完整測試與回歸驗證：未開始
 - 第四階段 專案整理與文件更新（PROJECT-AUDIT-REPORT.md、PROJECT-STATUS.md、CHANGELOG、README、docs/ARCHITECTURE.md、docs/PROJECT-ISSUES.md）：未開始
 - 第五階段 最終驗收與報告交付（升版、update、verify、push、tag、Release）：未開始

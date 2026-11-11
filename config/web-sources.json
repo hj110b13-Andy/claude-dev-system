@@ -8,7 +8,7 @@
     "context7": "Context7（MCP；免費 1,000 次／月）",
     "parallel": "Parallel（MCP；註冊送 $20 一次性，每月 $5 須綁卡；有金鑰多 web_research）",
     "firecrawl": "Firecrawl（MCP；免費 1,000 credits／月；有金鑰開全部工具）",
-    "_keyMode": "搜尋類金鑰預設「免費優先」：local.json 的 keyMode[名稱] 為 fallback（預設）時同時註冊免金鑰版 <名稱> 與金鑰版 <名稱>-key，規則先用免金鑰、回 429／5xx／402 才用 -key 版；設 always 則只註冊金鑰版。",
+    "_keyMode": "搜尋類金鑰預設「免費優先」：local.json 的 keyMode[名稱] 為 fallback（預設）時同時註冊免金鑰版 <名稱> 與金鑰版 <名稱>-key，規則先用免金鑰、回 429／5xx／402 才用 -key 版；設 always 則只註冊金鑰版；設 free 則只註冊免金鑰版（金鑰留在 local.json 不用）。",
     "cwa": "中央氣象署 opendata.cwa.gov.tw 授權碼",
     "moenv": "環境部 data.moenv.gov.tw api_key",
     "openaq": "OpenAQ explore.openaq.org X-API-Key",
@@ -37,7 +37,7 @@
         "web_fetch_exa"
       ],
       "keyHeader": "x-api-key",
-      "note": "免金鑰語意搜尋（用意思找而非關鍵字），與 Parallel／內建索引互補；免金鑰官方寫「Free rate-limited usage」（數字未公開）。有金鑰時以 x-api-key header 傳：免費層每月 1 日重置 $10 額度（search 每千次 $4 起，約 2,500 次 Lite 搜尋），額度用完回 402 Payment Required、不會自動退回免金鑰（exa.ai/docs/admin/billing，2026-10-27 查）——撞 402 就 `web --key exa=` 清掉金鑰改回免金鑰。"
+      "note": "免金鑰語意搜尋（用意思找而非關鍵字），與 Parallel／內建索引互補；免金鑰官方寫「Free rate-limited usage」（數字未公開）。有金鑰時以 x-api-key header 傳：免費層每月 1 日重置 $10 額度（search 每千次 $4 起，約 2,500 次 Lite 搜尋），額度用完回 402 Payment Required、不會自動退回免金鑰（exa.ai/docs/admin/billing，2026-10-27 查）——撞 402 就 `web --key exa=` 清掉金鑰改回免金鑰（這是 keyMode 設成 always 時才需要；0.7.0 起預設「免費優先」，免金鑰版 exa 與金鑰版 exa-key 並存，撞 402 時規則自動改用免金鑰版，不必清金鑰——與 rules/web-sources.md 第 2c 節一致）。"
     },
     "context7": {
       "url": "https://mcp.context7.com/mcp",

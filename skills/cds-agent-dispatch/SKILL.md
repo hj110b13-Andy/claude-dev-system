@@ -31,7 +31,7 @@ description: 派 agent 前決定模型（opus／sonnet／haiku）與努力程度
 - 規格七要素：背景與原話、證據、修法方向、不能破壞的行為、可量化驗收、協調資訊、時限＋回報格式（「進度 已完成/總數｜預計還需 N 分（依據）」，交完最終報告就結束）。
 - **固定條款四條（每份派工照抄，0.16.0；第 4 條 0.21.0）**：
   1. 交最終報告前確認自己開的背景程序（含 until／while 等待迴圈、tail、回測、測試、伺服器）全部結束，依自己記下的 PID 或埠號結束、不整批結束 node／bash；結束不了的寫進報告。
-  2. 重型程序（回測、全套測試、build、影片轉逐字稿）開跑前用 `py -3 ~/.claude/claude-dev-system/tools/resgate.py run --project <專案> --desc "<工作>" -- <要跑的指令>`（優先；夠才執行、exit code 透傳；`wait` 仍可用，但後面不可接管線；前景 timeout 600000）；不足（exit 1）就不跑，報告寫「記憶體不足、沒有執行」（已登記延後清單）。門檻只讀 dispatch-config.json 的 `resourceGate`，不在派工說明寫數字。
+  2. 重型程序（回測、全套測試、build、影片轉逐字稿）開跑前用 `py -3 ~/.claude/claude-dev-system/tools/resgate.py run --project <專案> --desc "<工作>" -- <要跑的指令>`（優先；夠才執行、exit code 透傳；`wait` 仍可用，但後面不可接管線；前景 timeout 600000，先 `resgate.py check`、不足就把 `run` 放背景執行——它可能等滿 10 分鐘才開跑）；不足（exit 1）就不跑，報告寫「記憶體不足、沒有執行」（已登記延後清單）。門檻只讀 dispatch-config.json 的 `resourceGate`，不在派工說明寫數字。
   3. 暫存檔寫在 scratchpad 底下自己的子資料夾 `<agent 名稱或任務代號>/`，不寫在根目錄（11/8 共用 scratchpad 被別的 agent 覆蓋 head.md／tail.md）。
   4. （0.21.0）寫明「在 `<絕對路徑>` 工作，commit 到分支 `<名稱>`」或「不 commit，只交 patch」；派工前先 `git branch --show-current`（agent 的工作目錄繼承主對話當下位置；11/10 Stock-web 有 agent 因此 commit 到部署分支）。
 - **這份工作一定要守的規則與相關記憶，逐條寫進派工說明**（0.21.0）：agent 拿得到 CLAUDE.md 與 MEMORY.md 索引，拿不到回覆語言設定、記憶內文、Stop 守門；實測寫進派工說明的規則幾乎都照做，只在 CLAUDE.md 的常被略過。SubagentStart hook 會自動補一份保底清單、交報告時另有守門核對五項並退回一次（0.22.0），都不取代派工說明。收報告時自己核對結論、數字出處與 commit 分支後才轉給使用者。
