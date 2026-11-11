@@ -28,6 +28,7 @@
 | `SubagentStart` hook 事件 | 2.0.43 | changelog 2.0.43：「Added the `SubagentStart` hook event」 |
 | `SubagentStart` 的 `additionalContext` 注入 | **查不到起始版本**（changelog 沒有單獨一條） | 官方文件 hooks.md〈SubagentStart〉現行寫明可回傳；GitHub issue #23885（2026-02-07）已把它當既有能力；issue #52628 在 2.1.119 實測可用。2.1.265 修過「resume 的 subagent 把 SubagentStart context 移出 prompt 前綴、破壞 cache」 |
 | PreToolUse／PostToolUse 等 hook 在 subagent 內觸發時帶 `agent_id`、`agent_type` | 2.1.69 | changelog 2.1.69：「Added `agent_id` (for subagents) and `agent_type` (for subagents and `--agent`) to hook events」 |
+| 聯網 MCP 工具延後載入（註冊時加 `"alwaysLoad": false`） | 2.1.287 | 官方 mcp 文件〈Defer a server's tools〉：「Requires Claude Code v2.1.287 or later」；低於此版安裝器照舊註冊，不會壞，只是 firecrawl 的工具定義每次請求都帶著 |
 | `SubagentHandback` 工具（agent 交報告經這個工具，PreToolUse 才攔得到） | **2.1.271** | tools-reference.md：「Requires Claude Code v2.1.271 or later」；changelog 2.1.271：auto mode 下 subagent 改用專屬 hand-back 呼叫交報告 |
 
 **`SubagentHandback` 只在這些情況存在**（tools-reference.md）：**auto mode**、subagent 由 Agent 工具在本機執行且**不是 fork**（`subagent_type: "fork"`）。不是 auto mode、或是 fork，agent 就用一般文字交報告，PreToolUse 守門不會觸發。官方文件沒有說明有 structured output schema 的 agent 會不會用這個工具，這點**查不到**，不要假設。

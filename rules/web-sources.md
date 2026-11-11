@@ -61,7 +61,7 @@
 
 **額度說明**：`parallel`、`exa`、`context7`、`deepwiki`、`mslearn` 免金鑰、不消耗使用者任何額度；只有 `tavily`（有金鑰時）用使用者的每月 1,000 credits。不要跟使用者說「這些工具會用到你的額度」。
 
-Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔工具**名稱**，用到才載入說明；所以多幾個遠端 MCP 幾乎不花 token。真正的成本是本機執行型 MCP（要跑 Node 子程序、佔記憶體）與工具太多時選錯工具——規則寫清楚用途就是在降這個風險。
+Token 成本：Claude Code 延後載入 MCP 工具 schema，每場對話只佔工具**名稱**，用到才載入說明；所以多幾個遠端 MCP 幾乎不花 token。**例外（0.24.0 更正）**：伺服器可以把工具標成一開始就載入，firecrawl 就是——2026-11-11 量到 firecrawl＋firecrawl-key 共 45 KB 工具定義每次請求都帶著。安裝器現在註冊時一律加 `"alwaysLoad": false` 強制延後（Claude Code 2.1.287 以上；官方文件 mcp〈Defer a server's tools〉），要用 firecrawl 時先 ToolSearch 載入。新增伺服器後用 `/context` 看一下有沒有工具沒被標成 deferred。真正的成本是本機執行型 MCP（要跑 Node 子程序、佔記憶體）與工具太多時選錯工具——規則寫清楚用途就是在降這個風險。
 
 ## 2. MCP 一覽
 
