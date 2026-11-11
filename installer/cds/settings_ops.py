@@ -10,7 +10,7 @@ from . import HOOK_MARK
 # Read／Grep／Glob 這類一場對話幾十上百次的工具不掛，用量檢查本來就有 5 分鐘 TTL，不會漏
 # Stop（0.11.8）：查證守門——回覆結束時看最後一則回答，問答題含年份／數字卻沒「來源」段就 block 一次讓它補（stop_hook_active 時不再擋，不會無限迴圈）
 # SessionStart（0.12.0）：壓縮／接續後重新注入開工檢查（Stock-web 一場對話開 19 天、壓縮 20 次，開工檢查只在第一天做過）
-HOOK_SPECS = [("UserPromptSubmit", None), ("PostToolUse", "Bash|PowerShell|Agent|Task|Edit|Write|NotebookEdit|Workflow"), ("Stop", None), ("SessionStart", None),
+HOOK_SPECS = [("UserPromptSubmit", None), ("PostToolUse", "Bash|PowerShell|Agent|Task|Edit|Write|NotebookEdit|Workflow|CronCreate|CronDelete"), ("Stop", None), ("SessionStart", None),
               ("SubagentStart", None),
               ("PreToolUse", "SubagentHandback"),
               ("SubagentStop", None)]  # 0.22.0：agent 交報告時核對語言、數字出處、web-quick、記憶、commit 分支，不合格退回一次  # 0.21.0：agent 開工時補語言、工作目錄與分支、記憶內文路徑、自我核對清單

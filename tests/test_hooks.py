@@ -189,12 +189,15 @@ class Health(unittest.TestCase):
             ver.write_text("0.13.4", encoding="utf-8")
             self.assertIsNone(ug.align_msg(str(self.proj), "s3"), "修訂號不觸發")
             ver.write_text("0.14.0", encoding="utf-8")
-            m = ug.align_msg(str(self.proj), "s4")
-            self.assertIn("從 0.13.0 更新到 0.14.0", m)
+            self.assertIsNone(ug.align_msg(str(self.proj), "s4"), "0.25.0：同一個專案當天已對照過，再升版也不再要求")
+            ver.write_text("0.14.1", encoding="utf-8")
+            self.assertIsNone(ug.align_msg(str(self.proj), "s4b"))
+            m = ug.align_msg(str(self.proj), "s4", today="2999-01-02")
+            self.assertIn("從 0.13.0 更新到 0.14.1", m, "隔天第一則：從上次對照的版本算起")
             self.assertNotIn("過時條文", m, "沒寫死 pull --rebase 不提")
             ver.write_text("0.15.0", encoding="utf-8")
-            self.assertIsNone(ug.align_msg(str(self.proj), "s5", mark_only=True), "init／audit 那則只記錄")
-            self.assertIsNone(ug.align_msg(str(self.proj), "s6"))
+            self.assertIsNone(ug.align_msg(str(self.proj), "s5", mark_only=True, today="2999-01-03"), "init／audit 那則只記錄")
+            self.assertIsNone(ug.align_msg(str(self.proj), "s6", today="2999-01-04"))
             (self.proj / ".claude" / "dispatch-config.json").write_text(json.dumps({"projectAutomation": {"alignOnUpdate": False}}), encoding="utf-8")
             ver.write_text("0.16.0", encoding="utf-8")
             self.assertIsNone(ug.align_msg(str(self.proj), "s7"), "專案可關閉")
@@ -488,6 +491,49 @@ class SubagentBrief(unittest.TestCase):
         self.assertIn(("SubagentStart", None), settings_ops.HOOK_SPECS)
         s, rec = settings_ops.add_hooks({}, "py -3 x.py # claude-dev-system")
         self.assertEqual(len(s["hooks"]["SubagentStart"]), 1)
+
+
+class PatrolReminder(unittest.TestCase):
+    """0.25.0：這場對話已有巡檢排程就不再提醒；排程刪掉後再派背景任務才提醒。"""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.old = (ug.STATE_DIR, ug.PA_STATE, ug.CONFIG)
+        ug.STATE_DIR = str(self.tmp / "state")
+        ug.PA_STATE = str(self.tmp / "state" / "project-auto.json")
+        ug.CONFIG = str(self.tmp / "nope.json")
+
+    def tearDown(self):
+        ug.STATE_DIR, ug.PA_STATE, ug.CONFIG = self.old
+
+    def post(self, name, sid="s1", **kw):
+        return ug.tool_reminders({"hook_event_name": "PostToolUse", "tool_name": name, "session_id": sid, "cwd": str(self.tmp),
+                                  "tool_input": kw.pop("tool_input", {}), **kw})
+
+    def patrol(self, out):
+        return any("背景任務巡檢" in x for x in out)
+
+    def test_no_reminder_while_patrol_cron_exists_and_again_after_delete(self):
+        self.assertTrue(self.patrol(self.post("Agent", tool_response={"agentId": "a1"})), "還沒有排程：提醒")
+        self.post("CronCreate", tool_input={"cron": "*/15 * * * *", "prompt": "巡檢：列出所有進行中的背景任務與 agent"},
+                  tool_response="Scheduled recurring job 684f6925 (Every 15 minutes).")
+        self.assertFalse(self.patrol(self.post("Agent", tool_response={"agentId": "a2"})), "排程還在：不再提醒")
+        self.assertFalse(self.patrol(self.post("Bash", tool_input={"command": "x", "run_in_background": True}, tool_response={"backgroundTaskId": "b1"})))
+        self.post("CronDelete", tool_input={"id": "684f6925"})
+        self.assertTrue(self.patrol(self.post("Agent", tool_response={"agentId": "a3"})), "排程刪掉後再派：要提醒重建")
+
+    def test_other_crons_and_other_sessions_do_not_suppress(self):
+        self.post("CronCreate", tool_input={"cron": "0 9 * * *", "prompt": "check the build"}, tool_response="Scheduled recurring job aaaa1111")
+        self.assertTrue(self.patrol(self.post("Agent", tool_response={"agentId": "a1"})), "不是巡檢排程")
+        self.post("CronCreate", tool_input={"prompt": "巡檢：列出"}, tool_response="Scheduled recurring job bbbb2222")
+        self.assertTrue(self.patrol(self.post("Agent", sid="s2", tool_response={"agentId": "a9"})), "別場對話的排程不算")
+
+    def test_stop_sync_uses_session_crons(self):
+        self.post("CronCreate", tool_input={"prompt": "巡檢：列出"}, tool_response="Scheduled recurring job cccc3333")
+        ug.patrol_sync({"session_id": "s1", "session_crons": []})
+        self.assertTrue(self.patrol(self.post("Agent", tool_response={"agentId": "a1"})), "Stop 看到排程已經不在（過期或被刪）：恢復提醒")
+        ug.patrol_sync({"session_id": "s1", "session_crons": [{"id": "dddd4444", "prompt": "巡檢：列出所有進行中的背景任務"}]})
+        self.assertFalse(self.patrol(self.post("Agent", tool_response={"agentId": "a2"})), "Stop 看到排程在：不提醒")
 
 
 class SubagentCompaction(unittest.TestCase):

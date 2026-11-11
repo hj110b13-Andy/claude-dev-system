@@ -739,9 +739,11 @@ def stale_rule_hits(cwd, limit=8):
     return out
 
 
-def align_msg(cwd, session_id=None, mark_only=False):
+def align_msg(cwd, session_id=None, mark_only=False, today=None):
     """回要注入的字串或 None。條件：算專案、有 CLAUDE.md、alignOnUpdate、已安裝版本的主.次版號 ≠ 這個資料夾上次記錄的。
-    mark_only=True：只記錄版本不注入（同一則已經在跑 init／audit，那兩個本來就照最新規則做）。"""
+    mark_only=True：只記錄版本不注入（同一則已經在跑 init／audit，那兩個本來就照最新規則做）。
+    0.25.0：同一個專案一天最多對照一次——2026-11-11 這個 repo 一天升了 5 個次版號，Stock-web 當天被要求對照 4 次以上。
+    當天已對照過又升版：不注入、也不更新記錄的版本，隔天第一則提示再一次對照「上次對照的版本之後的各版」。"""
     try:
         c = _pa_skip(cwd)
         if not c or not os.path.exists(os.path.join(c, "CLAUDE.md")):
@@ -761,11 +763,16 @@ def align_msg(cwd, session_id=None, mark_only=False):
         old = st.get(key)
         if _minor(old) == _minor(ver):
             return None
+        day = today or time.strftime("%Y-%m-%d")
+        if old and not mark_only and st.get("alignday|" + c.lower()) == day:
+            return None
         if not mark_only:
             is_git = os.path.exists(os.path.join(c, ".git"))
             if not is_git and _pa_count_sources(c)[0] < cfg["minSourceFiles"]:
                 return None
         st[key] = ver
+        if not mark_only:
+            st["alignday|" + c.lower()] = day
         _pa_save(st)
         if mark_only:
             return None
@@ -922,6 +929,29 @@ def _background_task_id(payload):
     return m.group(1) if m else ""
 
 
+PATROL_MARK = "巡檢"  # core.md 固定的巡檢排程 prompt 以這兩個字開頭
+
+
+def patrol_sync(payload):
+    """Stop：用官方欄位 session_crons 對一次「這場對話現在有沒有巡檢排程」（最準；排程過期、被刪、對話壓縮後都會被校正）。"""
+    try:
+        crons = payload.get("session_crons")
+        sid = str(payload.get("session_id") or "")
+        if not isinstance(crons, list) or not sid:
+            return
+        ids = [str((c or {}).get("id") or "?") for c in crons if PATROL_MARK in str((c or {}).get("prompt") or "")[:40]]
+        st = _pa_load()
+        rem = st.get("remind") if isinstance(st.get("remind"), dict) else {}
+        sess = rem.get(sid) if isinstance(rem.get(sid), dict) else {}
+        if sess.get("patrol", []) != ids:
+            sess["patrol"] = ids
+            rem[sid] = sess
+            st["remind"] = rem
+            _pa_save(st)
+    except Exception:
+        pass
+
+
 def tool_reminders(payload):
     """回要注入的提醒清單。四項：改安裝副本、派背景任務沒建巡檢、改被大量引用的模組、多人共用目錄的危險 git 指令。"""
     try:
@@ -936,6 +966,17 @@ def tool_reminders(payload):
         sess = rem.pop(sid, {})  # pop 再放回＝移到最後，修剪時留最近的對話
         rem[sid] = sess
         out = []
+        # 0.25.0：記住這場對話的巡檢排程。原本每派一個背景任務就提醒一次（0.14.1 為了「排程刪掉後再派要重建」），
+        # 排程明明還在也照跳——2026-11-11 這個 repo 的對話十幾次、Stock-web 8 次。現在排程在就不提醒，刪掉後再派才提醒。
+        if name == "CronCreate" and PATROL_MARK in str(ti.get("prompt") or "")[:40]:
+            r = payload.get("tool_response")
+            m = re.search(r"\b([0-9a-f]{6,12})\b", json.dumps(r, ensure_ascii=False) if not isinstance(r, str) else r)
+            sess["patrol"] = list(sess.get("patrol") or []) + [m.group(1) if m else "?"]
+        elif name == "CronDelete":
+            left = [x for x in sess.get("patrol") or [] if x != str(ti.get("id") or "")]
+            if left == sess.get("patrol") and "?" in left:
+                left.remove("?")  # 建立時沒抓到編號的那一筆
+            sess["patrol"] = left
 
         def once(k):
             if k in sess:
@@ -967,7 +1008,7 @@ def tool_reminders(payload):
         bg = name in ("Agent", "Task", "Workflow") or (name in ("Bash", "PowerShell") and (ti.get("run_in_background") is True or bool(tid)))
         if bg:
             en, mins = _task_check(cwd)
-            if en and once("taskcheck|" + tid if tid else "taskcheck"):
+            if en and not sess.get("patrol") and once("taskcheck|" + tid if tid else "taskcheck"):
                 out.append(f"【背景任務巡檢（hook）】剛派出背景任務，taskCheck.enabled=true → 先 `CronList`，這場對話還沒有巡檢排程就用 `CronCreate` 建每 {mins} 分鐘一次，"
                            "prompt 用 core.md「背景任務巡檢」那句固定文字；全部結束就 `CronDelete`。子 agent 忽略此則。" + _deferred_hint())
         if name in ("Bash", "PowerShell"):
@@ -1661,6 +1702,7 @@ def main():
         except Exception:
             event = ""
     if event == "Stop":  # 查證守門：只看回覆，不查用量
+        patrol_sync(payload)
         out = source_guard(payload)
         if out:
             print(json.dumps(out, ensure_ascii=True))
