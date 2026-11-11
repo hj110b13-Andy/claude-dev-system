@@ -438,6 +438,33 @@ class ReadAndDiff(Base):
         self.assertEqual((pa["claudeMdMaxLines"], pa["staleFiles"], pa["verifySkill"]), (250, 0, False), "0＝不檢查要能存")
         self.assertEqual(self.state()["project_auto"]["claudeMdMaxLines"], 250)
 
+    def test_sub_brief_roundtrip_and_defaults_match_hook(self):
+        # 0.22.0：設定視窗可開關「agent 開工補充」「交報告守門」；預設與 hook 的 _sub_cfg 相同
+        s = self.state()
+        self.apply(gm.form_from_state(s), s)
+        s = self.state()
+        self.assertEqual(s["sub_brief"], gm.DEFAULT_SUB_BRIEF)
+        f = gm.form_from_state(s)
+        self.assertEqual(gm.diff(s, f), [])
+        f.sub_brief["guard"] = False
+        self.assertTrue(any("agent 交報告守門=關" in c.text for c in gm.diff(s, f)))
+        self.assertEqual(self.apply(f, s), 0, chr(10).join(self.logs))
+        d = json.loads((self.lay.payload / "config" / "dispatch-config.json").read_text(encoding="utf-8"))
+        self.assertEqual((d["subagentBrief"]["enabled"], d["subagentBrief"]["guard"]), (True, False))
+        self.assertIn("$說明", d["subagentBrief"])
+        self.assertEqual(gm.export_profile(self.state(), gm.form_from_state(self.state()))["sub_brief"]["guard"], False)
+        sys.path.insert(0, str(REPO / "hooks"))
+        try:
+            import usage_guard as ug
+        finally:
+            sys.path.pop(0)
+        old = ug.CONFIG
+        ug.CONFIG = str(REPO / "no-such.json")
+        try:
+            self.assertEqual(ug._sub_cfg(tempfile.mkdtemp()), gm.DEFAULT_SUB_BRIEF)
+        finally:
+            ug.CONFIG = old
+
     def test_project_auto_defaults_match_hook_and_shipped_config(self):
         # 唯一來源守門：視窗預設、hook 內建預設、出廠設定檔三處數值相同
         sys.path.insert(0, str(REPO / "hooks"))

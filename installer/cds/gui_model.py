@@ -427,6 +427,35 @@ def write_project_auto(lay: Layout, auto: dict) -> None:
     write_json(p, d)
 
 
+# 0.22.0 派工補充與交報告守門（hooks/usage_guard.py 的 _sub_cfg 讀同一個鍵，預設值要相同）
+DEFAULT_SUB_BRIEF = {"enabled": True, "guard": True}
+
+
+def read_sub_brief(lay: Layout) -> dict:
+    out = dict(DEFAULT_SUB_BRIEF)
+    try:
+        t = read_json(lay.payload / "config" / "dispatch-config.json").get("subagentBrief") or {}
+    except Exception:  # noqa: BLE001
+        return out
+    for k in out:
+        if isinstance(t.get(k), bool):
+            out[k] = t[k]
+    return out
+
+
+def write_sub_brief(lay: Layout, sb: dict) -> None:
+    """只改 enabled／guard，$說明 等其他鍵保留。"""
+    p = lay.payload / "config" / "dispatch-config.json"
+    d = read_json(p) if p.exists() else {}
+    t = dict(d.get("subagentBrief")) if isinstance(d.get("subagentBrief"), dict) else {}
+    t.setdefault("$說明", "agent 開工時自動補上不會傳給它的東西（語言、工作目錄與分支、記憶內文路徑、自我核對清單）；guard＝交報告時核對，不合格退回一次。")
+    for k in DEFAULT_SUB_BRIEF:
+        t[k] = bool(sb.get(k, DEFAULT_SUB_BRIEF[k]))
+    d["subagentBrief"] = t
+    d["updated"] = _dt.date.today().isoformat()
+    write_json(p, d)
+
+
 def read_task_check(lay: Layout) -> dict:
     p = lay.payload / "config" / "dispatch-config.json"
     try:
@@ -562,6 +591,7 @@ def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.de
         "usage": read_usage(lay),
         "thresholds": read_thresholds(lay) if m else dict(DEFAULT_THRESHOLDS),
         "task_check": read_task_check(lay) if m else dict(DEFAULT_TASK_CHECK),
+        "sub_brief": read_sub_brief(lay) if m else dict(DEFAULT_SUB_BRIEF),
         "mem_gb": read_mem_gate(lay) if m else DEFAULT_MEM_GB,
         "project_auto": read_project_auto(lay) if m else dict(DEFAULT_PROJECT_AUTO),
         "chrome": {"extension": chrome_extension_installed(), "native_host": chrome_native_host_registered(),
@@ -589,6 +619,7 @@ class Form:
     usage_guard: bool = True
     source_guard: bool = True                          # Stop hook：回覆含年份／數字卻沒「來源」段就退回補一次（local.json sourceGuard）
     task_check: dict = field(default_factory=lambda: dict(DEFAULT_TASK_CHECK))
+    sub_brief: dict = field(default_factory=lambda: dict(DEFAULT_SUB_BRIEF))
     mem_gb: float = DEFAULT_MEM_GB                     # 重型工作記憶體門檻（GB）
     project_auto: dict = field(default_factory=lambda: dict(DEFAULT_PROJECT_AUTO))
 
@@ -598,6 +629,7 @@ def form_from_state(state: dict) -> Form:
     f.usage_guard = state["hooks"]["usage_guard_pref"]
     f.source_guard = state["hooks"].get("source_guard_pref", True)
     f.task_check = dict(state.get("task_check") or DEFAULT_TASK_CHECK)
+    f.sub_brief = {**DEFAULT_SUB_BRIEF, **(state.get("sub_brief") or {})}
     f.mem_gb = float(state.get("mem_gb", DEFAULT_MEM_GB))
     f.project_auto = dict(state.get("project_auto") or DEFAULT_PROJECT_AUTO)
     f.web_enabled = state["web"]["enabled"]
@@ -688,6 +720,11 @@ def diff(state: dict, form: Form) -> list[Change]:
     tc0 = state.get("task_check") or DEFAULT_TASK_CHECK
     if bool(form.task_check.get("enabled")) != bool(tc0["enabled"]) or int(form.task_check.get("minutes", tc0["minutes"])) != int(tc0["minutes"]):
         ch.append(Change("task_check", "背景任務巡檢 → " + (f"每 {int(form.task_check['minutes'])} 分鐘" if form.task_check.get("enabled") else "關閉")))
+    sb0 = {**DEFAULT_SUB_BRIEF, **(state.get("sub_brief") or {})}
+    sb_lab = {"enabled": "agent 開工自動補充", "guard": "agent 交報告守門"}
+    sb_changed = [k for k in DEFAULT_SUB_BRIEF if bool(form.sub_brief.get(k, sb0[k])) != bool(sb0[k])]
+    if sb_changed:
+        ch.append(Change("sub_brief", "派工 → " + "、".join(f"{sb_lab[k]}={'開' if form.sub_brief[k] else '關'}" for k in sb_changed)))
     if float(form.mem_gb) != float(state.get("mem_gb", DEFAULT_MEM_GB)):
         ch.append(Change("mem_gate", f"重型工作記憶體門檻：{float(state.get('mem_gb', DEFAULT_MEM_GB)):g} GB → {float(form.mem_gb):g} GB"))
     pa0 = {**DEFAULT_PROJECT_AUTO, **(state.get("project_auto") or {})}
@@ -785,6 +822,9 @@ def apply_form(lay: Layout, python: str, state: dict, form: Form, log, repo: Pat
     if any(c.kind == "mem_gate" for c in changes):
         write_mem_gate(lay, float(form.mem_gb))
         log(f"重型工作記憶體門檻寫入 {float(form.mem_gb):g} GB")
+    if any(c.kind == "sub_brief" for c in changes):
+        write_sub_brief(lay, form.sub_brief)
+        log(f"派工補充與交報告守門寫入：{form.sub_brief}")
     if any(c.kind == "task_check" for c in changes):
         write_task_check(lay, bool(form.task_check.get("enabled")), int(form.task_check.get("minutes", DEFAULT_TASK_CHECK["minutes"])))
         log(f"背景任務巡檢寫入：{'每 ' + str(int(form.task_check['minutes'])) + ' 分鐘' if form.task_check.get('enabled') else '關閉'}")
@@ -1045,6 +1085,7 @@ def export_profile(state: dict, form: Form, include_keys: bool = False, current_
          "video_enabled": form.video_enabled, "key_modes": dict(form.key_modes), "thresholds": dict(form.thresholds),
          "download_dir": form.download_dir, "chrome_default_enabled": form.chrome_default_enabled, "usage_guard": form.usage_guard,
          "source_guard": form.source_guard, "task_check": dict(form.task_check), "project_auto": dict(form.project_auto),
+         "sub_brief": dict(form.sub_brief),
          "mem_gb": float(form.mem_gb),
          "key_notes": {n: (form.key_notes.get(n) if form.key_notes.get(n) is not None else k.get("account", "")) for n, k in state["keys"].items()
                        if (form.key_notes.get(n) if form.key_notes.get(n) is not None else k.get("account", ""))}}
@@ -1080,6 +1121,8 @@ def import_profile(form: Form, data: dict) -> Form:
     for k in ("web_enabled", "video_enabled", "download_dir", "chrome_default_enabled", "usage_guard", "source_guard"):
         if k in data:
             setattr(f, k, data[k])
+    if isinstance(data.get("sub_brief"), dict):
+        f.sub_brief.update({k: v for k, v in data["sub_brief"].items() if k in DEFAULT_SUB_BRIEF and isinstance(v, bool)})
     for k in ("servers", "env", "key_modes", "thresholds", "task_check", "project_auto"):
         if isinstance(data.get(k), dict):
             vals = data[k]

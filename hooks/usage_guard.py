@@ -1087,19 +1087,26 @@ def _git_branch(cwd):
         return None
 
 
+def _sub_cfg(cwd):
+    """subagentBrief 設定：enabled＝開工補充、guard＝交報告守門。全域設定檔，再專案設定檔（優先），都沒有就預設開。"""
+    cfg = {"enabled": True, "guard": True}
+    for path in (CONFIG, os.path.join(cwd or os.getcwd(), PROJECT_CONFIG_REL)):
+        try:
+            with open(path, encoding="utf-8") as f:
+                t = (json.load(f) or {}).get("subagentBrief") or {}
+        except Exception:
+            continue
+        for k in cfg:
+            if isinstance(t.get(k), bool):
+                cfg[k] = t[k]
+    return cfg
+
+
 def subagent_brief(payload):
     """回要注入給剛派出的 agent 的字串或 None。設定：dispatch-config.json 的 subagentBrief.enabled（預設 true，專案優先）。"""
     cwd = payload.get("cwd") or os.getcwd()
-    enabled = True
-    for path in (CONFIG, os.path.join(cwd, PROJECT_CONFIG_REL)):
-        try:
-            with open(path, encoding="utf-8") as f:
-                v = ((json.load(f) or {}).get("subagentBrief") or {}).get("enabled")
-            if isinstance(v, bool):
-                enabled = v
-        except Exception:
-            continue
-    if not enabled:
+    cfg = _sub_cfg(cwd)
+    if not cfg["enabled"]:
         return None
     out = ["【派工補充（hook）】你是被派出的 agent。下面幾件事主對話有、但不會自動傳給你："]
     lang = _settings_language()
@@ -1118,8 +1125,124 @@ def subagent_brief(payload):
     out.append("- 規則：全域與專案 CLAUDE.md 對你同樣適用，派工單沒重寫不代表免除；兩者衝突時照派工單。主對話有 hook 會退回不合規的回覆，你沒有，交報告前自己逐項核對："
                "①上網查資料前先 Read `~/.claude/claude-dev-system/rules/web-quick.md` ②報告裡每個關鍵數字附出處（檔案路徑＋行或網址），推論另外標明 "
                "③回測、全套測試、build 開跑前先過 `resgate.py wait` ④只 `git add <自己改的檔>`，不 `add -A`、不 stash／reset 別人的變更 "
-               "⑤自己開的背景程序全部結束（依 PID 或埠號）。做不到的項目寫進報告，不可略過不提。")
+               "⑤自己開的背景程序全部結束（依 PID 或埠號）。做不到的項目寫進報告，不可略過不提。"
+               + ("交報告（SubagentHandback）時 hook 會核對語言、①、②、記憶與 commit 分支，不合格退回一次。" if cfg["guard"] else ""))
     return chr(10).join(out)
+
+
+# 0.22.0 交報告守門（PreToolUse：SubagentHandback）。使用者 2026-11-11：「還沒解決的繼續全都做完。」
+# 攔截點照官方文件與 issue：v2.1.271 起報告經 SubagentHandback 交出，SubagentStop 時報告已送達（code.claude.com/docs/en/hooks〈SubagentStop input〉）；
+# SubagentStop 還會被內部分支（agent_type 空字串）觸發（anthropics/claude-code#87065、#91910），所以不用它。
+SUB_WEB_TOOL = re.compile(r"^(?:WebSearch|WebFetch)$|^mcp__(?:exa|tavily|firecrawl|parallel|context7|deepwiki|mslearn)", re.I)
+SUB_COMMIT = re.compile(r"\bgit\b[^\n|;&]*\bcommit\b")
+SUB_CODE_PATH = re.compile(r"[\w\-./\\]*[\w\-]\.(?:py|ts|tsx|js|jsx|mjs|cjs|sql|sh|ps1|yml|yaml|toml|html|css)\b")
+SUB_CJK_LANG = ("chinese", "中文", "繁體", "zh")
+SUB_GUARD_STATE = os.path.join(STATE_DIR, "subagent-guard.json")
+SUB_MIN_NUMS = 3  # 自己定的：少於 3 個帶單位數字的報告不查出處（短回報、進度句）
+
+
+def _sub_cjk_ratio(text):
+    t = re.sub(r"```.*?```|`[^`]*`|https?://\S+|[\W\d_]", "", text or "", flags=re.S)
+    return (sum(1 for ch in t if "\u4e00" <= ch <= "\u9fff") / len(t)) if t else 1.0
+
+
+def _sub_scan(path):
+    """讀 agent 自己的對話紀錄：第一則派工說明、用過的工具、Read 過的路徑、Bash 指令。讀不到回 None（不擋）。"""
+    try:
+        prompt, tools, reads, cmds = None, [], [], []
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                c = (r.get("message") or {}).get("content")
+                if r.get("type") == "user" and prompt is None:
+                    prompt = c if isinstance(c, str) else " ".join(x.get("text", "") for x in c or [] if isinstance(x, dict))
+                if r.get("type") == "assistant" and isinstance(c, list):
+                    for x in c:
+                        if isinstance(x, dict) and x.get("type") == "tool_use":
+                            i = x.get("input") or {}
+                            tools.append(x.get("name") or "")
+                            if x.get("name") == "Read":
+                                reads.append(str(i.get("file_path") or ""))
+                            if x.get("name") in ("Bash", "PowerShell"):
+                                cmds.append(str(i.get("command") or ""))
+        return {"prompt": prompt or "", "tools": tools, "reads": reads, "cmds": cmds}
+    except Exception:
+        return None
+
+
+def _sub_transcript(payload):
+    aid = str(payload.get("agent_id") or "")
+    base = os.path.join(os.path.dirname(payload.get("transcript_path") or ""), str(payload.get("session_id") or ""), "subagents")
+    for name in (f"agent-{aid}.jsonl", f"{aid}.jsonl"):
+        p = os.path.join(base, name)
+        if aid and os.path.isfile(p):
+            return p
+    return None
+
+
+def subagent_report_judge(report, scan, lang, mem_dir):
+    """回不合格項目清單（字串）。scan 為 None（讀不到紀錄）時只查報告本身。純函式，測試直接呼叫。"""
+    bad = []
+    if lang and any(k in lang.lower() for k in SUB_CJK_LANG) and len(report) >= 80 and _sub_cjk_ratio(report) < 0.3:
+        bad.append(f"報告不是使用者設定的語言（{lang}）→ 整份改用該語言重寫。")
+    nums = len(SG_NUM.findall(report)) + len(SG_YEAR.findall(report))
+    if nums >= SUB_MIN_NUMS and not ("http://" in report or "https://" in report or "未附來源" in report
+                                     or sg_local_source(report) or SUB_CODE_PATH.search(report)):
+        bad.append(f"報告有 {nums} 個年份或帶單位數字，但沒有任何出處 → 每個關鍵數字旁寫檔案路徑（含行號）或網址；查不到的標〔未附來源〕。")
+    if scan is None:
+        return bad
+    blob = chr(10).join(scan["reads"] + scan["cmds"])
+    if any(SUB_WEB_TOOL.search(t) for t in scan["tools"]) and "web-quick" not in blob and "web-sources" not in blob:
+        bad.append("上網查了資料卻沒有先讀 `~/.claude/claude-dev-system/rules/web-quick.md` → 現在 Read 它，照〈回覆格式〉核對報告裡查到的事實（來源網址、日期、原句短引），不足的補查。")
+    if mem_dir and os.path.isfile(os.path.join(mem_dir, "MEMORY.md")) and "記憶索引" not in report:
+        key = os.path.basename(os.path.dirname(mem_dir)) + "/memory/"
+        norm = blob.replace(chr(92), "/")
+        if not re.search(re.escape(key) + r"(?!MEMORY\.md)[\w\-]+\.md", norm):
+            bad.append(f"沒有讀任何一條長期記憶的內文 → 看 context 裡的 MEMORY.md 索引，與這份工作有關的用 Read 讀內文（`{mem_dir}`）並照做、必要時修正成果；"
+                       "都無關就在報告加一行「記憶索引已看，無相關」。")
+    if any(SUB_COMMIT.search(c) for c in scan["cmds"]) and not re.search(r"分支|branch", scan["prompt"], re.I) and not re.search(r"分支|branch", report, re.I):
+        bad.append("派工說明沒有指定 commit 的分支，你卻 commit 了 → 不要自己 reset；在報告開頭寫明 commit hash、所在分支（`git branch --show-current`）與工作目錄，由 main 決定要不要搬。")
+    return bad
+
+
+def subagent_report_guard(payload):
+    """PreToolUse(SubagentHandback)：不合格就擋下這次交報告並說明要補什麼；同一個 agent 只擋一次。任何例外都放行。"""
+    try:
+        aid = str(payload.get("agent_id") or "")
+        if not aid or payload.get("agent_type") in SUB_LIGHT_TYPES or not _sub_cfg(payload.get("cwd"))["guard"]:
+            return None
+        report = str((payload.get("tool_input") or {}).get("message") or "")
+        if not report.strip():
+            return None
+        try:
+            with open(SUB_GUARD_STATE, encoding="utf-8") as f:
+                seen = json.load(f) or {}
+        except Exception:
+            seen = {}
+        if aid in seen:
+            return None
+        tp = _sub_transcript(payload)
+        mem = os.path.normpath(os.path.join(os.path.dirname(payload.get("transcript_path") or ""), "memory"))
+        bad = subagent_report_judge(report, _sub_scan(tp) if tp else None, _settings_language(), mem)
+        if not bad:
+            return None
+        now = time.time()
+        seen = {k: v for k, v in seen.items() if now - float(v) < 3 * 86400}
+        seen[aid] = now
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(SUB_GUARD_STATE, "w", encoding="utf-8") as f:
+            json.dump(seen, f)
+        with open(os.path.join(STATE_DIR, "source-guard.log"), "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} block-agent {aid} {len(bad)} 項：{'｜'.join(b[:24] for b in bad)}" + chr(10))
+        reason = ("【報告守門（hook）】這份報告還不能交，有 " + str(len(bad)) + " 項不合格：" + chr(10)
+                  + chr(10).join(f"{i}. {b}" for i, b in enumerate(bad, 1)) + chr(10)
+                  + "補完後再呼叫一次 SubagentHandback，交**完整報告**（不是只交補充的部分）。只退回這一次，之後不會再擋。")
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}
+    except Exception:
+        return None
 
 
 def main():
@@ -1136,6 +1259,12 @@ def main():
         out = source_guard(payload)
         if out:
             print(json.dumps(out, ensure_ascii=True))
+        return
+    if event == "PreToolUse":  # 0.22.0：只註冊在 SubagentHandback（agent 交報告）
+        if payload.get("tool_name") == "SubagentHandback":
+            out = subagent_report_guard(payload)
+            if out:
+                print(json.dumps(out, ensure_ascii=True))
         return
     if event == "SubagentStart":  # 0.21.0：把不會自動傳給 agent 的東西補進去
         msg = subagent_brief(payload)

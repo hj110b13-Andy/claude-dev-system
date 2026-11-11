@@ -96,7 +96,9 @@
   },
   "subagentBrief": {
     "$說明": "0.21.0：agent 開工時（SubagentStart）自動補上不會傳給它的東西——回覆語言、工作目錄與分支、記憶內文路徑、自我核對清單。enabled=false 完全不補。",
-    "enabled": true
+    "enabled": true,
+    "$守門": "0.22.0：guard＝agent 交報告（SubagentHandback）時核對：語言、數字有沒有出處、上網前有沒有讀 web-quick.md、有沒有讀相關記憶內文、派工單沒寫分支卻 commit。不合格退回一次要它補，同一個 agent 只退一次。",
+    "guard": true
   },
   "resourceGate": {
     "$說明": "0.16.0 重型工作記憶體閘門（唯一來源；tools/resgate.py、設定視窗都讀這裡）：回測、全套測試、build、影片轉逐字稿開跑前，可用實體記憶體 < minFreeMemGB 就每 pollSeconds 秒看一次、最多等 waitMinutes 分鐘；仍不足不跑，回報「記憶體不足、沒有執行」並登記延後清單（<CLAUDE_HOME>/state/deferred-jobs.json）。有 agent／背景任務完成時主對話先查記憶體，夠就依登記順序開跑延後的工作。設定視窗可改 minFreeMemGB（1～32）。",

@@ -316,6 +316,12 @@ class App:
         self._no_wheel_change(ttk.Spinbox(tcf, from_=1, to=120, width=5, textvariable=self.tc_min_var, command=self.update_diff)).pack(side="left")
         ttk.Label(tcf, text="分鐘自動檢查一次所有任務（結束或出錯就處理；全部結束就停；沒有任務時不會跑）").pack(side="left")
         self.tc_min_var.trace_add("write", lambda *a: self.update_diff())
+        sbf = ttk.Frame(core); sbf.pack(anchor="w", pady=4)
+        ttk.Label(sbf, text="派出的 agent：").pack(side="left")
+        self.sb_vars = {k: tk.BooleanVar(value=bool(f.sub_brief.get(k, gm.DEFAULT_SUB_BRIEF[k]))) for k in gm.DEFAULT_SUB_BRIEF}
+        for k, txt in (("enabled", "開工時自動補上語言、工作目錄與分支、記憶路徑、核對清單"),
+                       ("guard", "交報告時核對（語言、數字出處、記憶、分支），不合格退回一次")):
+            ttk.Checkbutton(sbf, text=txt, variable=self.sb_vars[k], command=self.update_diff).pack(side="left", padx=(0, 10))
         mgf = ttk.Frame(core); mgf.pack(anchor="w", pady=4)
         ttk.Label(mgf, text="重型工作記憶體門檻（GB）：").pack(side="left")
         self.mem_var = tk.StringVar(value=f"{float(f.mem_gb):g}")
@@ -506,6 +512,7 @@ class App:
             f.task_check = {"enabled": self.tc_var.get(), "minutes": max(1, int(self.tc_min_var.get()))}
         except ValueError:
             f.task_check = dict(self.state.get("task_check") or gm.DEFAULT_TASK_CHECK)
+        f.sub_brief = {k: v.get() for k, v in self.sb_vars.items()}
         try:
             f.mem_gb = gm.valid_mem_gb(self.mem_var.get())
         except ValueError:
@@ -949,6 +956,8 @@ class App:
         self.sguard_var.set(f.source_guard)
         self.tc_var.set(bool(f.task_check.get("enabled")))
         self.tc_min_var.set(str(int(f.task_check.get("minutes", gm.DEFAULT_TASK_CHECK["minutes"]))))
+        for k, v in self.sb_vars.items():
+            v.set(bool(f.sub_brief.get(k, v.get())))
         self.mem_var.set(f"{float(f.mem_gb):g}")
         for k, v in self.pa_vars.items():
             v.set(bool(f.project_auto.get(k, v.get())))

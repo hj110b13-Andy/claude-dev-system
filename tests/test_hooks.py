@@ -474,6 +474,103 @@ class SubagentBrief(unittest.TestCase):
         self.assertEqual(len(s["hooks"]["SubagentStart"]), 1)
 
 
+class SubagentReportGuard(unittest.TestCase):
+    """0.22.0：agent 交報告（PreToolUse SubagentHandback）時核對，不合格退回一次。"""
+    ZH = "已完成稽核，三個模組都改好並通過測試，細節如下。" * 6
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.old = (ug.HOME, ug.CONFIG, ug.STATE_DIR, ug.SUB_GUARD_STATE)
+        ug.HOME = str(self.tmp / "home")
+        ug.CONFIG = str(self.tmp / "home" / "nope.json")
+        ug.STATE_DIR = str(self.tmp / "state")
+        ug.SUB_GUARD_STATE = str(self.tmp / "state" / "subagent-guard.json")
+        (self.tmp / "home").mkdir()
+        (self.tmp / "home" / "settings.json").write_text(json.dumps({"language": "chinese"}), encoding="utf-8")
+        self.proj = self.tmp / "projects" / "slug"
+        self.mem = self.proj / "memory"
+        (self.proj / "sess" / "subagents").mkdir(parents=True)
+        self.cwd = self.tmp / "work"
+        self.cwd.mkdir()
+
+    def tearDown(self):
+        ug.HOME, ug.CONFIG, ug.STATE_DIR, ug.SUB_GUARD_STATE = self.old
+
+    def agent(self, aid, prompt, uses):
+        rows = [{"type": "user", "message": {"role": "user", "content": prompt}}]
+        for name, inp in uses:
+            rows.append({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": name, "input": inp}]}})
+        (self.proj / "sess" / "subagents" / f"agent-{aid}.jsonl").write_text(
+            chr(10).join(json.dumps(r, ensure_ascii=False) for r in rows) + chr(10), encoding="utf-8")
+
+    def call(self, aid, report, agent_type="general-purpose"):
+        return ug.subagent_report_guard({"hook_event_name": "PreToolUse", "tool_name": "SubagentHandback", "tool_input": {"message": report},
+                                         "agent_id": aid, "agent_type": agent_type, "session_id": "sess", "cwd": str(self.cwd),
+                                         "transcript_path": str(self.proj / "sess.jsonl")})
+
+    def reason(self, out):
+        return out["hookSpecificOutput"]["permissionDecisionReason"]
+
+    def test_clean_report_passes(self):
+        self.agent("a1", "整理文件", [("Read", {"file_path": "x.md"})])
+        self.assertIsNone(self.call("a1", self.ZH))
+
+    def test_english_report_blocked_once_then_allowed(self):
+        self.agent("a2", "do it", [])
+        out = self.call("a2", "All three modules were refactored and every test passes; details follow below. " * 4)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("語言", self.reason(out))
+        self.assertIsNone(self.call("a2", "Still English but the second attempt must go through. " * 4), "同一個 agent 只擋一次")
+
+    def test_numbers_without_any_source_blocked_and_path_passes(self):
+        self.agent("a3", "跑回測", [])
+        rep = self.ZH + "年化報酬 35.0%、最大回檔 37.2%、勝率 61%。"
+        self.assertIn("出處", self.reason(self.call("a3", rep)))
+        self.agent("a4", "跑回測", [])
+        self.assertIsNone(self.call("a4", rep + "出處 docs/backtest/2026-11-10-result.md 第 12 行。"))
+
+    def test_web_without_web_quick_blocked(self):
+        self.agent("a5", "查文件", [("mcp__exa__web_search_exa", {"query": "x"})])
+        self.assertIn("web-quick.md", self.reason(self.call("a5", self.ZH)))
+        self.agent("a6", "查文件", [("Read", {"file_path": "C:/u/.claude/claude-dev-system/rules/web-quick.md"}), ("WebSearch", {"query": "x"})])
+        self.assertIsNone(self.call("a6", self.ZH))
+
+    def test_memory_bodies_unread_blocked_unless_read_or_declared(self):
+        self.mem.mkdir()
+        (self.mem / "MEMORY.md").write_text("- [a](a.md) — b", encoding="utf-8")
+        self.agent("a7", "改程式", [("Read", {"file_path": str(self.mem / "MEMORY.md")})])
+        self.assertIn("長期記憶", self.reason(self.call("a7", self.ZH)))
+        self.agent("a8", "改程式", [("Read", {"file_path": str(self.mem / "a.md")})])
+        self.assertIsNone(self.call("a8", self.ZH))
+        self.agent("a9", "改程式", [])
+        self.assertIsNone(self.call("a9", self.ZH + "記憶索引已看，無相關。"))
+
+    def test_commit_without_branch_in_prompt_blocked(self):
+        self.agent("b1", "改完 commit", [("Bash", {"command": "git add a.py && git commit -m x -- a.py"})])
+        self.assertIn("分支", self.reason(self.call("b1", self.ZH)))
+        self.agent("b2", "改完 commit 到分支 main", [("Bash", {"command": "git commit -m x -- a.py"})])
+        self.assertIsNone(self.call("b2", self.ZH))
+
+    def test_skips_readonly_agents_missing_transcript_and_disabled(self):
+        self.assertIsNone(self.call("c1", "All English report from the explore agent, long enough to trip the check. " * 3, "Explore"))
+        self.assertIsNone(self.call("c2", self.ZH), "讀不到紀錄只查報告本身，中文報告放行")
+        (self.cwd / ".claude").mkdir()
+        (self.cwd / ".claude" / "dispatch-config.json").write_text(json.dumps({"subagentBrief": {"guard": False}}), encoding="utf-8")
+        self.assertIsNone(self.call("c3", "English only report that would otherwise be blocked by the guard for sure. " * 3))
+        self.assertIn("交報告", ug.subagent_brief({"cwd": str(self.tmp), "agent_type": "general-purpose"}))
+        self.assertNotIn("不合格退回一次", ug.subagent_brief({"cwd": str(self.cwd), "agent_type": "general-purpose"}))
+
+    def test_installer_registers_pretooluse_on_handback(self):
+        sys.path.insert(0, str(REPO / "installer"))
+        try:
+            from cds import settings_ops
+        finally:
+            sys.path.pop(0)
+        self.assertIn(("PreToolUse", "SubagentHandback"), settings_ops.HOOK_SPECS)
+        s, _ = settings_ops.add_hooks({}, "py -3 x.py # claude-dev-system")
+        self.assertEqual(s["hooks"]["PreToolUse"][0]["matcher"], "SubagentHandback")
+
+
 class RecoGuard(unittest.TestCase):
     """0.19.0：建議沒標已查證／未查證要退回；「不含待查證事實」不能蓋過研究結論。"""
     LONG = "說明" * 120
