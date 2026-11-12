@@ -1,6 +1,22 @@
 # claude-dev-system 交接紀錄
 
-## 全方位健檢進度（2026-11-11 22:1x 開工；做完前這節放最上面）
+## 全方位健檢（2026-11-11 22:1x 開工、2026-11-12 23:4x 完成並發布 v0.27.0）
+
+**結果**：五個階段都做完。問題 116 條（P1 17、P2 43、P3 56）：修 108、依判斷不改 5、部分處理 3；測試 187 → 488 項、覆蓋率 61% → 72%；CI 改成每次 push 跑 Windows 的 Python 3.10／3.12／3.14（ubuntu、macos 手動觸發，2026-11-12 第一次全過）。本機已 `update` 到 0.27.0、`verify` 49 項全 ✅；update 前後 settings.json 只差 PostToolUse 的 matcher 多了 Monitor。完整內容：`PROJECT-AUDIT-REPORT.md`（逐條）、`PROJECT-STATUS.md`（狀態與限制）、`docs/PROJECT-ISSUES.md`（還開著的 7 條）、`docs/ARCHITECTURE.md`、CHANGELOG 0.27.0。
+
+**還沒做的（都要人來做或決定，寫在報告 F 節）**：
+- 開一次設定視窗實際點一輪（數值填錯的提示、套用失敗不關窗、開窗自動檢查 exe）：視窗層的改動只有邏輯測試與讀碼，沒有開視窗看過。
+- 另一台裝置更新到 0.27.0：先 `update` 再 `verify`（那台家目錄若是 8.3 短檔名，順序反過來會多看到 hook「異常」）。
+- `--usage-guard off` 現在明寫是關掉整支 hook；如果要的是「只關用量提醒、其他守門照常」，那是新功能、要另外做。
+- `%TEMP%` 裡健檢留下的 `cds-audit-*`、`fixhook-*` 等暫存資料夾（agent 的清理指令被擋）：`py -3 ~/.claude/claude-dev-system/tools/cleanup.py` 看清單。
+- 還開著的技術債：四個大檔沒拆、三份設定讀取沒合併、視窗層與影片連網路徑沒有自動化測試、macOS／Linux 沒有實機驗證（`docs/PROJECT-ISSUES.md`）。
+
+**驗證方式**：`py -3 tools/resgate.py run --desc "全套測試" -- py -3 -m unittest discover -s tests`（488 項、略過 3）；`py -3 installer/install.py verify`；推到 `ci/all-os/<名稱>` 分支看五個環境的 CI；`gh release view v0.27.0` 確認 exe 與 .sha256。
+
+決策：2026-11-12｜視窗、工具甲、工具乙三個修正工作中途從 opus 改派 sonnet／high｜規格已逐條寫死、5 小時額度兩度用盡（同時還有 Stock-web 的對話在消耗）｜三個分支都一次做完、全套測試通過；之後由一個 opus agent 獨立審查整批修改，找到 7 條（4 條在這三個分支、3 條在別處）。
+決策：2026-11-12｜三份設定讀取（procs／resgate／hook）不合併｜hook 的測試靠改模組常數隔離、另兩支讀環境變數，硬合併會讓測試隔離失效｜`PROJECT-AUDIT-REPORT.md` TA-20。
+
+### 過程紀錄（以下是做的當下寫的，原文保留）
 
 **交辦**：使用者要求照 `C:\Users\88691\Documents\Claude\專案全方位深度健檢與最終完善.txt`（404 行）對這個 repo 做完整健檢並修到完。使用者原話：「這一路都無視用量守門與額度警告等等，直到做完前都不要中斷也不要停下來，如果到用量上限，就設排程等用量重置後立馬接著做。」「開始動作後就不要再詢問我任何問題，一路全部做到完。」
 
@@ -8,7 +24,7 @@
 
 **使用者 2026-11-11 22:3x 追加授權（原話）**：「檔中要先取得同意的項目（不可逆刪除、安全設定等），全部我都授權你可以直接改動，能改動就改動，不要只是紀錄而已。」→ 健檢文件裡「先取得同意再執行」的項目直接做（原本的預設是只記錄不做，已作廢）；刪除前仍先確認 git 可回復或另存備份。
 
-**排程（只活在這場對話）**：巡檢 `ac36987f`（每 15 分）、接續健檢 `8a7bce27`（每 30 分，用量重置後自動接著做）。全部做完要 CronDelete 兩個。
+**排程（只活在這場對話）**：巡檢 `ac36987f`（每 15 分）、接續健檢 `8a7bce27`（每 30 分，用量重置後自動接著做）。全部做完要 CronDelete 兩個。（發布後已刪。過程中 5 小時用量共撞上限 5 次，都由接續排程在重置後接著做。）
 
 **基準（改之前）**：v0.26.1、工作樹乾淨、`py -3 -m unittest discover -s tests` 187 項通過（輸出存 scratchpad `baseline-tests.txt`）；盤點 `docs/PROJECT-INVENTORY.md`（原始碼 19、測試 9、腳本 9；循環依賴 0；單檔 >800 行 4 個）。
 
@@ -22,7 +38,7 @@
   - main 讀碼發現、還沒實跑確認的：(1) `commands.py` `_prune_backups` 只留最近 10 份後，`uninstall --restore-backup` 用 `backups` 第一筆當「安裝前備份」——超過 10 次 update 後第一筆已不是安裝前那份，還原會把本工具的 hook 條目（指向已刪的腳本）寫回 settings.json；(2) `web_config` 每次都備份但不修剪，備份無上限；(3) `release.yml` 只在推 tag 時跑測試，平常 push master 沒有 CI；(4) `project-scan.py` 在這個 repo 找不到入口（`install.py` 等有 `__main__`）。
   - 覆蓋率量測：背景指令在等記憶體閘門（22:4x 可用 1.6 GB < 3 GB，VSCode 佔 6.9 GB）；沒跑成會登記延後清單，之後 `py -3 tools/resgate.py next`。設定檔 scratchpad `main/coveragerc`、`main/covsite/sitecustomize.py`。
   - 注意：基準那次全套測試 main 是直接跑、沒過記憶體閘門（違反規則，之後都用 `resgate.py run`）。
-- 第二階段 問題修復與架構改善：**進行中（2026-11-12 02:0x 派出）**
+- 第二階段 問題修復與架構改善：**完成（2026-11-12 02:0x 派出、18:3x 做完；含獨立審查的 7 條與 CI 發現的 4 條）**
   - 基準 commit `4ed2108`（master，本機、還沒 push）：VERSION 0.27.0、`tests/test_cli.py`、CHANGELOG 開頭。
   - 5 個修正 agent（opus／high）各在 main 用 `git worktree add` 建的 worktree 裡改、commit 到自己的分支、不 push：`.claude/worktrees/fix-installer`→`audit/fix-installer`（commands、web、fsio、paths、claudemd、manifest、checks、install.py）；`fix-gui`→`audit/fix-gui`（gui.py、gui_model.py、appdir.py）；`fix-hook`→`audit/fix-hook`（hooks/usage_guard.py）；`fix-tools-a`→`audit/fix-tools-a`（resgate、procs、cleanup、video）；`fix-tools-b`→`audit/fix-tools-b`（project-scan、depgraph、moduleInventory、agent-audit、progress-diff＋兩個 skill 的閘門寫法）。每份派工的逐條做法寫在派工說明裡（對應六份 findings 檔的編號）。
   - **2026-11-12 06:1x 現況**：02:1x 五個 agent 才開工就撞 5 小時上限（06:10 重置）。重置後 hook、安裝器用 SendMessage 叫回原 agent（opus）接著做；視窗、工具甲、工具乙改派 sonnet／high 新 agent 接手同一個 worktree（規格從舊 agent 的紀錄取出存成 scratchpad `main/spec-fix-{gui,tools-a,tools-b}.md`；理由：規格已逐條寫死、兩度把 5 小時額度用盡）。7 天用量 06:12 是 56%。
@@ -42,9 +58,9 @@
   - agent 交回後 main 要做：逐條分支看 diff → `git merge --squash` 進 master（一個模組一個 commit）→ 全套測試 → 重跑 scratchpad `audit-*/` 的重現腳本確認壞行為消失 → `git worktree remove`＋刪分支。
   - 決策：2026-11-12｜「安裝前備份」用備份紀錄的選用鍵 `preInstall`，**不升 `MANIFEST_SCHEMA`**｜舊版 exe 的 `gui_model.read_state` 直接呼叫 `mf.load`、讀到較新的 schema 會丟 RuntimeError（還沒換新的 exe 會整個讀不了狀態）；選用鍵舊程式忽略即可、被舊程式修剪掉時新程式只會拒絕還原（安全）｜`installer/cds/gui_model.py:541`、`manifest.py:60`。
   - main 自己做（不跟 agent 的檔衝突）：`.github/workflows/`（release.yml 升 action 大版、加 tag 對 VERSION 的檢查；新增平常 push 就跑的 tests.yml）、文件與規則的不一致（findings-docs 的 DC-01～22、IN-14、TA-03 的規則句子）、合併後才能做的跨模組項目（HK-10 Monitor matcher 在 `settings_ops.py`、TB-07 hook 改呼叫 project-scan 的計數函式、TA-20 三份設定讀取要不要合併）、`docs/ARCHITECTURE.md`、`docs/PROJECT-ISSUES.md`、依賴閘門測試。
-- 第三階段 完整測試與回歸驗證：未開始
-- 第四階段 專案整理與文件更新（PROJECT-AUDIT-REPORT.md、PROJECT-STATUS.md、CHANGELOG、README、docs/ARCHITECTURE.md、docs/PROJECT-ISSUES.md）：未開始
-- 第五階段 最終驗收與報告交付（升版、update、verify、push、tag、Release）：未開始
+- 第三階段 完整測試與回歸驗證：**完成**——本機全套 488 項通過；19 支重現腳本重跑；CI 試跑四輪（run 43161477608、43199140723、43199910616、43245527060），第四輪五個環境全過；打包流程試跑 run 43199183411 成功。
+- 第四階段 專案整理與文件更新（PROJECT-AUDIT-REPORT.md、PROJECT-STATUS.md、CHANGELOG、README、docs/ARCHITECTURE.md、docs/PROJECT-ISSUES.md）：**完成**（`6abae4e`）；文件改寫用新版 progress-diff 逐檔比對 19 個檔，列出的 34 句都是刻意更正。
+- 第五階段 最終驗收與報告交付（升版、update、verify、push、tag、Release）：**完成**——本機 update＋verify 於 2026-11-12 23:3x；推送、tag v0.27.0、Release 附件確認見這節最上面與 git 紀錄。
 
 ## 接手狀態（2026-11-11 21:1x）
 
