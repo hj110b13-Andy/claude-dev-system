@@ -43,6 +43,25 @@ def claude_code_status(repo: Path = REPO) -> tuple[bool | None, str]:
     return ok, f"Claude Code {raw}；相容範圍 ≥{c['min']} 且 <{c['maxExclusive']}" + (tested if ok else "（超出範圍）")
 
 
+def settings_error(p: Path) -> str | None:
+    """唯一來源：settings.json 能不能被安裝器安全讀寫。不存在回 None（安裝時會建立）；有問題回一行「檔名＋原因＋怎麼修」。
+    check（env_report）與 install／update／uninstall 的寫入前預檢都呼叫這裡。"""
+    if not p.exists():
+        return None
+    raw = p.read_bytes()
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return f"{p} 開頭有 UTF-8 BOM，不是合法 JSON：請用編輯器另存成「UTF-8（無 BOM）」後重跑（安裝器不會覆寫這個檔）"
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except UnicodeDecodeError as e:
+        return f"{p} 不是 UTF-8 編碼（位置 {e.start}）：請另存成 UTF-8 後重跑（安裝器不會覆寫這個檔）"
+    except ValueError as e:
+        return f"{p} 不是合法 JSON：{e}（請先修好，安裝器不會覆寫壞檔）"
+    if not isinstance(data, dict):
+        return f"{p} 最外層必須是物件（{{...}}），現在是 {type(data).__name__}：請改成 {{}} 或修好後重跑（安裝器不會覆寫這個檔）"
+    return None
+
+
 def env_report(home: Path, repo: Path = REPO) -> list[tuple[str, bool | None, str]]:
     """回傳 [(項目, 通過?, 說明)]；通過? None＝警告不擋。"""
     c = compat(repo)
@@ -61,11 +80,8 @@ def env_report(home: Path, repo: Path = REPO) -> list[tuple[str, bool | None, st
     rows.append(("設定目錄", home.is_dir() or None, str(home) + ("" if home.is_dir() else "（不存在，安裝時會建立）")))
     st = home / "settings.json"
     if st.exists():
-        try:
-            json.loads(st.read_text(encoding="utf-8"))
-            rows.append(("settings.json", True, f"{st}（可解析）"))
-        except Exception as e:  # noqa: BLE001
-            rows.append(("settings.json", False, f"{st} 不是合法 JSON：{e}（請先修好，安裝器不會覆寫壞檔）"))
+        err = settings_error(st)
+        rows.append(("settings.json", False, err) if err else ("settings.json", True, f"{st}（可解析）"))
     else:
         rows.append(("settings.json", None, f"{st} 不存在（安裝時會建立）"))
     md = home / "CLAUDE.md"

@@ -3,26 +3,60 @@ from __future__ import annotations
 
 import copy
 import datetime as _dt
-import py_compile
+import functools
 import shutil
+import sys
 from pathlib import Path
 
 from . import HOOK_MARK, SKILL_MARKER_FILE
 from . import claudemd, manifest as mf, payload, settings_ops, video, web
-from .checks import claude_code_status, parse_ver
-from .fsio import atomic_write_bytes, read_json, sha256_bytes, sha256_file, write_json
+from .checks import claude_code_status, parse_ver, settings_error
+from .fsio import LockBusy, acquire_lock, atomic_write_bytes, read_json, release_lock, sha256_bytes, sha256_file, write_json
 from .paths import REPO, Layout, repo_version
 
 OK, BAD, WARN = "✅", "❌", "⚠️"
-LF, CRLF = chr(10), chr(13) + chr(10)
+
+
+LOCK_NAME = ".install.lock"  # <home>/claude-dev-system/.install.lock；不進 manifest 的 files
+
+
+def _locked(fn):
+    """IN-06：同一個設定目錄同時只跑一個會寫入的子命令（apply／web_config／video_config／uninstall）。
+    用作業系統層級的檔案鎖：程序結束或被殺時系統自動釋放，沒有「殘留鎖要等逾時」的問題。拿不到鎖回 (2, [一行說明])。
+    沒有安裝紀錄（還沒裝、或剛解除安裝）時，結束後把鎖檔與空的 claude-dev-system 資料夾一起清掉，不留痕跡。"""
+    @functools.wraps(fn)
+    def wrapper(lay: Layout, *args, **kwargs):
+        lock = lay.payload / LOCK_NAME
+        try:
+            fd = acquire_lock(lock)
+        except LockBusy:
+            return 2, [f"另一個安裝程序正在執行（設定目錄 {lay.home}）；等它結束再重跑"]
+        try:
+            return fn(lay, *args, **kwargs)
+        finally:
+            release_lock(fd)
+            if not lay.manifest.exists():
+                for clean in (lock.unlink, lay.payload.rmdir):  # rmdir 只刪空資料夾；別的程序剛好又打開鎖檔時刪不掉，略過
+                    try:
+                        clean()
+                    except OSError:
+                        pass
+    return wrapper
+
+
+def _ver(s) -> tuple:
+    """版本比較用的唯一來源：解析不出來（None、"0"、亂寫）一律當 (0, 0, 0)，不讓比較丟 TypeError（IN-12）。"""
+    return parse_ver(str(s or "")) or (0, 0, 0)
 
 
 def _ts() -> str:
     return _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
-def backup(lay: Layout, log: list) -> dict:
-    """備份 settings.json 與 CLAUDE.md 到 <home>/backups/claude-dev-system-<時間>*。"""
+def backup(lay: Layout, log: list, pre_install: bool = False) -> dict:
+    """備份 settings.json 與 CLAUDE.md 到 <home>/backups/claude-dev-system-<時間>*。
+    pre_install：第一次 install 那筆（安裝前的原狀）記 "preInstall": true——安裝前沒有 settings.json 時 settings 為 None 也照記，
+    `--restore-backup` 才知道「安裝前根本沒有這個檔」，不會拿安裝後的備份來還原（2026-11-12 健檢 main 實跑確認）。"""
     lay.backups.mkdir(parents=True, exist_ok=True)
     base = f"claude-dev-system-{_ts()}"
     n = 0
@@ -30,6 +64,8 @@ def backup(lay: Layout, log: list) -> dict:
         n += 1
         base = f"claude-dev-system-{_ts()}-{n}"
     rec = {"settings": None, "claudeMd": None, "at": _dt.datetime.now().isoformat(timespec="seconds")}
+    if pre_install:
+        rec["preInstall"] = True  # 選用鍵（不升 MANIFEST_SCHEMA：舊版 exe 讀到較新的 schema 會直接丟錯；舊程式會忽略這個鍵）
     if lay.settings.exists():
         dst = lay.backups / f"{base}.json"
         shutil.copy2(lay.settings, dst)
@@ -44,27 +80,72 @@ def backup(lay: Layout, log: list) -> dict:
 
 
 KEEP_BACKUPS = 10
+LEGACY_PRE_INSTALL_WINDOW = 120  # 秒；0.27.0 前的紀錄沒有 preInstall 旗標，第一筆的時間在 installedAt 之後這麼久以內才當成安裝前那筆（自己加的門檻：install 時兩個時間只差 0～1 秒）
 
 
-def _prune_backups(items: list, log: list) -> list:
-    """每次 apply 都備份，只留最近 KEEP_BACKUPS 份，舊的連檔案一起刪（原本無限增長）。"""
-    keep, drop = items[-KEEP_BACKUPS:], items[:-KEEP_BACKUPS]
+def _pre_install_index(items: list, installed_at) -> int | None:
+    """唯一來源：backups 清單裡「安裝前」那筆的索引。有 preInstall 旗標的優先；整份都沒有旗標（0.27.0 前的舊紀錄）時，
+    只有第一筆的 at 在 installedAt 之後 LEGACY_PRE_INSTALL_WINDOW 秒內才算（update 超過 KEEP_BACKUPS 次後第一筆早被修剪，那時就回 None）。"""
+    for i, b in enumerate(items):
+        if isinstance(b, dict) and b.get("preInstall"):
+            return i
+    if not items or not isinstance(items[0], dict) or not installed_at:
+        return None
+    try:
+        delta = (_dt.datetime.fromisoformat(str(items[0].get("at"))) - _dt.datetime.fromisoformat(str(installed_at))).total_seconds()
+    except (TypeError, ValueError):
+        return None
+    return 0 if 0 <= delta <= LEGACY_PRE_INSTALL_WINDOW else None
+
+
+def pre_install_backup(m: dict) -> dict | None:
+    """安裝前那筆備份紀錄（找不到回 None）。uninstall 的「還原原排版」與 `--restore-backup` 都只用這個函式。"""
+    items = list((m or {}).get("backups") or [])
+    i = _pre_install_index(items, (m or {}).get("installedAt"))
+    return None if i is None else items[i]
+
+
+def _prune_backups(items: list, log: list, installed_at=None) -> list:
+    """每次 apply／web 都備份；安裝前那筆永遠保留，其他只留最近 KEEP_BACKUPS-1 份，舊的連檔案一起刪（原本無限增長）。"""
+    pre = _pre_install_index(items, installed_at)
+    rest = [b for i, b in enumerate(items) if i != pre]
+    n_rest = KEEP_BACKUPS - 1 if pre is not None else KEEP_BACKUPS
+    keep_rest, drop = rest[-n_rest:], rest[:-n_rest]
     for b in drop:
         for k in ("settings", "claudeMd"):
-            if b.get(k):
+            if isinstance(b, dict) and b.get(k):
                 Path(b[k]).unlink(missing_ok=True)
     if drop:
-        log.append(f"清掉 {len(drop)} 份較舊的備份（只留最近 {KEEP_BACKUPS} 份）")
-    return keep
+        log.append(f"清掉 {len(drop)} 份較舊的備份（只留安裝前那份＋最近 {n_rest} 份）")
+    return ([items[pre]] if pre is not None else []) + keep_rest
 
 
-def _md_text(p: Path) -> tuple[str, str]:
-    """讀 CLAUDE.md 不轉換換行；回 (內容, 這個檔用的換行)。使用者的檔是 CRLF 就維持 CRLF，區塊外才真的一字不動。"""
+def _md_text(p: Path) -> str:
+    """讀 CLAUDE.md 原文、不轉換換行。使用者的檔是 CRLF 就維持 CRLF，區塊外才真的一字不動。
+    IN-09：原本整檔先轉 LF、寫回時整檔換成同一種換行，混合換行的檔區塊外位元組會變；現在只換區塊本身（claudemd.upsert／remove），
+    雜湊在 claudemd.block_hash 裡以 LF 正規化（與舊紀錄相容）。"""
     if not p.exists():
-        return "", LF
-    t = p.read_bytes().decode("utf-8")
-    nl = CRLF if CRLF in t else LF
-    return t.replace(CRLF, LF), nl  # 內部一律 LF 處理（雜湊、分隔、區塊比對才一致），寫回時換成 nl
+        return ""
+    return p.read_bytes().decode("utf-8")
+
+
+def _preflight(lay: Layout, web_on: bool = False) -> None:
+    """IN-04：任何備份與寫入之前先確認讀得懂使用者的檔，否則丟一行「檔名＋原因＋怎麼修」的 ValueError（install.py 印成 ❌、結束碼 2）。
+    原本是寫到一半才丟錯：payload 27 個檔與 7 條 hook 已寫、manifest 沒存，修好重裝後 createdKeys 變空，解除安裝留下空的 hooks 鍵。"""
+    err = settings_error(lay.settings)
+    if err:
+        raise ValueError(err)
+    if lay.claude_md.exists():
+        try:
+            t = lay.claude_md.read_bytes().decode("utf-8")
+        except UnicodeDecodeError as e:
+            raise ValueError(f"{lay.claude_md} 不是 UTF-8 編碼（位置 {e.start}；例如用 Big5／cp950 存的）：請用編輯器另存成 UTF-8 後重跑") from None
+        try:
+            claudemd.find_block(t)
+        except ValueError as e:
+            raise ValueError(f"{lay.claude_md}：{e}") from None
+    if web_on:
+        web.load_local(lay)  # local.json 壞掉時這裡就丟（訊息已含檔名），不要等到檔案寫了一半
 
 
 def _read_settings(lay: Layout) -> tuple:
@@ -84,6 +165,15 @@ def _sync_files(lay: Layout, repo: Path, version: str, old: dict, new: dict, for
             conflicts.add(sk)
             log.append(f"{WARN} skills/{sk} 已存在且不是本工具裝的，略過不覆蓋（改名或移走後重跑 update）")
     extra = []
+    old_extra = set(old.get("extraFiles", []))
+
+    def clear_new(rel: str) -> None:
+        """IN-11：這個檔已和新版一致（使用者改回來、或被 --force 覆蓋）時，之前留的 <rel>.new 已沒用，刪掉並從 extraFiles 拿掉。"""
+        nrel = rel + ".new"
+        if nrel in old_extra and (home / nrel).exists():
+            (home / nrel).unlink()
+            log.append(f"移除已不需要的 {nrel}（{rel} 已與新版一致）")
+
     for rel, data in desired.items():
         parts = rel.split("/")
         if parts[0] == "skills" and parts[1] in conflicts:
@@ -92,6 +182,7 @@ def _sync_files(lay: Layout, repo: Path, version: str, old: dict, new: dict, for
         cur, want, rec = sha256_file(p), sha256_bytes(data), old["files"].get(rel)
         if cur == want:
             new["files"][rel] = want
+            clear_new(rel)
             continue
         if cur is not None and rec is not None and cur != rec and not force:
             new["files"][rel] = rec  # 保留使用者改動；紀錄維持舊雜湊，verify 標「使用者已修改」
@@ -109,13 +200,14 @@ def _sync_files(lay: Layout, repo: Path, version: str, old: dict, new: dict, for
             continue
         atomic_write_bytes(p, data)
         new["files"][rel] = want
+        clear_new(rel)
         log.append(("更新 " if cur else "新增 ") + rel)
     stale = {f"{r}.new" for r in payload.USER_EDITABLE}  # 0.9.6 前每次 update 都會生的 dispatch-config.json.new：清掉
     for rel in stale:
         if (home / rel).exists():
             (home / rel).unlink()
             log.append(f"移除多餘的 {rel}（設定檔本來就可改，不需新版副本）")
-    new["extraFiles"] = sorted((set(old.get("extraFiles", [])) | set(extra)) - stale)
+    new["extraFiles"] = sorted(x for x in (old_extra | set(extra)) - stale if (home / x).exists())  # 已不存在的（清掉的、使用者自己刪的）不再登記
     for rel, rec in old["files"].items():
         if rel in desired:
             continue
@@ -174,7 +266,7 @@ def _sync_settings(lay: Layout, python: str, old: dict, new: dict, log: list) ->
 
 
 def _sync_claude_md(lay: Layout, repo: Path, version: str, old: dict, new: dict, force: bool, log: list) -> None:
-    text, nl = _md_text(lay.claude_md)
+    text = _md_text(lay.claude_md)
     cur_hash = claudemd.block_hash(text)
     old_md = old.get("claudeMd") or {}
     block = claudemd.make_block(payload.core_rules(repo), version)
@@ -191,8 +283,13 @@ def _sync_claude_md(lay: Layout, repo: Path, version: str, old: dict, new: dict,
     if sep is not None:
         new["claudeMd"]["sep"] = sep
     new["claudeMd"]["blockSha256"] = claudemd.block_hash(t2)
+    stale = (lay.payload / "CLAUDE-block.new.md").relative_to(lay.home).as_posix()
+    if stale in new.get("extraFiles", []):  # IN-11：區塊衝突已解除（使用者改回、或 --force），上次留的新版區塊副本沒用了
+        (lay.home / stale).unlink(missing_ok=True)
+        new["extraFiles"] = [x for x in new["extraFiles"] if x != stale]
+        log.append(f"移除已不需要的 {stale}")
     if t2 != text:
-        atomic_write_bytes(lay.claude_md, t2.replace(LF, nl).encode("utf-8"))
+        atomic_write_bytes(lay.claude_md, t2.encode("utf-8"))
         log.append(f"CLAUDE.md 寫入標記區塊（{len(block.splitlines())} 行，區塊外未變動）")
     else:
         log.append("CLAUDE.md 區塊已是最新")
@@ -202,14 +299,15 @@ def _sync_web(lay: Layout, old: dict, new: dict, enable: bool, runner, log: list
     """聯網來源（選用）：enable 時對齊 MCP 與 env；關閉時移除本工具加過的；都只動自己登記過的項目。"""
     old_web = {**web.empty_record(), **(old.get("web") or {})}
     if not enable:
+        failed: list = []
         if old_web["mcpAdded"] or old_web["envCreatedKeys"]:
-            web.remove_mcp(lay, old_web, runner, log)
+            failed = web.remove_mcp(lay, old_web, runner, log)
             s, _ = _read_settings(lay)
             s2, removed = web.remove_env(s, old_web["envCreatedKeys"])
             if s2 != s:
                 write_json(lay.settings, s2)
                 log.extend(f"settings.json 移除 env {k}" for k in removed)
-        new["web"] = web.empty_record()
+        new["web"] = {**web.empty_record(), "mcpAdded": failed}  # 移不掉的留著登記（IN-02／IN-03 同根因），重跑 `web --off` 會接著移除
         return
     rec = web.sync_mcp(lay, old_web, runner, log)
     s, _ = _read_settings(lay)
@@ -225,6 +323,7 @@ def _sync_web(lay: Layout, old: dict, new: dict, enable: bool, runner, log: list
     new["web"] = {"enabled": True, "mcpAdded": rec["mcpAdded"], "envCreatedKeys": created, "skipped": rec["skipped"]}
 
 
+@_locked
 def apply(lay: Layout, python: str, repo: Path = REPO, force: bool = False, mode: str = "install",
           with_web: bool | None = None, runner=web.default_runner, with_video: bool | None = None, pip=video.default_pip) -> tuple:
     """with_web／with_video：True 開啟、False 關閉、None 沿用已安裝的狀態。"""
@@ -237,20 +336,21 @@ def apply(lay: Layout, python: str, repo: Path = REPO, force: bool = False, mode
     old = old or mf.empty()
     version = repo_version(repo)
     if mode == "update":
-        ov, nv = parse_ver(old.get("version") or "0"), parse_ver(version)
+        ov, nv = _ver(old.get("version")), _ver(version)
         log.append(f"版本 {old.get('version')} → {version}" + ("（相同版本，重新套用）" if ov == nv else ""))
         if nv < ov and not force:
             return 2, log + [f"repo 版本 {version} 比已安裝的 {old['version']} 舊；要降版請加 --force"]
+    enable = bool((old.get("web") or {}).get("enabled")) if with_web is None else with_web
+    _preflight(lay, web_on=enable)
     now = _dt.datetime.now().isoformat(timespec="seconds")
     new = mf.empty()
     new.update({"version": version, "repo": str(repo), "python": python,
                 "installedAt": old.get("installedAt") or now, "updatedAt": now,
                 "userEditable": list(payload.USER_EDITABLE)})
-    new["backups"] = _prune_backups(list(old.get("backups", [])) + [backup(lay, log)], log)
+    new["backups"] = _prune_backups(list(old.get("backups", [])) + [backup(lay, log, pre_install=mode == "install")], log, new["installedAt"])
     _sync_files(lay, repo, version, old, new, force, log)
     _sync_settings(lay, python, old, new, log)
     _sync_claude_md(lay, repo, version, old, new, force, log)
-    enable = bool((old.get("web") or {}).get("enabled")) if with_web is None else with_web
     _sync_web(lay, old, new, enable, runner, log)
     v_enable = bool((old.get("video") or {}).get("enabled")) if with_video is None else with_video
     new["video"] = video.sync(lay, python, v_enable, pip, log)
@@ -260,6 +360,7 @@ def apply(lay: Layout, python: str, repo: Path = REPO, force: bool = False, mode
     return (1 if failed else 0), log
 
 
+@_locked
 def web_config(lay: Layout, keys=(), enable=(), disable=(), env=(), off: bool = False, show: bool = False,
                runner=web.default_runner, key_mode=(), usage_guard: str | None = None) -> tuple:
     """`install.py web`：改本機偏好（local.json）後立即套用；--off 關閉並移除；--show 只顯示。"""
@@ -294,6 +395,15 @@ def web_config(lay: Layout, keys=(), enable=(), disable=(), env=(), off: bool = 
     for n in disable:
         local["disable"] = sorted(set(local.get("disable", [])) | {n})
         local["enable"] = [x for x in local.get("enable", []) if x != n]
+    # IN-01：聯網來源原本沒啟用時，只帶 --key／--env／--key-mode／--usage-guard 是「存偏好」，不可順便註冊 6 個 MCP、改 env
+    # （docs/video.md 教使用者用 `web --key youtube=…` 存影片金鑰）。不帶任何參數、--enable／--disable、--off、或已啟用時照舊同步。
+    prefs_only = (not m["web"].get("enabled") and not off and not enable and not disable
+                  and bool(keys or env or key_mode or usage_guard is not None))
+    if not show and (not prefs_only or usage_guard is not None):
+        try:
+            _preflight(lay)  # IN-04：接下來會寫 settings.json
+        except ValueError as e:
+            return 2, [str(e)]
     if keys or env or enable or disable or key_mode or usage_guard is not None:
         web.save_local(lay, local)
         log.append(f"本機偏好已寫入 {web.local_path(lay)}（不進 repo、update／uninstall 不動）")
@@ -310,14 +420,22 @@ def web_config(lay: Layout, keys=(), enable=(), disable=(), env=(), off: bool = 
         log.append(f"目前狀態：{'已啟用' if m['web'].get('enabled') else '未啟用'}；已註冊 {', '.join(m['web'].get('mcpAdded', [])) or '無'}")
         return 0, log
     new = copy.deepcopy(m)
-    new["backups"] = list(m.get("backups", [])) + [backup(lay, log)]
-    _sync_web(lay, m, new, not off, runner, log)
+    new["backups"] = _prune_backups(list(m.get("backups", [])) + [backup(lay, log)], log, m.get("installedAt"))  # 原本只增不減
+    if usage_guard is not None:  # 用量守門開關立刻反映到 settings.json（原本要再跑 update，期間 verify 7 條 ❌）
+        _sync_settings(lay, m.get("python") or Path(sys.executable).as_posix(), m, new, log)
+    if not prefs_only:
+        _sync_web(lay, m, new, not off, runner, log)
     new["updatedAt"] = _dt.datetime.now().isoformat(timespec="seconds")
     mf.save(lay.manifest, new)
-    log.append(f"{OK} 聯網來源{'已關閉並移除' if off else '已套用'}；重開 Claude Code 對話後生效（`/mcp` 可看連線狀態）")
+    if prefs_only:
+        log.append("聯網來源未啟用（`install.py web` 或 `update --with-web` 可開）；這次只存本機偏好，沒有註冊 MCP、沒有改 env")
+        log.append(f"{OK} 本機偏好已儲存")
+    else:
+        log.append(f"{OK} 聯網來源{'已關閉並移除' if off else '已套用'}；重開 Claude Code 對話後生效（`/mcp` 可看連線狀態）")
     return (1 if any(x.startswith(BAD) for x in log) else 0), log
 
 
+@_locked
 def video_config(lay: Layout, python: str, off: bool = False, show: bool = False, pip=video.default_pip,
                  importer=video.default_importer, ffmpeg=video.ffmpeg_path) -> tuple:
     """`install.py video`：啟用（pip 安裝套件並登記）／--off 取消登記／--show 只檢查。"""
@@ -345,26 +463,64 @@ def video_config(lay: Layout, python: str, off: bool = False, show: bool = False
     return (1 if failed else 0), log
 
 
+def _json_equals(p: Path, obj) -> bool:
+    try:
+        return p.exists() and read_json(p) == obj
+    except (OSError, ValueError):
+        return False
+
+
+def _restore_pre_install(lay: Layout, m: dict, log: list) -> None:
+    """`--restore-backup`：只用安裝前那筆（pre_install_backup）。找不到、安裝前沒有 settings.json、或備份檔已不在 → 不還原，
+    保留已移除本工具條目的 settings.json。備份裡若有本工具標記的 hook（例如重裝前沒解乾淨）先清掉再寫；沒有就原檔位元組複製（保留排版）。"""
+    keep = "保留目前已移除本工具條目的 settings.json"
+    pre = pre_install_backup(m)
+    if pre is None:
+        log.append(f"{WARN} 找不到安裝前的 settings 備份紀錄（0.27.0 前安裝且 update 超過 {KEEP_BACKUPS} 次時已被修剪），不還原；{keep}")
+        return
+    if not pre.get("settings"):
+        log.append(f"{WARN} 安裝前沒有 settings.json（{pre.get('at')} 的安裝前備份紀錄為空），不還原；{keep}")
+        return
+    src = Path(pre["settings"])
+    if not src.exists():
+        log.append(f"{WARN} 安裝前備份檔已不在：{src}，不還原；{keep}")
+        return
+    try:
+        data = read_json(src)
+    except (OSError, ValueError) as e:
+        log.append(f"{WARN} 安裝前備份檔讀不了：{src}（{e}），不還原；{keep}")
+        return
+    cleaned, removed = settings_ops.remove_marked(data) if isinstance(data, dict) else (data, [])
+    if removed:
+        write_json(lay.settings, cleaned)
+        log.append(f"已用安裝前備份還原 settings.json：{src}（備份裡有 {len(removed)} 條本工具 hook，已清掉）")
+    else:
+        shutil.copy2(src, lay.settings)
+        log.append(f"已用安裝前備份還原 settings.json：{src}")
+
+
+@_locked
 def uninstall(lay: Layout, force: bool = False, restore_backup: bool = False, runner=web.default_runner) -> tuple:
     log: list = []
     m = mf.load(lay.manifest)
     if not m:
         log.append(f"{WARN} 找不到安裝紀錄，只清除帶標記的 hook 與 CLAUDE.md 區塊")
         m = mf.empty()
+    _preflight(lay)  # IN-04：settings.json 或 CLAUDE.md 讀不懂時，MCP、hook 一個都還沒動就停（原本移到一半才丟錯）
     backup(lay, log)
     home = lay.home
-    web.remove_mcp(lay, m.get("web") or {}, runner, log)
+    mcp_failed = web.remove_mcp(lay, m.get("web") or {}, runner, log)
     if lay.settings.exists():
         s = read_json(lay.settings)
         s2, removed = settings_ops.remove_marked(s, m["settings"].get("createdKeys"))
         s2, env_removed = web.remove_env(s2, (m.get("web") or {}).get("envCreatedKeys"))
         removed += [f"env {k}" for k in env_removed]
         if removed:
-            first = next((b for b in m.get("backups", []) if b.get("settings")), None)
+            first = pre_install_backup(m)
             if m["settings"].get("createdFile") and s2 == {}:
                 lay.settings.unlink()
                 log.append("刪除本工具建立的 settings.json（已無其他內容）")
-            elif first and Path(first["settings"]).exists() and read_json(Path(first["settings"])) == s2:
+            elif first and first.get("settings") and _json_equals(Path(first["settings"]), s2):
                 shutil.copy2(first["settings"], lay.settings)  # 逐鍵相等時還原原檔位元組，連排版都不變
                 log.append("移除後內容與安裝前備份逐鍵相等，已還原原檔（含原排版）")
             else:
@@ -376,14 +532,14 @@ def uninstall(lay: Layout, force: bool = False, restore_backup: bool = False, ru
         log.append(f"{WARN} 保留本機偏好 {web.local_path(lay)}（含你的金鑰；不需要請自行刪除）")
     if lay.claude_md.exists():
         md = m.get("claudeMd") or {}
-        t, nl = _md_text(lay.claude_md)
+        t = _md_text(lay.claude_md)
         t2 = claudemd.remove(t, md.get("sep", ""))
         if t2 != t:
             if md.get("createdFile") and t2 == "":
                 lay.claude_md.unlink()
                 log.append("刪除本工具建立的 CLAUDE.md（已無其他內容）")
             else:
-                atomic_write_bytes(lay.claude_md, t2.replace(LF, nl).encode("utf-8"))
+                atomic_write_bytes(lay.claude_md, t2.encode("utf-8"))
                 log.append("移除 CLAUDE.md 標記區塊（區塊外未變動）")
     deleted = 0
     for rel, h in m.get("files", {}).items():
@@ -409,7 +565,13 @@ def uninstall(lay: Layout, force: bool = False, restore_backup: bool = False, ru
     if rep.exists():
         shutil.rmtree(rep, ignore_errors=True)
         log.append("刪除 state/selftest-reports")
-    lay.manifest.unlink(missing_ok=True)
+    if mcp_failed:  # IN-02：MCP 移不掉時不刪紀錄，只留這些名稱；重跑 uninstall 會接著移除（重裝也會認得它們是本工具的）
+        rest = mf.empty()
+        rest["web"]["mcpAdded"] = sorted(mcp_failed)
+        mf.save(lay.manifest, rest)
+        log.append(f"{WARN} 安裝紀錄只保留移除失敗的 MCP：{', '.join(sorted(mcp_failed))}（修好後重跑 `uninstall`）")
+    else:
+        lay.manifest.unlink(missing_ok=True)
     dirs = [lay.skills / s for s in m.get("skills", [])] + [lay.payload]
     for d in dirs:
         if not d.exists():
@@ -417,20 +579,27 @@ def uninstall(lay: Layout, force: bool = False, restore_backup: bool = False, ru
         for sub in sorted((x for x in d.rglob("*") if x.is_dir()), key=lambda x: -len(x.parts)):
             if not any(sub.iterdir()):
                 sub.rmdir()
-        if not any(d.iterdir()):
-            d.rmdir()
+        if not any(x for x in d.iterdir() if x.name != LOCK_NAME or d != lay.payload):
+            if not (d / LOCK_NAME).exists() or d != lay.payload:  # 只剩鎖檔：鎖放掉後由 _locked 刪鎖檔與這個資料夾
+                d.rmdir()
             log.append(f"移除資料夾 {d}")
         else:
             log.append(f"{WARN} 保留 {d}（內有非本工具的檔案）")
     if restore_backup:
-        first = next((b for b in m.get("backups", []) if b.get("settings")), None)
-        if first and Path(first["settings"]).exists():
-            shutil.copy2(first["settings"], lay.settings)
-            log.append(f"已用安裝前備份還原 settings.json：{first['settings']}")
-        else:
-            log.append(f"{WARN} 沒有可用的安裝前 settings 備份")
-    log.append(f"{OK} 解除安裝完成")
-    return 0, log
+        _restore_pre_install(lay, m, log)
+    failed = any(x.startswith(BAD) for x in log)  # IN-02：比照 apply，有 ❌ 就回 1、最後一行 ❌
+    log.append(f"{BAD} 解除安裝完成但有項目失敗（見上方 ❌）" if failed else f"{OK} 解除安裝完成")
+    return (1 if failed else 0), log
+
+
+def _python_row(py) -> tuple:
+    """IN-08：hook 用的 Python 還在不在（venv 或 Python 被移除後 7 個 hook 每次都失敗，原本 verify 仍全 ✅）。"""
+    if not py:
+        return BAD, "hook 用的 Python：安裝紀錄沒有記錄（重跑 `install.py update`）"
+    p = Path(str(py))
+    found = p.exists() if p.is_absolute() else bool(shutil.which(str(py)))
+    return (OK, f"hook 用的 Python 存在：{py}") if found else (
+        BAD, f"hook 用的 Python 不存在：{py}（用現在的 Python 重跑 `install.py update`，或加 `--python 路徑`）")
 
 
 def verify(lay: Layout, repo: Path | None = REPO, check_claude: bool = True, importer=video.default_importer,
@@ -461,6 +630,8 @@ def verify(lay: Layout, repo: Path | None = REPO, check_claude: bool = True, imp
     n = len(m["files"])
     rows.append((OK if not bad else BAD, f"檔案雜湊 {n - len([b for b in bad if not b.startswith('與 repo')])}/{n} 一致"
                  + ("" if not bad else "：" + "；".join(bad[:8]))))
+    # IN-15：editable 來自 manifest 的 userEditable，目前每次 apply 都設成 payload.USER_EDITABLE，所以下面的 WARN 分支平常走不到；
+    # 只有舊版安裝器寫的 manifest（userEditable 比現在多）或手改過 manifest 時才會出現。保留行為，不刪。
     rows.extend((OK, f"{e} 使用者自己的設定值（update 會保留、新版新增的鍵會補上）") if e in payload.USER_EDITABLE else (WARN, f"{e} 已被使用者修改（允許，update 會保留）") for e in edited)
     s = read_json(lay.settings) if lay.settings.exists() else {}
     script = (lay.payload / "hooks" / "usage_guard.py").as_posix()
@@ -481,16 +652,17 @@ def verify(lay: Layout, repo: Path | None = REPO, check_claude: bool = True, imp
             rows.append((OK, f"{event} hook：使用者既有的 usage_guard 條目在作用（本工具未重複註冊）"))
         else:
             rows.append((BAD, f"{event} hook 不存在"))
+    if guard_on and any(settings_ops.has_marked(s, e) for e, _ in settings_ops.HOOK_SPECS):
+        rows.append(_python_row(m.get("python")))
     rows.extend(web.verify_rows(lay, m.get("web") or {}, s))
     try:
         vkeys = web.load_local(lay).get("keys") or {}
     except ValueError:
         vkeys = {}
     rows.extend(video.verify_rows(lay, m.get("video") or {}, importer, vkeys, ffmpeg))
-    try:
-        cfile = lay.payload / "_verify.pyc"
-        py_compile.compile(str(lay.payload / "hooks" / "usage_guard.py"), cfile=str(cfile), doraise=True)
-        cfile.unlink(missing_ok=True)
+    try:  # IN-13：只在記憶體編譯（原本寫 _verify.pyc 再刪：verify 不是唯讀，兩個同時跑或目錄唯讀時誤報）
+        src = lay.payload / "hooks" / "usage_guard.py"
+        compile(src.read_bytes(), str(src), "exec")
         rows.append((OK, "usage_guard.py 可編譯"))
     except Exception as e:  # noqa: BLE001
         rows.append((BAD, f"usage_guard.py 無法編譯：{e}"))
@@ -523,7 +695,7 @@ def status(lay: Layout, repo: Path = REPO) -> tuple:
         return 0, [f"未安裝；repo 版本 {rv}；設定目錄 {lay.home}"]
     s = read_json(lay.settings) if lay.settings.exists() else {}
     marked = sum(len(settings_ops.has_marked(s, e)) for e, _ in settings_ops.HOOK_SPECS)
-    upd = "（repo 較新，可 update）" if parse_ver(rv) > parse_ver(m["version"]) else ""
+    upd = "（repo 較新，可 update）" if _ver(rv) > _ver(m.get("version")) else ""
     last = (m.get("backups") or [{}])[-1]
     skipped_n = len(m["settings"].get("hooksSkippedExisting", []))
     guard_line = ("用量守門：已關閉（本機偏好 usageGuard=false）" if not usage_guard_enabled(lay)

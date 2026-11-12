@@ -19,14 +19,25 @@ REPO = _repo()
 FROZEN = bool(getattr(sys, "frozen", False))
 
 
+def norm(p: Path) -> Path:
+    """路徑正規化的唯一來源：展開 ~ 後 resolve（junction、符號連結、Windows 8.3 短檔名都換成真實長路徑；不存在的路徑也可以）。
+    IN-05：原本 --claude-home／CLAUDE_CONFIG_DIR 會 resolve、預設的 ~/.claude 不會，~/.claude 是 junction 時
+    「GUI 安裝、CLI 驗證」算出兩個不同的腳本路徑與 .claude.json 位置。"""
+    p = Path(p).expanduser()
+    try:
+        return p.resolve()
+    except OSError:
+        return p.absolute()
+
+
 def claude_home(override: str | None = None) -> Path:
-    """Claude Code 使用者設定目錄：--claude-home > 環境變數 CLAUDE_CONFIG_DIR > ~/.claude。"""
+    """Claude Code 使用者設定目錄：--claude-home > 環境變數 CLAUDE_CONFIG_DIR > ~/.claude（三者用同一種正規化）。"""
     if override:
-        return Path(override).expanduser().resolve()
+        return norm(Path(override))
     env = os.environ.get("CLAUDE_CONFIG_DIR")
     if env:
-        return Path(env).expanduser().resolve()
-    return Path.home() / ".claude"
+        return norm(Path(env))
+    return norm(Path.home() / ".claude")
 
 
 def os_name() -> str:

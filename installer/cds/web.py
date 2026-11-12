@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 import shutil
 import urllib.parse
@@ -16,7 +17,7 @@ import subprocess
 from pathlib import Path
 
 from .fsio import read_json, write_json
-from .paths import Layout
+from .paths import Layout, norm
 
 SOURCES_REL = "config/web-sources.json"
 LOCAL_REL = "config/local.json"
@@ -46,17 +47,25 @@ def load_local(lay: Layout) -> dict:
         if not isinstance(data, dict):
             raise ValueError(f"本機偏好檔 {p} 最外層必須是物件（{{...}}）")
         for k, v in data.items():
+            if k in base and not isinstance(v, type(base[k])):
+                continue  # 手改成 null 或錯的型別（例如 "enable": null）：當成空，不讓後面丟 TypeError
             base[k] = v
     return base
 
 
 def save_local(lay: Layout, d: dict) -> None:
-    write_json(local_path(lay), d)
+    p = local_path(lay)
+    write_json(p, d)
+    if os.name != "nt":  # 含金鑰：POSIX 上只給擁有者讀寫（Windows 的 os.chmod 只能改唯讀旗標，不做；失敗不擋）
+        try:
+            os.chmod(p, 0o600)
+        except OSError:
+            pass
 
 
 def user_config_path(lay: Layout) -> Path:
     """`claude mcp add --scope user` 寫入的檔：預設 ~/.claude.json；設 CLAUDE_CONFIG_DIR／--claude-home 時在該目錄下。"""
-    if lay.home == Path.home() / ".claude":
+    if norm(lay.home) == norm(Path.home() / ".claude"):  # IN-05：比 resolve 後的路徑（junction／8.3 短檔名／--claude-home ~/.claude 都算同一個）
         return Path.home() / ".claude.json"
     return lay.home / ".claude.json"
 
@@ -186,8 +195,12 @@ def sync_mcp(lay: Layout, old: dict, runner=default_runner, log: list | None = N
         if name in mine and _same(have.get(name), spec, defer):
             rec["mcpAdded"].append(name)
             continue
-        if name in mine and name in have:
-            runner(["remove", "--scope", "user", name])  # 連線設定變了（例如新增金鑰、改成延後載入），重建
+        if name in mine and name in have:  # 連線設定變了（例如新增金鑰、改成延後載入），重建
+            code, out = runner(["remove", "--scope", "user", name])
+            if code != 0:  # IN-03：舊設定移不掉就不接著 add（會撞 already exists）；名稱仍登記為本工具的，下次重跑接著重建
+                rec["mcpAdded"].append(name)
+                log.append(f"{BAD} MCP {name} 重建失敗（移除舊設定失敗，未重新註冊）：{mask(out, local)}")
+                continue
         if defer:
             entry = {"type": "http", "url": spec["url"], "alwaysLoad": False}
             if spec["headers"]:
@@ -207,22 +220,29 @@ def sync_mcp(lay: Layout, old: dict, runner=default_runner, log: list | None = N
         if name in have:
             code, out = runner(["remove", "--scope", "user", name])
             log.append(f"MCP 移除 {name}" if code == 0 else f"{BAD} MCP {name} 移除失敗：{mask(out, local)}")
+            if code != 0:  # IN-03：移不掉的仍登記為本工具的，否則重新啟用時會被當成使用者自己的而略過
+                rec["mcpAdded"].append(name)
     rec["mcpAdded"].sort()
     return rec
 
 
-def remove_mcp(lay: Layout, old: dict, runner=default_runner, log: list | None = None) -> None:
+def remove_mcp(lay: Layout, old: dict, runner=default_runner, log: list | None = None) -> list[str]:
+    """移除本工具登記的 MCP；回傳移除失敗（仍在 user scope）的名稱，呼叫端要把它們留在紀錄裡，重跑才能接著移除。"""
     log = log if log is not None else []
     have = installed_servers(lay)
     try:
         local = load_local(lay)
     except ValueError:
         local = {}  # 只用來遮罩；偏好檔壞掉不該擋住移除
+    failed: list[str] = []
     for name in old.get("mcpAdded", []):
         if name not in have:
             continue
         code, out = runner(["remove", "--scope", "user", name])
         log.append(f"MCP 移除 {name}" if code == 0 else f"{BAD} MCP {name} 移除失敗：{mask(out, local)}")
+        if code != 0:
+            failed.append(name)
+    return failed
 
 
 def apply_env(settings: dict, env: dict[str, str], old_created: list[str]) -> tuple[dict, list[str], list[str]]:
@@ -296,22 +316,29 @@ def verify_rows(lay: Layout, rec: dict, settings: dict) -> list[tuple[str, str]]
     return rows
 
 
+def _kv_error(flag: str, fmt: str, kv: str) -> ValueError:
+    """IN-07：格式錯的參數只顯示「=」前的名稱部分，值一律不印（等號旁多空格、名稱打錯、貼上夾帶換行時，原本會把金鑰整段印出來）。"""
+    name, sep, _ = kv.strip().partition("=")
+    shown = f"（名稱部分：{name.strip()!r}）" if sep else "（缺少「=」；為避免印出金鑰，不顯示輸入內容）"
+    return ValueError(f"{flag} 格式應為 {fmt}{shown}；名稱與「=」之間不可有空格，值不可含換行")
+
+
 def set_key_arg(local: dict, kv: str) -> None:
     m = re.fullmatch(r"([A-Za-z0-9_-]+)=(.*)", kv.strip())
     if not m:
-        raise ValueError(f"--key 格式應為 名稱=值：{kv}")
+        raise _kv_error("--key", "名稱=值", kv)
     local.setdefault("keys", {})[m.group(1)] = m.group(2)
 
 
 def set_key_mode_arg(local: dict, kv: str) -> None:
     m = re.fullmatch(r"([A-Za-z0-9_-]+)=(fallback|always|free)", kv.strip())
     if not m:
-        raise ValueError(f"--key-mode 格式應為 名稱=fallback|always|free：{kv}")
+        raise _kv_error("--key-mode", "名稱=fallback|always|free", kv)
     local.setdefault("keyMode", {})[m.group(1)] = m.group(2)
 
 
 def set_env_arg(local: dict, kv: str) -> None:
     m = re.fullmatch(r"([A-Z0-9_]+)=(.*)", kv.strip())
     if not m:
-        raise ValueError(f"--env 格式應為 大寫鍵=值：{kv}")
+        raise _kv_error("--env", "大寫鍵=值", kv)
     local.setdefault("env", {})[m.group(1)] = m.group(2)

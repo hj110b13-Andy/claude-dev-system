@@ -62,6 +62,25 @@ def migrate(m: dict) -> dict:
     while v < MANIFEST_SCHEMA:
         m = MIGRATIONS[v](m)
         v = int(m["schemaVersion"])
+    return _fill_defaults(m)
+
+
+def _fill_defaults(m: dict) -> dict:
+    """IN-12：手改或寫一半的 manifest 缺鍵（例如沒有 files）時補上預設值，巢狀物件缺的鍵也補；型別不對的容器換成預設。
+    原本只有 v0 遷移會補欄位，缺 files 時 update／verify 直接 KeyError 噴 traceback。既有的值一律不動。"""
+    for k, dv in empty().items():
+        cur = m.get(k)
+        if isinstance(dv, dict):
+            if not isinstance(cur, dict):
+                m[k] = dv
+            else:
+                for kk, vv in dv.items():
+                    cur.setdefault(kk, vv)
+        elif isinstance(dv, list):
+            if not isinstance(cur, list):
+                m[k] = dv
+        else:
+            m.setdefault(k, dv)
     return m
 
 

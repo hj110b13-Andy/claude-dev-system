@@ -5,20 +5,24 @@
   --claude-home     目標設定目錄（預設：環境變數 CLAUDE_CONFIG_DIR，否則 ~/.claude）；測試時指向暫存資料夾
   --python          hook 用的 Python 執行檔（預設：執行本安裝器的這個 Python）
   --force           install／update：覆蓋使用者改過的本工具檔案或區塊；uninstall：連使用者改過的也刪
-  --restore-backup  uninstall 後用第一次安裝前的備份還原 settings.json
+  --restore-backup  uninstall 後用「第一次 install 前」那份備份還原 settings.json（備份裡若有本工具的 hook 會先清掉）；
+                    安裝前沒有 settings.json、或那份備份已不在（0.27.0 前安裝且 update 超過 10 次）時不還原，保留已移除本工具條目的檔
   --no-claude       verify 時不呼叫 claude --version（測試用）
   --with-web        install／update：同時啟用聯網來源（免金鑰搜尋 MCP＋WebSearch 上限 env；細節 docs/web-sources.md）
   --with-video      install／update：同時啟用影片來源（pip 裝 yt-dlp 等，讓 tools/video.py 可用；細節 docs/video.md）
-web 子命令（改本機偏好並立即套用；偏好存 <CLAUDE_HOME>/claude-dev-system/config/local.json，不進 repo）：
+web 子命令（改本機偏好；偏好存 <CLAUDE_HOME>/claude-dev-system/config/local.json，不進 repo）：
+  聯網來源已啟用時立即套用；未啟用時只帶 --key／--env／--key-mode／--usage-guard 只存偏好、不會順便啟用；
+  不帶參數、或帶 --enable／--disable 才會啟用（--usage-guard 一律立即同步 settings.json 的 hook）
   --key 名稱=值     存金鑰（tavily、exa、cwa、youtube、gemini…）   --enable／--disable 名稱   開關某個 MCP
   --env 鍵=值       覆寫 env 值                   --off  關閉聯網來源並移除   --show  只顯示不套用
   --key-mode 名稱=fallback|always|free   fallback（預設）：免金鑰版與 <名稱>-key 金鑰版並存、規則先用免金鑰；always：只用金鑰版；free：只用免金鑰版（金鑰留著不用，少一個伺服器省 token）
-  --usage-guard on|off              開關用量守門 hook（off：不註冊、update 時移除；規則仍在）
+  --usage-guard on|off              開關用量守門 hook（立即同步 settings.json；off：移除且之後 update 也不註冊；規則仍在；加 --show 時只存偏好）
 video 子命令：不帶參數＝啟用（pip 安裝並登記）；--off 取消登記；--show 只檢查依賴與金鑰
 gui 子命令：開設定視窗（同 `python installer/gui.py`）：所有開關、金鑰、門檻在視窗裡改，按套用才生效
-selftest 子命令：用全新無頭 claude -p 重跑 config/selftest.json 的九題，比對實際呼叫的工具（--list 列題目、--only 題號 只跑幾題、
+selftest 子命令：用全新無頭 claude -p 重跑 config/selftest.json 的全部題目（題數以 --list 為準），比對實際呼叫的工具（--list 列題目、--only 題號 只跑幾題、
   --report-dir 路徑 存每題呼叫清單、--dry-run 只印指令不跑、--smoke 快測三題）；每題印 token 用量，並檢查回答有沒有來源與網址；每題約一場短對話的用量、全部約 20～40 分鐘，只手動跑
-結束碼：0 成功／全部通過；1 check 或 verify 有 ❌；2 用法或狀態錯誤。
+結束碼：0 成功／全部通過；1 check 或 verify 有 ❌，或 install／update／web／video／uninstall 做完但有項目失敗（輸出有 ❌）；
+  2 用法或狀態錯誤（尚未安裝、已安裝、參數格式錯、settings.json／CLAUDE.md／local.json 讀不懂、另一個安裝程序正在執行）。
 """
 from __future__ import annotations
 
@@ -55,7 +59,7 @@ def main(argv=None) -> int:
     ap.add_argument("--disable", action="append", default=[], metavar="MCP名稱")
     ap.add_argument("--env", action="append", default=[], metavar="鍵=值")
     ap.add_argument("--key-mode", action="append", default=[], metavar="名稱=fallback|always|free")
-    ap.add_argument("--usage-guard", choices=["on", "off"], help="web 子命令：開關用量守門 hook（off＝不註冊，update 時移除）")
+    ap.add_argument("--usage-guard", choices=["on", "off"], help="web 子命令：開關用量守門 hook（立即同步 settings.json；off＝移除且 update 也不註冊）")
     ap.add_argument("--off", action="store_true")
     ap.add_argument("--show", action="store_true")
     ap.add_argument("--list", action="store_true", help="selftest：只列題目")
