@@ -2,6 +2,8 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.cds-tmp
+# Claude Code 的本機工作檔：盤點索引（含本機時間，各裝置自己產）、排程鎖、agent 的 worktree
+.claude/
 build/
 dist/
 *.spec

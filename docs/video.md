@@ -45,7 +45,7 @@ $V clean --media-only                          # 刪快取裡的影音檔、留�
 
 1. 開 https://aistudio.google.com/api-keys 登入。〔未核對畫面〕新用戶會先要同意服務條款，官方說會自動建立預設專案與金鑰；沒有就按 **Create API key** 建新專案。
 2. 複製金鑰。2026-10 實測新金鑰格式是 `AQ.` 開頭 53 字，不是舊的 `AIza`。
-3. 終端機自己輸入 `python installer/install.py web --key gemini=金鑰`（不要貼在對話裡）。
+3. 終端機自己輸入 `python installer/install.py web --key gemini=金鑰`（不要貼在對話裡）。聯網來源沒啟用時這行只把金鑰存進 `local.json`，不會順便註冊任何 MCP（0.27.0 起；`youtube` 金鑰同）。
 免費層：YouTube 網址每天 8 小時影片；速率依模型（https://ai.google.dev/gemini-api/docs/rate-limits ）。`video.json` 預設模型 `gemini-flash-latest`，503 高負載時自動重試並換備用模型。
 
 ### YouTube Data API（`youtube`）
