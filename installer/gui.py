@@ -112,8 +112,7 @@ class App:
     def start_old_exe_cleanup(self):
         """更新留下的 .old*.exe：舊程序要幾秒才完全結束（Tk 收尾＋PyInstaller 刪暫存夾），期間鎖著；背景每秒試一次、最多 90 秒，
         進度印在紀錄。視窗關閉時這條執行緒跟著結束，不會留在背景。"""
-        exe = Path(sys.executable)
-        olds = list(exe.parent.glob(exe.stem + ".old*.exe"))
+        olds = appdir.old_exe_files(Path(sys.executable))  # GU-11：與 appdir.cleanup_old_exe 共用同一份 glob 與刪除邏輯
         if not olds:
             return
         self._old_exe_pending = set(olds)
@@ -122,11 +121,7 @@ class App:
 
         def work():
             for _ in range(90):
-                for o in list(self._old_exe_pending):
-                    try:
-                        o.unlink()
-                    except OSError:
-                        continue
+                for o in appdir.delete_old_exes(list(self._old_exe_pending)):
                     self._old_exe_pending.discard(o)
                     self.q.put(("oldexe", ("deleted", o.name)))
                 if not self._old_exe_pending:
@@ -155,8 +150,7 @@ class App:
             if ans is None:
                 return
             if ans:
-                self._close_after_apply = True
-                self.do_apply()
+                self.do_apply(close_after=True)  # GU-06：旗標只在套用工作真的啟動後才設，不再跨呼叫殘留
                 return
         self._finish_close()
 
@@ -546,28 +540,27 @@ class App:
         for n, nv in self.note_vars.items():
             if nv.get().strip() != self.note_orig.get(n, ""):
                 f.key_notes[n] = nv.get().strip()
-        try:
-            f.thresholds = {"fiveHour": float(self.five_var.get()), "sevenDay": float(self.seven_var.get())}
-        except ValueError:
-            f.thresholds = dict(self.state["thresholds"])
-        try:
-            f.task_check = {"enabled": self.tc_var.get(), "minutes": max(1, int(self.tc_min_var.get()))}
-        except ValueError:
-            f.task_check = dict(self.state.get("task_check") or gm.DEFAULT_TASK_CHECK)
+        # GU-05：數值欄位的檢查全在 gm.valid_*（唯一來源）；不合法就丟 ValueError，由 update_diff 顯示「表單有誤：…」、套用／匯出前跳訊息，
+        # 不再無聲退回舊值（原本 0、-5、nan 都寫得進去，亂打字則「將變更」顯示「無」）
+        f.thresholds = {"fiveHour": gm.valid_threshold(self.five_var.get(), gm.THRESHOLD_LABELS["fiveHour"]),
+                        "sevenDay": gm.valid_threshold(self.seven_var.get(), gm.THRESHOLD_LABELS["sevenDay"])}
+        f.task_check = {"enabled": self.tc_var.get(), "minutes": gm.valid_task_minutes(self.tc_min_var.get())}
         f.sub_brief = {k: v.get() for k, v in self.sb_vars.items()}
-        try:
-            f.mem_gb = gm.valid_mem_gb(self.mem_var.get())
-        except ValueError:
-            f.mem_gb = float(self.state.get("mem_gb", gm.DEFAULT_MEM_GB))  # 超出範圍或不是數字：不套用
-        try:
-            f.project_auto = {k: v.get() for k, v in self.pa_vars.items()}
-            for k, v in self.pa_int_vars.items():
-                f.project_auto[k] = max(gm.PA_INT_MIN.get(k, 0), int(v.get()))
-        except ValueError:
-            f.project_auto = dict(self.state.get("project_auto") or gm.DEFAULT_PROJECT_AUTO)
+        f.mem_gb = gm.valid_mem_gb(self.mem_var.get())
+        f.project_auto = {k: v.get() for k, v in self.pa_vars.items()}
+        for k, v in self.pa_int_vars.items():
+            f.project_auto[k] = gm.valid_pa_int(k, v.get())
         if self.state["chrome"]["default_enabled"] is not None:
             f.chrome_default_enabled = self.chrome_var.get()
         return f
+
+    def _safe_collect(self, title: str):
+        """按鈕動作用：表單數值不合法就跳訊息並回 None（不讓 ValueError 逃出 Tk callback）。"""
+        try:
+            return self._collect()
+        except ValueError as e:
+            messagebox.showerror(title, f"表單有誤，請先改正：{e}")
+            return None
 
     def _key_typed(self, n):
         cur = self.key_vars[n].get().strip()
@@ -607,7 +600,10 @@ class App:
         self.diff_text.configure(state="disabled", height=max(1, min(len(ch), 6)))  # 最多 6 行，再多就在框內捲（滾輪）
 
     def set_preset(self, on: bool):
-        f = gm.preset(self._collect(), self.state, on)
+        cur = self._safe_collect("全部啟用" if on else "全部關閉")
+        if cur is None:
+            return
+        f = gm.preset(cur, self.state, on)
         self.web_var.set(f.web_enabled)
         for n, v in self.server_vars.items():
             v.set(f.servers.get(n, False))
@@ -641,8 +637,9 @@ class App:
                     self.apply_btn.configure(state="normal")
                     if payload:
                         self.refresh()
-                    if getattr(self, "_close_after_apply", False):
-                        self._close_after_apply = False
+                    close = gm.should_close_after_apply(getattr(self, "_close_after_apply", False), getattr(self, "_apply_code", None))
+                    self._close_after_apply, self._apply_code = False, None  # GU-06：不論關不關都清掉；套用失敗（有 ❌）不關窗
+                    if close:
                         self._finish_close()
                         return
                     if getattr(self, "_relaunch", False):
@@ -653,7 +650,7 @@ class App:
                         # 讓它重新解壓成獨立的頂層程序（pyinstaller.org/en/stable/common-issues-and-pitfalls.html「Restarting an application as an independent process」）
                         env = {k: v for k, v in os.environ.items() if k not in ("TCL_LIBRARY", "TK_LIBRARY")}
                         env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-                        subprocess.Popen([sys.executable, "--after-update"], cwd=str(Path(sys.executable).parent), close_fds=True, creationflags=flags, env=env)
+                        subprocess.Popen(gm.relaunch_command(sys.executable, self.lay.home), cwd=str(Path(sys.executable).parent), close_fds=True, creationflags=flags, env=env)
                         self.root.destroy()
                         return
                     pending = getattr(self, "_pending_update", None)
@@ -697,7 +694,7 @@ class App:
     def _run_bg(self, fn, refresh_after=True, what="上一個工作"):
         if self.busy:
             self._busy_msg()
-            return
+            return False
         self.busy = True
         self.busy_what = what
         self.apply_btn.configure(state="disabled")
@@ -710,6 +707,7 @@ class App:
             finally:
                 self.q.put(("done", refresh_after))
         threading.Thread(target=work, daemon=True).start()
+        return True
 
     # ---------- 動作 ----------
     def refresh(self):
@@ -735,8 +733,11 @@ class App:
                 self.q.put(("done", False))
         threading.Thread(target=work, daemon=True).start()
 
-    def do_apply(self):
-        form = self._collect()
+    def do_apply(self, close_after: bool = False):
+        """close_after＝關窗時選了「先套用」：套用成功才關窗（gm.should_close_after_apply）；任何提早 return 都不留旗標（GU-06）。"""
+        form = self._safe_collect("套用")
+        if form is None:
+            return
         ch = gm.diff(self.state, form)
         if not ch:
             messagebox.showinfo("套用", "沒有變更。")
@@ -744,15 +745,18 @@ class App:
         if not _ensure_python():
             messagebox.showerror("套用", "找不到系統的 Python ≥3.10（hook 與影片工具要用它）。請先在「環境」區按「開下載頁」安裝 Python，裝好後重開本程式。")
             return
-        if not getattr(self, "_close_after_apply", False) and not messagebox.askyesno("套用", "將執行：\n\n" + "\n".join("• " + c.text for c in ch) + "\n\n確定？"):
+        if not close_after and not messagebox.askyesno("套用", "將執行：\n\n" + "\n".join("• " + c.text for c in ch) + "\n\n確定？"):
             return
         state = self.state
 
         def job():
             self._log("=== 套用開始 ===")
             code = gm.apply_form(self.lay, PY, state, form, self._log, repo=self.repo)
+            self._apply_code = code
             self._log(f"=== 套用{'完成' if code == 0 else '完成但有項目失敗（見 ❌）'}；重開 Claude Code 對話後生效 ===")
-        self._run_bg(job, what="套用")
+        self._apply_code = None
+        if self._run_bg(job, what="套用"):
+            self._close_after_apply = close_after
 
     def do_verify(self):
         def job():
@@ -792,11 +796,11 @@ class App:
             self._busy_msg()
             return
         self.q.put(("keystatus", (n, "測試中…")))
+        acct = self.note_vars[n].get().strip() if n in self.note_vars else ""  # GU-09：tk 變數只在主執行緒讀，值傳給工作執行緒
 
         def job():
             ok, msg = gm.test_key(n, val, keys)
             self.q.put(("keystatus", (n, f"{'✅ 有效' if ok else '❌ 無效'} {msg}")))
-            acct = self.note_vars[n].get().strip() if n in self.note_vars else ""
             self._log(f"金鑰 {n}{'（帳號：' + acct + '）' if acct else '（帳號備註未填）'} 測試：{'✅' if ok else '❌'} {msg}")
         self._run_bg(job, refresh_after=False, what="測試金鑰")
 
@@ -807,44 +811,50 @@ class App:
             return
 
         def job():
-            info = appdir.check_update(self.lay, REPO)
-            if info["error"]:
-                self._log(f"自動檢查更新：{info['error']}（可稍後按「檢查更新」）")
-            elif info["newer"]:
-                self._log(f"自動檢查更新：有新版 v{info['local']} → v{info['remote']}")
-                self._pending_update = info
-            else:
-                self._log(f"自動檢查更新：已是最新 v{info['local']}")
+            self._check_updates(manual=False)
             rep = sorted((self.lay.home / "state" / "selftest-reports").glob("selftest-*.json")) if (self.lay.home / "state" / "selftest-reports").exists() else []
-            import time as _t
-            if not rep or _t.time() - rep[-1].stat().st_mtime > 30 * 86400:
+            if not rep or time.time() - rep[-1].stat().st_mtime > 30 * 86400:
                 self._log("提醒：超過 30 天沒跑自我測試（或從沒跑過）；外部服務與 Claude Code 改版會讓規則失效，建議按「自我測試」選快測 3 題（約 10 分鐘）")
         self._run_bg(job, refresh_after=False, what="開窗自動檢查更新")
 
     def do_check_update(self):
         def job():
             self._log("=== 檢查更新（GitHub master 的 config/VERSION）===")
-            info = appdir.check_update(self.lay, REPO)
-            if info["error"]:
-                self._log(f"❌ {info['error']}")
-                return
-            if not info["newer"]:
-                self._log(f"✅ 規則／工具已是最新：v{info['local']}（GitHub v{info['remote']}）")
-                ex = self._exe_update_info()
-                if ex and ex["newer"]:
-                    self._log(f"但視窗程式有新版：v{ex['tag']}（執行中的是 v{repo_version(REPO)}）")
-                    self._pending_update = {**info, "exe_only": True}
-                return
-            self._log(f"有新版：v{info['local']} → v{info['remote']}")
-            self._pending_update = info
+            self._check_updates(manual=True)
         self._run_bg(job, refresh_after=False, what="檢查更新")
 
-    def _exe_update_info(self):
-        """exe 模式才查 Release；原始碼模式回 None。自己查失敗就改用 app/ 的新版更新程式查（備援）。"""
+    def _check_updates(self, manual: bool):
+        """開窗自動檢查與「檢查更新」按鈕共用的檢查流程（在背景執行緒跑）：查規則版本，沒新版再查 exe，由 appdir.update_plan 判斷有沒有東西要更新。
+        GU-10：自動檢查原本只比規則版本、不查 exe，可能顯示「已是最新」但 exe 其實是舊的。自動檢查查 exe 時不跑備援、失敗安靜略過（check_exe_update 的網路呼叫有 20 秒逾時）。"""
+        info = appdir.check_update(self.lay, REPO)
+        if info["error"]:
+            self._log(f"❌ {info['error']}" if manual else f"自動檢查更新：{info['error']}（可稍後按「檢查更新」）")
+            return
+        ex = None if info["newer"] else self._exe_update_info(quiet=not manual)  # 規則有新版時更新流程自己會處理 exe，不重複查
+        plan = appdir.update_plan(info, ex)
+        pre = "" if manual else "自動檢查更新："
+        if plan == "rules":
+            self._log(f"有新版：v{info['local']} → v{info['remote']}" if manual else f"{pre}有新版 v{info['local']} → v{info['remote']}")
+            self._pending_update = info
+        elif plan == "exe_only":
+            if manual:
+                self._log(f"✅ 規則／工具已是最新：v{info['local']}（GitHub v{info['remote']}）")
+                self._log(f"但視窗程式有新版：v{ex['tag']}（執行中的是 v{repo_version(REPO)}）")
+            else:
+                self._log(f"{pre}規則／工具已是最新 v{info['local']}，但視窗程式有新版：v{ex['tag']}（執行中的是 v{repo_version(REPO)}）")
+            self._pending_update = {**info, "exe_only": True}
+        else:
+            self._log(f"✅ 規則／工具已是最新：v{info['local']}（GitHub v{info['remote']}）" if manual else f"{pre}已是最新 v{info['local']}")
+
+    def _exe_update_info(self, quiet: bool = False):
+        """exe 模式才查 Release；原始碼模式回 None。自己查失敗就改用 app/ 的新版更新程式查（備援）。
+        quiet＝開窗自動檢查：查不到就安靜回 None，不印警告、不跑備援（備援的子程序最長可跑 10 分鐘，不該卡在開窗檢查）。"""
         if not FROZEN:
             return None
         ex = appdir.check_exe_update(repo_version(REPO))
         if ex["error"]:
+            if quiet:
+                return None
             self._log(f"⚠️ 視窗程式：{ex['error']}")
             fb = self._exe_fallback(check_only=True)
             if fb and not fb.get("error"):
@@ -976,15 +986,21 @@ class App:
         if not p:
             return
         cur = gm._local(self.lay).get("keys") or {}
-        Path(p).write_text(json.dumps(gm.export_profile(self.state, self._collect(), include_keys=bool(inc), current_keys=cur), ensure_ascii=False, indent=2), encoding="utf-8")
+        form = self._safe_collect("匯出設定")
+        if form is None:
+            return
+        Path(p).write_text(json.dumps(gm.export_profile(self.state, form, include_keys=bool(inc), current_keys=cur), ensure_ascii=False, indent=2), encoding="utf-8")
         self._log(f"已匯出 {p}" + ("（含金鑰明文，請妥善保管）" if inc else "（不含金鑰）"))
 
     def do_import(self):
         p = filedialog.askopenfilename(title="匯入設定", filetypes=[("JSON", "*.json")])
         if not p:
             return
+        cur = self._safe_collect("匯入設定")
+        if cur is None:
+            return
         try:
-            f = gm.import_profile(self._collect(), json.loads(Path(p).read_text(encoding="utf-8")))
+            f = gm.import_profile(cur, json.loads(Path(p).read_text(encoding="utf-8")))
         except Exception as e:  # noqa: BLE001
             messagebox.showerror("匯入失敗", str(e))
             return

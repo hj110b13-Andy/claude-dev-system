@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import re
 import shutil
 import tempfile
 import time
@@ -33,6 +34,32 @@ KEEP_DIRS = ("rules", "tools", "hooks", "skills", "config", "installer", "docs")
 KEEP_FILES = ("README.md", "CHANGELOG.md", "CLAUDE.md", "LICENSE")
 
 
+NO_VERSION = "0.0.0"  # 讀不到版本時的預設值（必須解析得出來；原本用 "0"，parse_ver("0") 是 None，比較會丟 TypeError）
+
+
+def is_newer(candidate, current) -> tuple[bool, str | None]:
+    """版本比較的唯一來源（check_update、check_exe_update 共用）。回 (candidate 是否比 current 新, 錯誤說明)。
+    任何一邊解析不出版本（latest、vtest、None、空字串…）都回 (False, 說明)，不丟例外（GU-03：原本 None > tuple 丟 TypeError，
+    因為是例外不是 error 欄位，exe 更新的備援也不會啟動）。"""
+    a, b = parse_ver(str(candidate) if candidate is not None else ""), parse_ver(str(current) if current is not None else "")
+    if a is None:
+        return False, f"版本字串不合法：{candidate!r}"
+    if b is None:
+        return False, f"目前版本字串不合法：{current!r}"
+    return a > b, None
+
+
+def update_plan(rules: dict, exe: dict | None) -> str:
+    """「有沒有東西要更新」的唯一來源（GU-10：開窗自動檢查原本只看規則版本、不查 exe，手動檢查才查，兩處各寫一份）。
+    rules 是 check_update 的結果、exe 是 check_exe_update 的結果（原始碼模式或查不到傳 None）。
+    回 "rules"（規則／工具有新版，更新流程會順便處理 exe）、"exe_only"（規則最新但視窗程式 exe 有新版）、"none"。"""
+    if rules and rules.get("newer"):
+        return "rules"
+    if exe and exe.get("newer"):
+        return "exe_only"
+    return "none"
+
+
 def app_dir(lay: Layout) -> Path:
     return lay.payload / "app"
 
@@ -48,7 +75,8 @@ def effective_repo(lay: Layout, bundled: Path = REPO) -> Path:
     """app/ 有完整內容且版本不比內建舊就用 app/，否則用內建（原始碼執行時就是 repo 本身）。"""
     a = app_dir(lay)
     av, bv = _ver(a), _ver(bundled)
-    if av and (a / "rules" / "core.md").exists() and (a / "installer" / "install.py").exists() and (not bv or parse_ver(av) >= parse_ver(bv)):
+    complete = av and parse_ver(av) is not None and (a / "rules" / "core.md").exists() and (a / "installer" / "install.py").exists()
+    if complete and (not bv or parse_ver(bv) is None or parse_ver(av) >= parse_ver(bv)):
         return a
     return bundled
 
@@ -88,14 +116,15 @@ def _http_get(url: str, timeout: int = 60) -> bytes:
 
 def check_update(lay: Layout, bundled: Path = REPO, http=_http_get) -> dict:
     """回 {local, remote, newer, error}。local 是目前生效的 repo 版本。"""
-    local = _ver(effective_repo(lay, bundled)) or "0"
+    local = _ver(effective_repo(lay, bundled)) or NO_VERSION
     try:
         remote = http(RAW_VERSION_URL, 20).decode("utf-8").strip()
     except Exception as e:  # noqa: BLE001
         return {"local": local, "remote": None, "newer": False, "error": f"連不上 GitHub：{type(e).__name__}: {e}"}
-    if not remote or len(remote) > 20:
+    if not remote or len(remote) > 20 or parse_ver(remote) is None:
         return {"local": local, "remote": None, "newer": False, "error": "GitHub 回的版本字串不合法"}
-    return {"local": local, "remote": remote, "newer": parse_ver(remote) > parse_ver(local), "error": None}
+    newer, err = is_newer(remote, local)
+    return {"local": local, "remote": remote, "newer": newer, "error": err}
 
 
 def download_update(lay: Layout, log=print, http=_http_get) -> Path:
@@ -159,15 +188,29 @@ def check_exe_update(bundled_ver: str | None, http=_http_get) -> dict:
         data = json.loads(http(LATEST_API, 20).decode("utf-8"))
     except Exception as e:  # noqa: BLE001
         return {**none, "error": f"查不到 Releases：{type(e).__name__}: {e}"}
+    if not isinstance(data, dict):
+        return {**none, "error": "Releases 回的資料格式不對"}
     tag = str(data.get("tag_name") or "").lstrip("v").strip()
-    assets = {a.get("name"): a for a in data.get("assets", []) if isinstance(a, dict)}
+    assets = {a.get("name"): a for a in (data.get("assets") if isinstance(data.get("assets"), list) else []) if isinstance(a, dict)}
     exe = assets.get(EXE_NAME)
     if not tag or not exe or not exe.get("browser_download_url"):
         return {**none, "tag": tag or None, "error": "最新 Release 沒有附 exe"}
     sha = assets.get(EXE_NAME + ".sha256")
-    return {"tag": tag, "url": exe["browser_download_url"], "size": int(exe.get("size") or 0),
-            "sha_url": sha.get("browser_download_url") if sha else None,
-            "newer": parse_ver(tag) > parse_ver(bundled_ver or "0"), "error": None}
+    try:
+        size = int(exe.get("size") or 0)
+    except (TypeError, ValueError):
+        size = 0  # 沒有標大小就只靠 .sha256 核對
+    newer, err = is_newer(tag, bundled_ver or NO_VERSION)  # tag 是 latest／vtest 之類解析不出來 → 不是較新、error 說明（不丟例外）
+    return {"tag": tag, "url": exe["browser_download_url"], "size": size,
+            "sha_url": sha.get("browser_download_url") if sha else None, "newer": newer, "error": err}
+
+
+def parse_sha256(raw: bytes) -> str:
+    """讀 Release 附的 .sha256（格式「<64 位十六進位>  <檔名>」）。空檔或格式不對丟 ValueError（原本空檔會 IndexError，訊息看不懂）。"""
+    parts = (raw or b"").decode("utf-8-sig", "replace").split()
+    if not parts or not re.fullmatch(r"[0-9a-fA-F]{64}", parts[0]):
+        raise ValueError(".sha256 檔是空的或格式不對，不換 exe")
+    return parts[0].lower()
 
 
 def download_exe(info: dict, exe_path: Path, log=print, http=_http_get) -> Path:
@@ -177,7 +220,7 @@ def download_exe(info: dict, exe_path: Path, log=print, http=_http_get) -> Path:
     if info.get("size") and len(data) != int(info["size"]):
         raise ValueError(f"下載大小 {len(data)} 與 Release 標的 {info['size']} 不符，不換")
     if info.get("sha_url"):
-        want = http(info["sha_url"], 20).decode("utf-8").split()[0].lower()
+        want = parse_sha256(http(info["sha_url"], 20))
         got = hashlib.sha256(data).hexdigest()
         if want != got:
             raise ValueError("sha256 不符，不換 exe")
@@ -200,22 +243,46 @@ def swap_exe(exe_path: Path, new_path: Path) -> Path:
     exe_path.rename(old)
     try:
         new_path.rename(exe_path)
-    except Exception:
-        old.rename(exe_path)
+    except Exception as e:
+        try:
+            old.rename(exe_path)
+        except Exception as e2:  # noqa: BLE001  還原也失敗：原本的 exe 還在 .old 名下，把位置講清楚（原本只丟還原失敗的例外，使用者看不出 exe「不見了」去哪）
+            raise OSError(f"換新 exe 失敗（{type(e).__name__}: {e}），而且把原本的程式改回原名也失敗（{type(e2).__name__}: {e2}）。"
+                          f"原本的程式現在叫 {old}，請手動把它改回 {exe_path.name}") from e
         raise
     return old
 
 
-def cleanup_old_exe(exe_path: Path, tries: int = 10, wait: float = 0.3) -> int:
-    """刪掉上次更新留下的 .old*.exe。舊程序關閉要幾秒（Tk 收尾＋PyInstaller 刪自己的暫存夾），期間檔案鎖著刪不掉，
-    所以要重試；新視窗啟動時在背景執行緒跑（tries=90、wait=1），不擋開窗。回刪掉的數量。"""
+def old_exe_files(exe_path: Path) -> list[Path]:
+    """上次更新留下的 .old*.exe（swap_exe 改的名字）。視窗與 cleanup_old_exe 共用這個 glob，不各寫一份。"""
+    return sorted(exe_path.parent.glob(exe_path.stem + ".old*.exe"))
+
+
+def delete_old_exes(paths) -> list[Path]:
+    """試刪一輪：回這次刪掉的；被鎖著（舊程序還在收尾）刪不掉的留著，由呼叫端稍後再試。"""
+    gone = []
+    for old in paths:
+        try:
+            old.unlink()
+            gone.append(old)
+        except OSError:
+            continue
+    return gone
+
+
+def cleanup_old_exe(exe_path: Path, tries: int = 10, wait: float = 0.3, sleep=time.sleep) -> int:
+    """刪掉上次更新留下的 .old*.exe，被鎖著就等 wait 秒再試、最多 tries 輪，回刪掉的數量。
+    舊程序關閉要幾秒（Tk 收尾＋PyInstaller 刪自己的暫存夾），期間檔案鎖著刪不掉。
+    視窗（gui.py start_old_exe_cleanup）用同一組 old_exe_files／delete_old_exes，但要每輪回報進度給畫面，所以自己控制迴圈（每秒一輪、最多 90 輪）；
+    這個函式是不需要進度的呼叫端用的（GU-11：原 docstring 寫成視窗在用它，與實際不符）。"""
+    pending = old_exe_files(exe_path)
     n = 0
-    for old in exe_path.parent.glob(exe_path.stem + ".old*.exe"):
-        for _ in range(tries):
-            try:
-                old.unlink()
-                n += 1
-                break
-            except OSError:
-                time.sleep(wait)
+    for i in range(max(1, tries)):
+        gone = delete_old_exes(pending)
+        n += len(gone)
+        pending = [p for p in pending if p not in gone]
+        if not pending:
+            break
+        if i < tries - 1:
+            sleep(wait)
     return n

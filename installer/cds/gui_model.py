@@ -134,8 +134,9 @@ def _pwsh_status(which=shutil.which, run=subprocess.run, msi_location=_pwsh_msi_
     except Exception:  # noqa: BLE001
         ver = "?"
     # Claude Code 偵測不到的是 Store／MSIX 版（路徑在 WindowsApps 底下的別名，issue #55041）；MSI 版裝在哪個磁碟都可以
+    # （GU-12：原條件多一段 `(bool(reg) and not store)`，被後面的 `not store` 涵蓋，邏輯等價、拿掉）
     store = "windowsapps" in str(exe).lower()
-    good = sys.platform != "win32" or msi.exists() or (bool(reg) and not store) or not store
+    good = sys.platform != "win32" or msi.exists() or not store
     if good:
         where = "" if msi.exists() else f"（{Path(exe).parent}）"
         return EnvItem(True, f"PowerShell {ver}{where}", None)
@@ -144,17 +145,20 @@ def _pwsh_status(which=shutil.which, run=subprocess.run, msi_location=_pwsh_msi_
     return EnvItem(None, f"PowerShell {ver}{note}", "pwsh7")
 
 
-def find_system_python(which=shutil.which, run=subprocess.run) -> tuple[str | None, tuple[int, ...] | None]:
-    """exe 模式用：找系統的 Python（py 啟動器優先，再 python3／python），回 (執行檔完整路徑, 版本)。沒有回 (None, None)。"""
+def find_system_python(which=shutil.which, run=subprocess.run, exists=os.path.isfile) -> tuple[str | None, tuple[int, ...] | None]:
+    """exe 模式用：找系統的 Python（py 啟動器優先，再 python3／python），回 (執行檔完整路徑, 版本)。沒有回 (None, None)。
+    GU-01（2026-11-12 健檢）：原本用 .split() 依空白切輸出，`C:\\Program Files\\...`、`C:\\Users\\John Smith\\...` 被截成 `C:/Program`，
+    exe 模式所有 hook 被註冊成壞路徑。改成逐行解析；子程序強制 UTF-8 輸出（中文使用者名稱不經碼頁 950 亂碼）；路徑要真的存在才採用。"""
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
     for cand in ("py", "python3", "python"):
         exe = which(cand)
         if not exe:
             continue
         args = [exe, "-3"] if cand == "py" else [exe]
         try:
-            r = run(args + ["-c", "import sys;print(sys.executable);print('.'.join(map(str,sys.version_info[:3])))"], capture_output=True, timeout=15)
-            lines = (r.stdout or b"").decode("utf-8", "replace").split()
-            if r.returncode == 0 and len(lines) >= 2 and "WindowsApps" not in lines[0]:  # 商店的假 python.exe 排除
+            r = run(args + ["-c", "import sys;print(sys.executable);print('.'.join(map(str,sys.version_info[:3])))"], capture_output=True, timeout=15, env=env)
+            lines = [x.strip() for x in (r.stdout or b"").decode("utf-8", "replace").splitlines() if x.strip()]
+            if r.returncode == 0 and len(lines) >= 2 and "windowsapps" not in lines[0].lower() and exists(lines[0]):  # 商店的假 python.exe 排除
                 return Path(lines[0]).as_posix(), parse_ver(lines[1])
         except Exception:  # noqa: BLE001
             continue
@@ -351,6 +355,77 @@ def valid_mem_gb(v) -> float:
     return x
 
 
+# GU-05（2026-11-12 健檢）：用量門檻原本視窗只 float()、匯入另有一份 1～100 檢查，0、-5、nan 都寫得進去（nan 寫出非法 JSON 的 NaN）。
+# 數值欄位的檢查一律走下面這幾個函式：視窗表單（gui.py _collect）、匯入（import_profile）、套用（apply_form → validate_form）、寫檔（write_*）共用。
+THRESHOLD_RANGE = (1.0, 100.0)
+THRESHOLD_LABELS = {"fiveHour": "5 小時用量門檻", "sevenDay": "7 天用量門檻"}
+
+
+def valid_threshold(v, label: str = "用量門檻") -> float:
+    """1～100（%）的數字，否則 ValueError。nan、inf、布林都不算數字。"""
+    if isinstance(v, bool):
+        raise ValueError(f"{label}要是數字：{v!r}")
+    try:
+        x = float(str(v).strip()) if isinstance(v, str) else float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"{label}要是數字：{v!r}") from None
+    if not (THRESHOLD_RANGE[0] <= x <= THRESHOLD_RANGE[1]):  # nan 比較一律 False，會落在這裡
+        raise ValueError(f"{label}要在 {THRESHOLD_RANGE[0]:g}～{THRESHOLD_RANGE[1]:g}%：{v!r}")
+    return x
+
+
+def valid_task_minutes(v) -> int:
+    """背景任務巡檢分鐘數：≥1 的整數，否則 ValueError（原本視窗 0 會被無聲改成 1、亂打字無聲退回舊值）。"""
+    if isinstance(v, bool):
+        raise ValueError(f"巡檢分鐘數要是整數：{v!r}")
+    try:
+        x = float(str(v).strip()) if isinstance(v, str) else float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"巡檢分鐘數要是整數：{v!r}") from None
+    if not (x >= 1) or not x.is_integer():  # nan、inf 的 is_integer() 都是 False
+        raise ValueError(f"巡檢分鐘數要是 ≥1 的整數：{v!r}")
+    return int(x)
+
+
+def valid_pa_int(k: str, v) -> int:
+    """專案自動化的數字欄位：整數、不小於 PA_INT_MIN（minSourceFiles ≥1，其餘 ≥0；0＝不檢查），否則 ValueError。"""
+    label = PA_LABELS.get(k, k)
+    if isinstance(v, bool):
+        raise ValueError(f"{label}要是整數：{v!r}")
+    try:
+        x = float(str(v).strip()) if isinstance(v, str) else float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"{label}要是整數：{v!r}") from None
+    lo = PA_INT_MIN.get(k, 0)
+    if not (x >= lo) or not x.is_integer():
+        raise ValueError(f"{label}要是 ≥{lo} 的整數：{v!r}")
+    return int(x)
+
+
+def _unchanged(a, b) -> bool:
+    """表單值與目前狀態相同（nan 視為相同）：沒動過的欄位不檢查——使用者自己手改進設定檔的舊值（例如門檻 0.5）不該擋住不相關的套用／更新。"""
+    try:
+        x, y = float(a), float(b)
+    except (TypeError, ValueError):
+        return False
+    return x == y or (x != x and y != y)
+
+
+def validate_form(form: "Form", state: dict | None = None) -> None:
+    """套用前整份表單的數值檢查；有一項不合格就 ValueError（訊息指出欄位），apply_form 會整個不動。
+    給了 state 時，與目前狀態相同的欄位略過（只檢查這次要寫的值）。"""
+    st = state or {}
+    for k in ("fiveHour", "sevenDay"):
+        v = form.thresholds.get(k)
+        if not (state and _unchanged(v, (st.get("thresholds") or {}).get(k))):
+            valid_threshold(v, THRESHOLD_LABELS[k])
+    valid_task_minutes(form.task_check.get("minutes", DEFAULT_TASK_CHECK["minutes"]))
+    valid_mem_gb(form.mem_gb)
+    for k in PA_INT_KEYS:
+        if k in form.project_auto:
+            valid_pa_int(k, form.project_auto[k])
+
+
 def read_mem_gate(lay: Layout) -> float:
     p = lay.payload / "config" / "dispatch-config.json"
     try:
@@ -420,8 +495,7 @@ def write_project_auto(lay: Layout, auto: dict) -> None:
     for k in PA_BOOL_KEYS:
         t[k] = bool(auto.get(k, DEFAULT_PROJECT_AUTO[k]))
     for k in PA_INT_KEYS:
-        v = _pa_clean_int(k, auto.get(k, DEFAULT_PROJECT_AUTO[k]))
-        t[k] = DEFAULT_PROJECT_AUTO[k] if v is None else v
+        t[k] = valid_pa_int(k, auto.get(k, DEFAULT_PROJECT_AUTO[k]))  # GU-05：不合法就丟 ValueError（原本無聲換成預設值）
     d["projectAutomation"] = t
     d["updated"] = _dt.date.today().isoformat()
     write_json(p, d)
@@ -471,22 +545,36 @@ def read_task_check(lay: Layout) -> dict:
 
 
 def write_task_check(lay: Layout, enabled: bool, minutes: int) -> None:
+    """只改 taskCheck 的 enabled／minutes，段內其他鍵保留（GU-07：原本整段重建，使用者手動加的鍵會被洗掉）。"""
+    minutes = valid_task_minutes(minutes)
     p = lay.payload / "config" / "dispatch-config.json"
     d = read_json(p) if p.exists() else {}
-    t = d.get("taskCheck") if isinstance(d.get("taskCheck"), dict) else {}
-    desc = t.get("$說明") or "背景任務巡檢：有背景任務時每 minutes 分鐘用 CronCreate 醒來檢查，全部結束後刪除排程；enabled=false 完全不做。"
-    d["taskCheck"] = {"$說明": desc, "enabled": bool(enabled), "minutes": int(minutes)}
+    t = dict(d.get("taskCheck")) if isinstance(d.get("taskCheck"), dict) else {}
+    t = {"$說明": t.get("$說明") or "背景任務巡檢：有背景任務時每 minutes 分鐘用 CronCreate 醒來檢查，全部結束後刪除排程；enabled=false 完全不做。",
+         **{k: v for k, v in t.items() if k != "$說明"}}
+    t["enabled"] = bool(enabled)
+    t["minutes"] = minutes
+    d["taskCheck"] = t
     d["updated"] = _dt.date.today().isoformat()
     write_json(p, d)
 
 
+def _is_legacy_plan_entry(v) -> bool:
+    """舊 plan 格式在 usageThresholdPct 底下每個方案一個 {"fiveHour":…, "sevenDay":…}；扁平化時要拿掉。"""
+    return isinstance(v, dict) and ("fiveHour" in v or "sevenDay" in v)
+
+
 def write_thresholds(lay: Layout, five: float, seven: float) -> None:
-    """只改 usageThresholdPct 的兩個數字（扁平格式），其餘鍵保留；舊 plan 格式一併扁平化。"""
+    """只改 usageThresholdPct 的兩個數字（扁平格式），段內與檔內其他鍵保留（GU-07）；舊 plan 格式一併扁平化（拿掉各方案的子物件與 plan）。"""
+    five, seven = valid_threshold(five, THRESHOLD_LABELS["fiveHour"]), valid_threshold(seven, THRESHOLD_LABELS["sevenDay"])
     p = lay.payload / "config" / "dispatch-config.json"
     d = read_json(p) if p.exists() else {}
-    t = d.get("usageThresholdPct") if isinstance(d.get("usageThresholdPct"), dict) else {}
-    desc = t.get("$說明") or "觸發收尾的門檻（%）：5 小時用量 >= fiveHour 或 7 天用量 >= sevenDay。沒到就什麼都不做。"
-    d["usageThresholdPct"] = {"$說明": desc, "fiveHour": five, "sevenDay": seven}
+    t = dict(d.get("usageThresholdPct")) if isinstance(d.get("usageThresholdPct"), dict) else {}
+    t = {"$說明": t.get("$說明") or "觸發收尾的門檻（%）：5 小時用量 >= fiveHour 或 7 天用量 >= sevenDay。沒到就什麼都不做。",
+         **{k: v for k, v in t.items() if k != "$說明" and not _is_legacy_plan_entry(v)}}
+    t["fiveHour"] = five
+    t["sevenDay"] = seven
+    d["usageThresholdPct"] = t
     d.pop("plan", None)
     d["updated"] = _dt.date.today().isoformat()
     write_json(p, d)
@@ -744,6 +832,11 @@ def apply_form(lay: Layout, python: str, state: dict, form: Form, log, repo: Pat
                runner=web.default_runner, pip=video.default_pip, force: bool = False) -> int:
     """依表單執行安裝器命令。順序：金鑰／開關／env／模式（先寫 local.json，不套用）→ install/update（含 web、video）→ 門檻 → 下載資料夾 → Chrome。
     回傳 0 成功、1 有 ❌、2 用法錯誤。log 是 callable(str)。"""
+    try:
+        validate_form(form, state)  # GU-05：數值欄位不合法就整個不動（原本 0、-5、nan 都照寫）
+    except ValueError as e:
+        log(f"❌ 表單有誤，沒有套用任何變更：{e}")
+        return 2
     changes = diff(state, form)
     if not changes:
         log("沒有變更。")
@@ -765,20 +858,27 @@ def apply_form(lay: Layout, python: str, state: dict, form: Form, log, repo: Pat
     env_args = [f"{k}={v}" for k, v in form.env.items() if str(v).strip() not in ("", str(state["web"]["env_defaults"].get(k, "")))]
     env_reset = [k for k, v in form.env.items() if str(v).strip() in ("", str(state["web"]["env_defaults"].get(k, "")))]
     modes = [f"{n}={m}" for n, m in form.key_modes.items() if state["keys"].get(n, {}).get("mode") and m != state["keys"][n]["mode"]]
+    # GU-02：local.json 是壞檔時，下面所有會寫它的步驟都不做（原本 _local() 回空預設值、整檔蓋掉，金鑰無聲消失）；與 commands.web_config 對壞檔的處理一致
+    if keys or enable or disable or env_args or modes or any(c.kind in LOCAL_WRITE_KINDS for c in changes):  # env_reset 不算：沒有變更時它也常是非空（全部＝預設值）
+        try:
+            web.load_local(lay)
+        except ValueError as e:
+            log(f"❌ {e}（沒有套用任何變更）")
+            return 2
     # 0) 用量守門開關只是 local.json 的一個布林，apply 時 _sync_settings 會照它加／移除 hook
     if form.usage_guard != state["hooks"]["usage_guard_pref"]:
-        local = _local(lay)
+        local = _local_strict(lay)
         local["usageGuard"] = bool(form.usage_guard)
         web.save_local(lay, local)
         log(f"用量守門 → {'開' if form.usage_guard else '關'}（local.json usageGuard）")
     if form.source_guard != state["hooks"].get("source_guard_pref", True):
-        local = _local(lay)
+        local = _local_strict(lay)
         local["sourceGuard"] = bool(form.source_guard)
         web.save_local(lay, local)
         log(f"查證守門 → {'開' if form.source_guard else '關'}（local.json sourceGuard；hook 每次回覆結束時讀它）")
     notes = {n: str(v).strip() for n, v in form.key_notes.items() if v is not None and n in state["keys"] and str(v).strip() != state["keys"][n].get("account", "")}
     if notes:
-        local = _local(lay)
+        local = _local_strict(lay)
         kn = local.get("keyNotes") if isinstance(local.get("keyNotes"), dict) else {}
         for n, v in notes.items():
             if v:
@@ -832,7 +932,7 @@ def apply_form(lay: Layout, python: str, state: dict, form: Form, log, repo: Pat
         write_project_auto(lay, form.project_auto)
         log(f"專案自動化寫入：{form.project_auto}")
     if any(c.kind == "download_dir" for c in changes):
-        local = _local(lay)
+        local = _local_strict(lay)
         local.setdefault("video", {})["downloadDir"] = form.download_dir or ""
         web.save_local(lay, local)
         log(f"下載資料夾寫入 local.json：{form.download_dir or '（預設）'}")
@@ -842,15 +942,25 @@ def apply_form(lay: Layout, python: str, state: dict, form: Form, log, repo: Pat
     return worst
 
 
+# 這些變更種類（Change.kind）會寫 local.json；壞檔時整批不套用（見 apply_form 的預檢）
+LOCAL_WRITE_KINDS = ("guard", "source_guard", "keys", "env", "download_dir", "web")
+
+
 def _local(lay: Layout) -> dict:
+    """只給畫面讀取與 web.mask 用：壞檔回空預設值。要寫檔一律用 _local_strict，不可把這個回傳值寫回去（GU-02）。"""
     try:
         return web.load_local(lay)
     except ValueError:
         return {"keys": {}, "enable": [], "disable": [], "env": {}}
 
 
+def _local_strict(lay: Layout) -> dict:
+    """寫入路徑用：壞檔丟 ValueError（訊息含檔名與「請修好或刪除」），絕不用空預設值整檔蓋掉。"""
+    return web.load_local(lay)
+
+
 def _prewrite_local(lay, keys, enable, disable, env_args, env_reset, modes):
-    local = _local(lay)
+    local = _local_strict(lay)
     for kv in keys:
         web.set_key_arg(local, kv)
     for kv in env_args:
@@ -871,7 +981,10 @@ def _prewrite_local(lay, keys, enable, disable, env_args, env_reset, modes):
 def _reset_env_override(lay: Layout, keys: list[str]) -> None:
     if not keys:
         return
-    local = _local(lay)
+    try:
+        local = _local_strict(lay)
+    except ValueError:
+        return  # 壞檔：沒東西可重設，也絕不寫（錯誤訊息由 apply_form 預檢與 commands.web_config 給）
     env = local.get("env") or {}
     changed = False
     for k in keys:
@@ -1028,6 +1141,33 @@ def install_hint(code: int, out: str) -> str | None:
     return None
 
 
+def decode_output(b: bytes | None, fallback: str | None = None) -> str:
+    """外部程式（winget、powershell.exe）被重導向時輸出的編碼不固定：先照 UTF-8 嚴格解；不是合法 UTF-8 就改用系統碼頁（台灣為 cp950）解，
+    仍有解不開的位元組才用 errors=replace（M：絕不丟 UnicodeDecodeError；碼頁 950 的中文訊息不會整段變成 U+FFFD，
+    install_hint 才找得到「結束代碼為: 1603」這類在地化字串）。"""
+    import locale
+    b = b or b""
+    try:
+        return b.decode("utf-8", "strict")
+    except UnicodeDecodeError:
+        pass
+    try:
+        return b.decode(fallback or locale.getpreferredencoding(False) or "utf-8", "replace")
+    except LookupError:
+        return b.decode("utf-8", "replace")
+
+
+def should_close_after_apply(close_requested: bool, apply_code: int | None) -> bool:
+    """關窗時選「先套用」：套用工作結束後要不要關窗。只有真的跑完套用而且成功（結束碼 0）才關；
+    失敗（1、2）或套用根本沒跑（None）都不關，讓使用者看得到 ❌（GU-06：原本失敗也照樣關窗）。"""
+    return bool(close_requested) and apply_code == 0
+
+
+def relaunch_command(executable: str, home) -> list[str]:
+    """視窗內換完 exe 後重開的指令：要把目前用的設定目錄帶過去，否則用 --claude-home 開的視窗重開後會跑到預設目錄（GU-12）。"""
+    return [str(executable), "--claude-home", str(home), "--after-update"]
+
+
 def install_action(action: str, python: str, gpu: bool = False, run=subprocess.run) -> tuple[int, str]:
     if action == "faster_whisper":
         if not python:  # 原本把 None 傳給 subprocess，顯示「expected str, bytes or os.PathLike object, not NoneType」
@@ -1042,7 +1182,7 @@ def install_action(action: str, python: str, gpu: bool = False, run=subprocess.r
         r = run(cmd, capture_output=True, timeout=1800)
     except Exception as e:  # noqa: BLE001
         return 1, str(e)
-    out = ((r.stdout or b"") + (r.stderr or b"")).decode("utf-8", "replace")
+    out = decode_output((r.stdout or b"") + (r.stderr or b""))
     return r.returncode, out[-1500:]
 
 
@@ -1099,38 +1239,96 @@ def export_profile(state: dict, form: Form, include_keys: bool = False, current_
     return d
 
 
+def _bad_profile(field: str, want: str, v) -> ValueError:
+    return ValueError(f"設定檔的 {field} 不合格（要{want}）：{v!r}；整份設定檔不匯入")
+
+
 def import_profile(form: Form, data: dict) -> Form:
-    if data.get("claude-dev-system-profile") != 1:
+    """把設定檔套到表單上。GU-08：每個欄位先做型別與範圍檢查，任何一項不合格就丟 ValueError、整份不匯入（原本 "abc"、"yes"、"no" 都放行，
+    之後 int("abc") 在 Tk callback 外丟例外、bool("no") 變成 True）。數值規則與視窗表單共用 valid_*（唯一來源）。"""
+    if not isinstance(data, dict) or data.get("claude-dev-system-profile") != 1:
         raise ValueError("不是本工具的設定檔（缺 claude-dev-system-profile: 1）")
     f = copy.deepcopy(form)
-    th = data.get("thresholds")
-    if isinstance(th, dict):
-        for k in ("fiveHour", "sevenDay"):
-            if k in th and not (isinstance(th[k], (int, float)) and 1 <= float(th[k]) <= 100):
-                raise ValueError(f"設定檔的門檻 {k} 不是 1～100 的數字：{th[k]!r}")
-    tc = data.get("task_check")
-    if isinstance(tc, dict) and "minutes" in tc and not (isinstance(tc["minutes"], (int, float)) and tc["minutes"] >= 1):
-        raise ValueError(f"設定檔的巡檢分鐘數不合法：{tc['minutes']!r}")
-    if "mem_gb" in data:
-        f.mem_gb = valid_mem_gb(data["mem_gb"])
     for k in ("web_enabled", "video_enabled", "usage_guard", "source_guard"):
         if k in data and not isinstance(data[k], bool):
             raise ValueError(f"設定檔的 {k} 必須是 true／false")
     if "download_dir" in data and not isinstance(data["download_dir"], str):
         raise ValueError("設定檔的 download_dir 必須是字串")
+    if "chrome_default_enabled" in data and data["chrome_default_enabled"] is not None and not isinstance(data["chrome_default_enabled"], bool):
+        raise _bad_profile("chrome_default_enabled", " true／false 或 null", data["chrome_default_enabled"])
+    if "mem_gb" in data:
+        f.mem_gb = valid_mem_gb(data["mem_gb"])
     for k in ("web_enabled", "video_enabled", "download_dir", "chrome_default_enabled", "usage_guard", "source_guard"):
         if k in data:
             setattr(f, k, data[k])
-    if isinstance(data.get("sub_brief"), dict):
-        f.sub_brief.update({k: v for k, v in data["sub_brief"].items() if k in DEFAULT_SUB_BRIEF and isinstance(v, bool)})
-    for k in ("servers", "env", "key_modes", "thresholds", "task_check", "project_auto"):
-        if isinstance(data.get(k), dict):
-            vals = data[k]
-            if k == "servers":
-                vals = {n: bool(v) for n, v in vals.items() if n in f.servers}  # 別台機器才有的 MCP 名稱略過
-            if k == "key_modes":
-                vals = {n: v for n, v in vals.items() if n in KEY_INFO and v in web.KEY_MODES}
-            getattr(f, k).update(vals)
+    th = data.get("thresholds")
+    if th is not None and not isinstance(th, dict):
+        raise _bad_profile("thresholds", "是物件", th)
+    for k in ("fiveHour", "sevenDay"):
+        if isinstance(th, dict) and k in th:
+            try:
+                f.thresholds[k] = valid_threshold(th[k], f"設定檔的門檻 {k}")
+            except ValueError as e:
+                raise ValueError(f"{e}；整份設定檔不匯入") from None
+    tc = data.get("task_check")
+    if tc is not None and not isinstance(tc, dict):
+        raise _bad_profile("task_check", "是物件", tc)
+    if isinstance(tc, dict):
+        if "enabled" in tc:
+            if not isinstance(tc["enabled"], bool):
+                raise _bad_profile("task_check.enabled", " true／false", tc["enabled"])
+            f.task_check["enabled"] = tc["enabled"]
+        if "minutes" in tc:
+            try:
+                f.task_check["minutes"] = valid_task_minutes(tc["minutes"])
+            except ValueError as e:
+                raise ValueError(f"設定檔的 task_check.minutes：{e}；整份設定檔不匯入") from None
+    pa = data.get("project_auto")
+    if pa is not None and not isinstance(pa, dict):
+        raise _bad_profile("project_auto", "是物件", pa)
+    if isinstance(pa, dict):
+        for k in PA_BOOL_KEYS:
+            if k in pa:
+                if not isinstance(pa[k], bool):
+                    raise _bad_profile(f"project_auto.{k}", " true／false", pa[k])
+                f.project_auto[k] = pa[k]
+        for k in PA_INT_KEYS:
+            if k in pa:
+                try:
+                    f.project_auto[k] = valid_pa_int(k, pa[k])
+                except ValueError as e:
+                    raise ValueError(f"設定檔的 project_auto.{k}：{e}；整份設定檔不匯入") from None
+    sb = data.get("sub_brief")
+    if sb is not None and not isinstance(sb, dict):
+        raise _bad_profile("sub_brief", "是物件", sb)
+    if isinstance(sb, dict):
+        for k, v in sb.items():
+            if k in DEFAULT_SUB_BRIEF:
+                if not isinstance(v, bool):
+                    raise _bad_profile(f"sub_brief.{k}", " true／false", v)
+                f.sub_brief[k] = v
+    sv = data.get("servers")
+    if sv is not None and not isinstance(sv, dict):
+        raise _bad_profile("servers", "是物件", sv)
+    if isinstance(sv, dict):
+        for n, v in sv.items():
+            if n in f.servers:  # 別台機器才有的 MCP 名稱略過
+                if not isinstance(v, bool):
+                    raise _bad_profile(f"servers.{n}", " true／false", v)
+                f.servers[n] = v
+    ev = data.get("env")
+    if ev is not None and not isinstance(ev, dict):
+        raise _bad_profile("env", "是物件", ev)
+    if isinstance(ev, dict):
+        for k, v in ev.items():
+            if isinstance(v, bool) or not isinstance(v, (str, int, float)):
+                raise _bad_profile(f"env.{k}", "是字串或數字", v)
+            f.env[k] = v
+    km = data.get("key_modes")
+    if km is not None and not isinstance(km, dict):
+        raise _bad_profile("key_modes", "是物件", km)
+    if isinstance(km, dict):
+        f.key_modes.update({n: v for n, v in km.items() if n in KEY_INFO and v in web.KEY_MODES})
     if isinstance(data.get("keys"), dict):
         for n, v in data["keys"].items():
             if n in KEY_INFO and isinstance(v, str) and v:
