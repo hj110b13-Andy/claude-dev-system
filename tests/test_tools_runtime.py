@@ -286,7 +286,8 @@ class SameProjectScope(_RgBase):
     def test_project_name_records_project_root(self):
         """F：不是現存路徑的 --project 名稱改記專案根，不記「cwd＼名稱」。"""
         pp = self.rg.project_path
-        self.assertEqual(os.path.normcase(pp("proj-name", cwd=str(self.proj / "sub"))), os.path.normcase(str(self.proj)))
+        self.assertEqual(os.path.normcase(pp("proj-name", cwd=str(self.proj / "sub"))), os.path.normcase(os.path.realpath(str(self.proj))),
+                         "專案根是解開連結後的路徑（CI 的暫存資料夾在 Windows 是 8.3 短檔名、在 macOS 是 /var 連結）")
         self.assertEqual(os.path.normcase(pp(str(self.other))), os.path.normcase(str(self.other)), "現存路徑照原樣（絕對化）")
         self.assertEqual(pp(""), "")
         absent = str(self.home / "nope" / "x")
