@@ -11,7 +11,10 @@
 repo 與安裝副本的 tools/ 與 hooks/ 相對位置相同）。下列判定 usage_guard.py 沒有，寫在這支工具裡：
   - git add -A／stash／整批結束程序／重型工作／resgate 的指令正則（取自 2026-11-11 的一次性腳本 cp.py、measure.py）
   - 記憶內文讀取（只看有沒有讀過 memory 底下非 MEMORY.md 的檔；guard 的版本要帶 mem_dir，這裡不需要）
-  - 中文比例門檻 0.3：與 usage_guard.subagent_report_judge 內寫死的 0.3 相同（guard 沒有匯出常數）
+  - 「有過記憶體閘門」「上網前先讀 web-quick」看事件先後順序：真的執行了 resgate.py run／wait 才算閘門
+    （指令用 hook 的 _command_segments 切開，`grep resgate` 不算），讀 web-quick 要在第一次上網工具之前。
+中文比例門檻不在這裡定義：用 usage_guard.SUB_LANG_MIN_RATIO（main() 載入後存進 LANG_RATIO，標題與判定都引用它）。
+模型名稱統一成家族名（opus／sonnet／haiku／fable），meta 寫「haiku」、對話紀錄寫「claude-haiku-5-5」算同一種。
 """
 import argparse
 import glob
@@ -35,6 +38,8 @@ RE_STASH = re.compile(r"\bgit\s+(?:stash(?!\s+(?:list|show)\b)|reset\s+--hard|ch
 RE_KILL = re.compile(r"taskkill\s+/(?:F\s+/)?IM|Stop-Process\s+-Name|\bpkill\b|\bkillall\b", re.I)
 # 重型工作：回測、全套測試、build（規則見全域 CLAUDE.md〈重型工作記憶體閘門〉）；指令本身含 resgate 的不算重型
 RE_HEAVY = re.compile(r"backtest|npm\s+(?:run\s+)?(?:test|build)|vitest|next\s+build|unittest\s+discover|pytest|build_exe", re.I)
+# 真的「執行」記憶體閘門：子指令開頭（可有執行器 py／python）就是 resgate.py 的 run 或 wait；grep／cat／echo 提到 resgate 不算
+RE_RESGATE_EXEC = re.compile(r"^(?:\w+=\S+\s+)*(?:(?:py|python3?)(?:\.exe)?(?:\s+-[\w.]+)*\s+)?\S*resgate\.py[\"']?\s+(?:run|wait)\b", re.I)
 RE_BRANCH = re.compile(r"分支|branch", re.I)
 RE_DENY = "這份報告還不能交"
 
@@ -109,6 +114,46 @@ def is_heavy(cmd, ug):
     return any(RE_RUNNER.match(sg) and RE_HEAVY.search(sg) for sg in segs)
 
 
+def _segments(cmd, ug):
+    try:
+        return ug._command_segments(cmd)
+    except Exception:
+        return [cmd]
+
+
+def is_resgate_exec(cmd, ug):
+    """這個指令有沒有真的執行 resgate.py run／wait（用 hook 的 _command_segments 切子指令，唯一來源）。"""
+    return any(RE_RESGATE_EXEC.match(sg.strip()) for sg in _segments(cmd, ug))
+
+
+def heavy_and_gated(cmds, ug):
+    """依指令先後順序判斷：(有沒有跑重型工作, 有沒有哪個重型工作之前（含同一個指令裡，`resgate.py run … -- <重型指令>`）真的過了閘門)。"""
+    heavy = gated = seen = False
+    for cmd in cmds:
+        for sg in _segments(cmd, ug):
+            sg = sg.strip()
+            if RE_RESGATE_EXEC.match(sg):
+                seen = True
+            if RE_RUNNER.match(sg) and RE_HEAVY.search(sg):
+                heavy = True
+                gated = gated or seen
+    return heavy, gated
+
+
+def model_family(*names):
+    """模型家族名：meta 的 `haiku`、對話紀錄的 `claude-haiku-5-5`、`claude-sonnet-4-5-20250929` 都歸成同一種。"""
+    for n in names:
+        if not n:
+            continue
+        m = re.search(r"(opus|sonnet|haiku|fable)", str(n), re.I)
+        if m:
+            return m.group(1).lower()
+        s = re.sub(r"^claude-", "", str(n)).split("-")[0]
+        if s:
+            return s
+    return "?"
+
+
 def analyze(path, ug, mem_dir=None):
     global LANG_RATIO
     LANG_RATIO = ug.SUB_LANG_MIN_RATIO
@@ -127,8 +172,8 @@ def analyze(path, ug, mem_dir=None):
     final = None
     final_from_text = False
     denied_seen = out_after_deny = False  # 退回之後有沒有再出現文字或 SubagentHandback（補交）
-    heavy = resg = False
     cmds_all = []
+    tools_all, reads_all = [], []  # 自己讀到的（_sub_scan 以嚴格 UTF-8 開檔，紀錄最後一行寫到一半時會整個回 None）
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
@@ -173,7 +218,12 @@ def analyze(path, ug, mem_dir=None):
             last_tool = n
             p = str(i.get("file_path") or "")
             cmd = str(i.get("command") or "")
-            if n == "Read" and "web-quick" in p:
+            tools_all.append(n)
+            if n == "Read":
+                reads_all.append(p)
+            if n in ("Bash", "PowerShell") and ("web-quick" in cmd or "web-sources" in cmd):
+                ev.append(("web-quick", "讀 web-quick（經指令）"))  # cat／Get-Content 讀也算（與 hook 的判定一致）
+            if n == "Read" and ("web-quick" in p or "web-sources" in p):
                 ev.append(("web-quick", "讀 web-quick"))
             elif n == "Read" and RE_MEMORY.search(p):
                 ev.append(("memory", "讀記憶 " + os.path.basename(p)))
@@ -181,8 +231,7 @@ def analyze(path, ug, mem_dir=None):
                 ev.append(("web", "上網 " + n.split("__")[-1]))
             elif n in ("Bash", "PowerShell"):
                 cmds_all.append(cmd)
-                if "resgate" in cmd:
-                    resg = True
+                if is_resgate_exec(cmd, ug):
                     ev.append(("resgate", "resgate"))
                 elif is_heavy(cmd, ug):
                     heavy = True
@@ -204,14 +253,15 @@ def analyze(path, ug, mem_dir=None):
     if final_from_text and mids:
         mids = mids[:-1]  # 最後一則文字是最終報告，不算中途文字
     # 記憶、重型、commit 等彙總：用 usage_guard 的掃描（同一套紀錄解析）
-    scan = ug._sub_scan(path) or {"prompt": "", "tools": [], "reads": [], "cmds": []}
+    scan = ug._sub_scan(path) or {"prompt": "", "tools": tools_all, "reads": reads_all, "cmds": cmds_all}
     blob = "\n".join(scan["reads"] + scan["cmds"])
     cmds = scan["cmds"] or cmds_all
     web = any(ug.SUB_WEB_TOOL.search(x) for x in scan["tools"])
-    # 命令裡 resgate 與重型分開判（含 resgate 的指令不算重型）
-    # 0.23.0 起建議寫法是 `resgate.py run … -- <重型指令>`（同一個指令裡），所以含 resgate 的指令也算「要跑重型工作」
-    heavy = any(is_heavy(c, ug) for c in cmds)
-    resg = any("resgate" in c for c in cmds)
+    # 0.23.0 起建議寫法是 `resgate.py run … -- <重型指令>`（同一個指令裡），所以含 resgate 的指令也算「要跑重型工作」；
+    # 閘門要「真的執行 resgate.py run／wait」而且在重型工作之前（grep resgate 不算，閘門在重型工作之後也不算）
+    heavy, gated = heavy_and_gated(cmds, ug)
+    web_idx = next((k for k, (kind, _) in enumerate(ev) if kind == "web"), None)
+    quick_first = web_idx is not None and any(kind == "web-quick" for kind, _ in ev[:web_idx])  # 讀 web-quick 要在第一次上網工具之前
     deny_idx = [k for k, (kind, _) in enumerate(ev) if kind == "DENY"]
     resubmitted = None
     if deny_idx:
@@ -220,13 +270,14 @@ def analyze(path, ug, mem_dir=None):
         "id": aid,
         "description": meta.get("description"),
         "agentType": meta.get("agentType"),
-        "model": meta.get("model") or (model or "").replace("claude-", "") or "?",
+        "model": model_family(meta.get("model"), model),
+        "model_id": meta.get("model") or model or "?",
         "effort": meta.get("effort"),
         "brief": brief,
         "mem": ug.sub_memory_read(blob, mem_dir) if mem_dir and os.path.isdir(mem_dir) else bool(RE_MEMORY.search(blob)),
         "mem_tool": any(RE_MEMORY.search(p) for p in scan["reads"]),  # 用 Read 工具讀；其餘（Get-Content、cat）只經指令
         "web": web,
-        "web_quick": web and ("web-quick" in blob or "web-sources" in blob),
+        "web_quick": bool(web and quick_first),
         "final_len": len(final or ""),
         "final_zh": (ug._sub_cjk_ratio(final) >= LANG_RATIO) if final else None,
         "mid_total": len(mids),
@@ -234,7 +285,7 @@ def analyze(path, ug, mem_dir=None):
         "commit": any(ug.SUB_COMMIT.search(c) for c in cmds),
         "commit_branch_in_report": bool(final and RE_BRANCH.search(final)),
         "heavy": heavy,
-        "gate": heavy and resg,
+        "gate": bool(heavy and gated),
         "add_all": any(RE_ADD_ALL.search(c) for c in cmds),
         "stash": any(RE_STASH.search(c) for c in cmds),
         "kill": any(RE_KILL.search(c) for c in cmds),
@@ -300,7 +351,7 @@ def print_summary(s):
         ("讀過記憶內文", f"{fmt(s['memory_read'])}（用 Read 工具 {s['memory_read_by_read_tool'][0]}、其餘只經指令讀）"),
         ("有上網", fmt(s["web"])),
         ("  其中上網前先讀 web-quick", fmt(s["web_quick_first"])),
-        ("最終報告是使用者語言（中文比例≥0.3）", fmt(s["final_in_user_language"])),
+        (f"最終報告是使用者語言（中文比例≥{LANG_RATIO}）", fmt(s["final_in_user_language"])),
         ("中途文字英文則數／總則數", fmt(s["mid_text_english"])),
         ("有 commit", fmt(s["commit"])),
         ("  其中報告有交代分支", fmt(s["commit_branch_in_report"])),
@@ -319,6 +370,7 @@ def print_summary(s):
 
 
 def main():
+    global LANG_RATIO
     ap = argparse.ArgumentParser(description="量派出的 agent 有沒有照規則做（只讀）")
     ap.add_argument("project", nargs="?", default=os.getcwd())
     g = ap.add_mutually_exclusive_group()
@@ -352,6 +404,7 @@ def main():
         print("這個專案沒有符合條件的 agent 對話紀錄。")
         return 0
     ug = load_guard()
+    LANG_RATIO = ug.SUB_LANG_MIN_RATIO
     rows = []
     for sid, sub, _ in sessions:
         for f in sorted(glob.glob(os.path.join(sub, "agent-*.jsonl")), key=os.path.getmtime):

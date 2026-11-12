@@ -143,6 +143,75 @@ class AgentAudit(unittest.TestCase):
         self.assertLess(out.index("讀 web-quick"), out.index("git add -A"))
         self.assertLess(out.index("git add -A"), out.index("git commit"))
 
+    def _row(self, aid):
+        return next(r for r in self.summary()["agents"] if r["id"] == aid)
+
+    def test_gate_needs_real_resgate_execution_before_heavy(self):
+        # TB-13：原本指令裡出現 resgate 字樣（grep、cat）就算有過閘門
+        self.agent("g1", [use("Bash", command="grep -n resgate README.md"), use("Bash", command="npm test"), use("SubagentHandback", message=ZH)])
+        self.agent("g2", [use("Bash", command='py -3 "C:/u/.claude/claude-dev-system/tools/resgate.py" run --desc t -- npm test'), use("SubagentHandback", message=ZH)])
+        self.agent("g3", [use("Bash", command="cd x && py -3 resgate.py wait --desc t"), use("Bash", command="npm run build"), use("SubagentHandback", message=ZH)])
+        self.agent("g4", [use("Bash", command="npm run build"), use("Bash", command="py -3 resgate.py wait"), use("SubagentHandback", message=ZH)])
+        self.agent("g5", [use("Bash", command='echo "py -3 resgate.py run" && npm test'), use("SubagentHandback", message=ZH)])
+        for aid, heavy, gate in (("g1", True, False), ("g2", True, True), ("g3", True, True), ("g4", True, False), ("g5", True, False)):
+            r = self._row(aid)
+            self.assertEqual((r["heavy"], r["gate"]), (heavy, gate), aid)
+        ev = {r["id"]: r["events"] for r in self.summary()["agents"]}  # JSON 的 events 是壓縮過的文字清單
+        self.assertNotIn("resgate", ev["g1"], "grep resgate 不是閘門事件")
+        self.assertIn("resgate", ev["g2"])
+
+    def test_web_quick_must_be_read_before_first_web_tool(self):
+        # TB-13：原本先上網、後讀 web-quick 也判成「上網前先讀」
+        self.agent("w1", [use("WebSearch", query="q"), use("Read", file_path="C:/x/rules/web-quick.md"), use("SubagentHandback", message=ZH)])
+        self.agent("w2", [use("Read", file_path="C:/x/rules/web-quick.md"), use("WebSearch", query="q"), use("SubagentHandback", message=ZH)])
+        self.agent("w3", [use("Bash", command="cat ~/.claude/claude-dev-system/rules/web-quick.md"), use("WebFetch", url="u"), use("SubagentHandback", message=ZH)])
+        self.agent("w4", [use("Read", file_path="C:/x/rules/web-quick.md"), use("SubagentHandback", message=ZH)])
+        self.assertEqual([self._row(a)["web_quick"] for a in ("w1", "w2", "w3", "w4")], [False, True, True, False])
+        s = self.summary()["summary"]
+        self.assertEqual((s["web"], s["web_quick_first"]), ([3, 4], [2, 3]))
+
+    def test_truncated_last_line_does_not_lose_web_and_memory(self):
+        # TB-14 在稽核這一側的影響：紀錄最後一行寫到一半（agent 還在跑），_sub_scan 以嚴格 UTF-8 讀會整個回 None
+        self.agent("t1", [use("Read", file_path="C:/p/memory/foo.md"), use("WebSearch", query="q"), use("SubagentHandback", message=ZH)])
+        with open(self.sub / "agent-t1.jsonl", "ab") as f:
+            f.write('{"type":"assistant","x":"中'.encode("utf-8")[:-1])
+        r = self._row("t1")
+        self.assertTrue(r["web"])
+        self.assertTrue(r["mem"])
+
+    def test_model_family_unified(self):
+        # TB-15：meta 寫 haiku、對話紀錄寫 claude-haiku-5-5 原本被拆成兩類
+        self.agent("m1", [use("SubagentHandback", message=ZH)], "haiku")
+        rows = [{"type": "user", "message": {"role": "user", "content": "派工"}},
+                {"type": "assistant", "message": {"role": "assistant", "model": "claude-haiku-5-5", "content": [
+                    {"type": "tool_use", "name": "SubagentHandback", "input": {"message": ZH}}]}}]
+        (self.sub / "agent-m2.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", encoding="utf-8")
+        self.assertEqual(self.summary()["summary"]["models"], {"haiku": 2})
+        self.assertEqual(self._row("m2")["model_id"], "claude-haiku-5-5")
+        self.assertEqual([aa.model_family(x) for x in ("claude-sonnet-4-5-20250929", "opus", "claude-3-5-haiku-20241022", None, "gpt-x")],
+                         ["sonnet", "opus", "haiku", "?", "gpt"])
+
+    def test_since_selects_sessions_by_mtime(self):
+        self.build()
+        old_t = 946684800  # 2000-01-01
+        for f in self.sub.glob("agent-*"):
+            os.utime(f, (old_t, old_t))
+        rc, out = self.run_cli("--since", "2020-01-01")
+        self.assertEqual(rc, 0)
+        self.assertIn("沒有符合條件", out)
+        rc, out = self.run_cli("--since", "1999-12-31")
+        self.assertIn("agent 總數：5", out)
+        rc, out = self.run_cli("--since", "2026/11/11")
+        self.assertEqual(rc, 2)
+        self.assertIn("YYYY-MM-DD", out)
+
+    def test_title_uses_guard_constant_not_hardcoded(self):
+        import inspect
+        self.assertNotIn("0.3", inspect.getsource(aa.print_summary))
+        self.build()
+        rc, out = self.run_cli()
+        self.assertIn(f"中文比例≥{aa.load_guard().SUB_LANG_MIN_RATIO}", out)
+
     def test_no_project_and_no_agents(self):
         import sys
         argv = sys.argv

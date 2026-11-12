@@ -244,10 +244,6 @@ class ProjectScanGitignore(unittest.TestCase):
             self.assertIn("a.log", self._rels(mod, root), "不是 git 專案就不判斷")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class VideoDownloadDir(unittest.TestCase):
     """download 預設資料夾：--out ＞ local.json video.downloadDir ＞ ~/Downloads（使用者要求下載預設存 D 槽）。"""
 
@@ -674,3 +670,7 @@ class Procs(unittest.TestCase):
         self.assertTrue(rows)
         self.assertLess(_t.time() - t0, 2.0)
         self.assertIsInstance(procs.session_leftovers(10_000), list)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -11,7 +11,7 @@ import sys
 from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from depgraph import build_graph, tarjan_sccs  # noqa: E402
+from depgraph import aliases_for, build_graph, tarjan_sccs  # noqa: E402
 
 EXPORT_RE = re.compile(r"^export\s+(?:default\s+)?(?:async\s+)?(?:function|const|let|class|type|interface|enum)\s+([A-Za-z0-9_$]+)", re.M)
 HEAD_RE = re.compile(r"^\s*(?:/\*\*?|//)\s*([^\n*/][^\n]*)", re.M)
@@ -37,7 +37,10 @@ def main():
     ap.add_argument("--notes", default="module-responsibilities.md")
     a = ap.parse_args()
     a.root = a.root.replace(os.sep, "/").rstrip("/")
-    aliases = dict(x.split("=", 1) for x in a.alias) if a.alias else {"@/": a.root}
+    if not os.path.isdir(a.root):  # root 打錯時原本照樣 exit 0 並寫出 0 檔的空清單
+        print(f"不是資料夾：{a.root}")
+        sys.exit(2)
+    aliases = aliases_for(a.root, a.alias)  # 沒給 --alias 就讀 tsconfig／jsconfig（與 depgraph、project-scan 同一份）
     files, g, ext, unreadable = build_graph(a.root, None, aliases)
     sccs = tarjan_sccs(files, g)
     in_cycle = {f: i + 1 for i, s in enumerate(sccs) for f in s}
@@ -46,9 +49,17 @@ def main():
         for w in g[f]:
             indeg[w] += 1
     rows = []
+    skipped = []  # 讀不到的檔（被鎖住、權限）：略過並在清單與輸出計數，不讓一個檔讓整份盤點崩潰
+    unread = {f for f, _e in unreadable}  # build_graph 已經讀不到的，不再開第二次
     for f in files:
-        with open(f, encoding="utf-8") as fh:
-            text = fh.read()
+        if f in unread:
+            continue
+        try:
+            with open(f, encoding="utf-8-sig", errors="replace") as fh:  # 非 UTF-8（cp950 註解等）以替代字元讀，仍列入
+                text = fh.read()
+        except OSError as e:
+            skipped.append((f, str(e)))
+            continue
         rows.append((f, text.count("\n") + 1, indeg[f], len(g[f]), in_cycle.get(f, 0),
                      ", ".join(EXPORT_RE.findall(text)[:6]), head_comment(text)))
     bydir = defaultdict(list)
@@ -69,11 +80,13 @@ def main():
         for f, n, i, o, c, ex, hc in sorted(rs, key=lambda r: -r[2]):
             out.append(f"| {os.path.basename(f)} | {n} | {i} | {o} | {c or ''} | {ex} | {hc.replace('|', '／')} |")
         out.append("")
-    if unreadable:
+    bad = [*unreadable, *skipped]
+    if bad:
         out.append("## 無法讀取")
-        out.extend(f"- {f}：{e}" for f, e in unreadable)
-    open(a.out, "w", encoding="utf-8").write("\n".join(out) + "\n")
-    print(f"已寫 {a.out}：{len(files)} 檔、{len(bydir)} 個目錄")
+        out.extend(f"- {f}：{e}" for f, e in bad)
+    with open(a.out, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(out) + "\n")
+    print(f"已寫 {a.out}：{len(rows)} 檔、{len(bydir)} 個目錄" + (f"；略過讀不到的檔 {len(bad)} 個" if bad else ""))
 
 
 if __name__ == "__main__":

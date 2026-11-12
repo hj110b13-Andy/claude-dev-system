@@ -2,23 +2,28 @@
 
 適用 JS／TS 專案（.ts .tsx .js .jsx .mjs）。不寫死路徑，全部用參數：
   python depgraph.py <root>                          # 掃 <root>，印摘要
-  python depgraph.py <root> --alias @/=<root>        # 路徑別名（可多次；預設 @/ 指向 root）
+  python depgraph.py <root> --alias @/=<root>        # 路徑別名（可多次；沒給就讀 root 的 tsconfig／jsconfig，再沒有才 @/ 指向 root）
   python depgraph.py <root> --json out.json          # 另存完整圖
   python depgraph.py <root> --max-cycle-files 59     # 循環內檔數超過門檻就 exit 1（當推送前閘門）
   python depgraph.py <root> --forbid lib:app,components  # 分層規則：路徑含 /lib/ 的檔不可引用含 /app/ 或 /components/ 的檔
-只看靜態 import／export from／動態 import()；外部套件只統計名稱；--exclude-dir（預設 __tests__,node_modules）不計入。
+只看靜態 import／export from／動態 import()／require()；外部套件只統計名稱；--exclude-dir（預設 __tests__,node_modules）不計入。
+檔案走訪、忽略清單（EXCLUDE_DIRS、.gitignore、worktree 與巢狀 checkout、目錄連結）、別名解析、Tarjan 都用同資料夾 project-scan.py 的同一份實作
+（唯一來源，與盤點的循環結果一致）。root 不存在 exit 2。
 """
 import argparse
+import importlib.util
 import json
 import os
 import re
 import sys
 from collections import defaultdict
+from pathlib import Path
 
 IMPORT_RE = re.compile(
     r'^\s*(?:import|export)\b[^;]*?\bfrom\s*["\']([^"\']+)["\']'
     r'|^\s*import\s*["\']([^"\']+)["\']'
-    r'|\bimport\(\s*["\']([^"\']+)["\']\s*\)',
+    r'|\bimport\(\s*["\']([^"\']+)["\']\s*\)'
+    r'|\brequire\(\s*["\']([^"\']+)["\']\s*\)',
     re.M,
 )
 
@@ -28,25 +33,38 @@ EXCLUDE = ("__tests__", "node_modules")
 ALIASES: dict = {}
 
 
-def _is_link_dir(path) -> bool:
-    """目錄連結（symlink／Windows junction）不跟隨：Windows 的 os.walk 會走進 junction（與 project-scan.is_link_dir 同一判斷）。"""
-    try:
-        return os.path.islink(path) or bool(getattr(os.path, "isjunction", lambda _p: False)(path))
-    except OSError:
-        return True
+_SCAN = None
+
+
+def scan_mod():
+    """唯一來源：同資料夾 project-scan.py（walk、is_link_dir、ts_aliases、tarjan）。載入一次後重用；
+    載入失敗就讓錯誤浮出來（不放第二份備案實作——兩份實作漂移就是 TB-03 的根因）。"""
+    global _SCAN
+    if _SCAN is None:
+        spec = importlib.util.spec_from_file_location("cds_project_scan_dep", Path(__file__).resolve().parent / "project-scan.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        _SCAN = mod
+    return _SCAN
+
+
+def aliases_for(root: str, alias_args=None) -> dict:
+    """路徑別名：--alias 有給就只用給的；沒給就讀 root 的 tsconfig／jsconfig（project-scan.ts_aliases），再沒有才 @/ → root。"""
+    if alias_args:
+        return dict(x.split("=", 1) for x in alias_args)
+    return scan_mod().ts_aliases(Path(root))
 
 
 def collect_files(root: str, exclude=None) -> list:
+    """root 底下的 JS／TS 檔：走訪交給 project-scan.walk（EXCLUDE_DIRS 如 node_modules／.next／worktrees、.gitignore、巢狀 checkout、
+    目錄連結都不進去）；exclude（預設 __tests__、node_modules）再依 root 以下的資料夾名稱排除。"""
     exclude = tuple(exclude or EXCLUDE)
+    rootp = root.replace(os.sep, "/").rstrip("/")
     out = []
-    for d, dns, fs in os.walk(root):
-        dns[:] = [x for x in dns if not _is_link_dir(os.path.join(d, x))]
-        parts = d.replace(os.sep, "/").split("/")
-        if any(x in parts for x in exclude):
-            continue
-        for f in fs:
-            if f.endswith(EXTS):
-                out.append(os.path.join(d, f).replace(os.sep, "/"))
+    for p in scan_mod().walk(Path(root)):
+        rel = p.relative_to(root).as_posix()
+        if rel.endswith(EXTS) and not any(x in rel.split("/")[:-1] for x in exclude):
+            out.append(f"{rootp}/{rel}")
     return sorted(out)
 
 
@@ -64,6 +82,12 @@ def resolve(src: str, spec: str, fset: set, root: str, aliases=None):
     for c in [base] + [base + e for e in EXTS] + [base + "/index" + e for e in EXTS]:
         if c in fset:
             return c
+    # TS 的 ESM 寫法：原始碼裡寫 ./b.js，實際檔案是 b.ts／b.tsx（TB-09）
+    if base.endswith((".js", ".jsx", ".mjs")):
+        stem = base[: base.rindex(".")]
+        for e in (".ts", ".tsx"):
+            if stem + e in fset:
+                return stem + e
     return None
 
 
@@ -80,7 +104,8 @@ def build_graph(root: str, exclude=None, aliases=None, files=None, texts=None):
         text = (texts or {}).get(f)
         if text is None:
             try:
-                with open(f, encoding="utf-8") as fh:
+                # utf-8-sig：有 BOM 的檔第一行 import 才解析得到；replace：非 UTF-8 的檔（註解是 cp950 等）照樣讀 import，與 project-scan 一致
+                with open(f, encoding="utf-8-sig", errors="replace") as fh:
                     text = fh.read()
             except Exception as e:  # noqa: BLE001
                 unreadable.append((f, str(e)))
@@ -98,39 +123,8 @@ def build_graph(root: str, exclude=None, aliases=None, files=None, texts=None):
 
 
 def tarjan_sccs(files, g):
-    sys.setrecursionlimit(20000)
-    index: dict = {}
-    low: dict = {}
-    stack: list = []
-    on_stack: set = set()
-    sccs: list[list] = []
-    counter = [0]
-
-    def visit(v):
-        index[v] = low[v] = counter[0]
-        counter[0] += 1
-        stack.append(v)
-        on_stack.add(v)
-        for w in g[v]:
-            if w not in index:
-                visit(w)
-                low[v] = min(low[v], low[w])
-            elif w in on_stack:
-                low[v] = min(low[v], index[w])
-        if low[v] == index[v]:
-            comp = []
-            while True:
-                w = stack.pop()
-                on_stack.discard(w)
-                comp.append(w)
-                if w == v:
-                    break
-            if len(comp) > 1:
-                sccs.append(sorted(comp))
-
-    for v in files:
-        if v not in index:
-            visit(v)
+    """循環（強連通分量，>1 個檔）：演算法用 project-scan.tarjan（唯一來源），這裡只依 files 的順序餵圖、結果依檔數由大到小排。"""
+    sccs = scan_mod().tarjan({f: set(g.get(f, ())) for f in files})
     sccs.sort(key=len, reverse=True)
     return sccs
 
@@ -150,7 +144,10 @@ def main():
     ap.add_argument("--top", type=int, default=15)
     a = ap.parse_args()
     a.root = a.root.replace(os.sep, "/").rstrip("/")
-    aliases = dict(x.split("=", 1) for x in a.alias) if a.alias else {"@/": a.root}
+    if not os.path.isdir(a.root):  # root 打錯時原本掃到 0 個檔、0 個循環、exit 0，閘門永遠通過
+        print(f"不是資料夾：{a.root}")
+        sys.exit(2)
+    aliases = aliases_for(a.root, a.alias)
     files, g, ext, unreadable = build_graph(a.root, a.exclude_dir.split(","), aliases)
     sccs = tarjan_sccs(files, g)
     indeg: dict = defaultdict(int)
