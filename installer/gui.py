@@ -320,7 +320,7 @@ class App:
         ttk.Label(core, text=f"{MARK[s['installed']]} {'已安裝' if s['installed'] else '尚未安裝（按套用會安裝）'}").pack(anchor="w")
         self.notes.append(ttk.Label(core, text=gm.TOOL_DESC["core"], foreground="#555", wraplength=900, justify="left")); self.notes[-1].pack(anchor="w")
         self.guard_var = tk.BooleanVar(value=f.usage_guard)
-        ttk.Checkbutton(core, text=f"用量守門 hook（到門檻才提示收尾，沒到完全不動；目前 settings.json：{'已註冊' if s['hooks']['usage_guard'] else '未註冊'}）",
+        ttk.Checkbutton(core, text=f"hook 總開關（用量守門、查證守門、專案自動化、壓縮後重新開工、agent 守門都靠它；關掉＝7 個事件全部不註冊。用量提醒到門檻才出現；目前 settings.json：{'已註冊' if s['hooks']['usage_guard'] else '未註冊'}）",
                         variable=self.guard_var, command=self.update_diff).pack(anchor="w")
         self.sguard_var = tk.BooleanVar(value=f.source_guard)
         ttk.Checkbutton(core, text="查證守門 hook（回覆結束時機械檢查：問答題的回覆含年份／數字卻沒「來源」段，就退回補來源一次；程式工作與純概念不擋）",
@@ -1067,7 +1067,7 @@ class App:
         ttk.Button(w, text="還原選取的備份", command=restore).pack(pady=4)
 
     def do_uninstall(self):
-        if not messagebox.askyesno("解除安裝", "只移除這套工具加進去的東西：\n• settings.json 的兩條 hook 與 env\n• CLAUDE.md 的標記區塊\n• 它註冊的 MCP\n• 規則／工具檔與 4 個 skill\n\n"
+        if not messagebox.askyesno("解除安裝", "只移除這套工具加進去的東西：\n• settings.json 裡本工具的 hook 條目與 env\n• CLAUDE.md 的標記區塊\n• 它註冊的 MCP\n• 規則／工具檔與 4 個 skill\n\n"
                                             "不會移除：pip 裝的 yt-dlp／faster-whisper、ffmpeg、PowerShell 7、Chrome 擴充、Python、Claude Code、金鑰檔 local.json、state/usage.json、這個設定程式本身。會順便刪 state/selftest-reports。\n\n確定？"):
             return
 
@@ -1076,6 +1076,8 @@ class App:
             code, lines = commands.uninstall(self.lay)
             for ln in lines:
                 self._log(web.mask(ln, gm._local(self.lay)))
+            if code != 0:  # 0.27.0 起 MCP 移除失敗會回 1、安裝紀錄留著：要讓使用者知道沒有完全移除、可以再按一次
+                self._log(f"❌ 解除安裝沒有完全成功（結束碼 {code}）：上面標 ❌ 的項目處理好之後再按一次「解除安裝」，會接著移除剩下的")
         self._run_bg(job, what="解除安裝")
 
 

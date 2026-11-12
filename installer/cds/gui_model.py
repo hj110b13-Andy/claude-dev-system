@@ -772,7 +772,7 @@ def diff(state: dict, form: Form) -> list[Change]:
     elif parse_ver(state["repo_version"]) != parse_ver(state["version"] or "0"):
         ch.append(Change("update", f"更新 {state['version']} → {state['repo_version']}"))
     if form.usage_guard != state["hooks"]["usage_guard_pref"]:
-        ch.append(Change("guard", "啟用用量守門 hook" if form.usage_guard else "關閉用量守門 hook（移除 settings.json 的 hook；規則仍在）"))
+        ch.append(Change("guard", "啟用用量守門 hook" if form.usage_guard else "關閉整支 hook（移除 settings.json 的 7 個 hook 條目：用量守門、查證守門、專案自動化等一起停；規則仍在）"))
     if form.source_guard != state["hooks"].get("source_guard_pref", True):
         ch.append(Change("source_guard", "啟用查證守門（回覆含年份／數字卻沒「來源」段就退回補一次）" if form.source_guard else "關閉查證守門（hook 仍掛著但不檢查）"))
     if form.web_enabled != state["web"]["enabled"]:

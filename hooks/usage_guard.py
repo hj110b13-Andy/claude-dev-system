@@ -380,7 +380,17 @@ def _pa_config(cwd):
 
 
 def _pa_count_sources(cwd, limit=3000, budget=0.5):
-    """快速數原始碼檔：最多看 limit 個檔或 budget 秒，夠判定「算不算專案」就停。回 (原始碼檔數, 是否被截斷)。"""
+    """快速數原始碼檔：最多看 limit 個檔或 budget 秒，夠判定「算不算專案」就停。回 (原始碼檔數, 是否被截斷)。
+    唯一來源是 tools/project-scan.py 的 count_code_files（`--summary` 判「算專案」也用它）：健檢 TB-07 查到兩邊各寫一套、
+    結果相反（tools/ 底下 12 個 .py：--summary 判不算專案、hook 數到 12）。工具載不到時才用下面同規則的後備
+    （tests/test_tools_scan.py 斷言 PA_EXCLUDE、PA_SOURCE_EXT 與 project-scan 的常數相同、逐棵樹結果相同）。"""
+    try:
+        fn = getattr(_tool_mod("project-scan"), "count_code_files", None)
+        if fn:
+            n, truncated = fn(cwd, limit=limit, budget_sec=budget)
+            return int(n), bool(truncated)
+    except Exception:
+        pass
     n = seen = 0
     t0 = time.time()
     for dp, dns, fns in os.walk(cwd):
@@ -1284,7 +1294,7 @@ def tool_reminders(payload):
         # 排程刪掉後再派的任務沒有巡檢，指令卡 34 分鐘要使用者問才發現）。提醒句本來就是「先 CronList，沒有才建」，重複提醒不會重複建。
         # 0.25.0 起：這場對話記得有巡檢排程（sess["patrol"]）就整個不提醒，只有沒有排程時才每個任務各提醒一次（健檢 HK-12 註解更正）。
         tid = _background_task_id(payload)
-        bg = name in ("Agent", "Task", "Workflow") or (name in ("Bash", "PowerShell") and (ti.get("run_in_background") is True or bool(tid)))
+        bg = name in ("Agent", "Task", "Workflow", "Monitor") or (name in ("Bash", "PowerShell") and (ti.get("run_in_background") is True or bool(tid)))
         if bg:
             en, mins = _task_check(cwd)
             if en and not sess.get("patrol") and once("taskcheck|" + tid if tid else "taskcheck"):
@@ -1430,7 +1440,7 @@ def proc_msg(cwd, session_id, st, now=None):
         if not new:
             return None
         return (f"【殘留程序（hook）】這場對話的工具指令開出、已跑超過 {cfg['minMinutes']:g} 分鐘的程序：{pr.fmt(new)}。"
-                "對照仍在跑的背景任務與 agent：屬於已結束的 agent、已交報告的任務（例如 until／while 等待迴圈、tail、沒人用的伺服器）就是殘留 → "
+                "對照仍在跑的背景任務與 agent：屬於已結束的 agent、已交報告的任務（例如 until／while 等待迴圈、tail、沒人用的伺服器，以及 PowerShell 工具開出的 cmd／pwsh）就是殘留 → "
                 "告訴使用者 PID 與命令、請使用者決定要不要結束（同意後只依 PID 結束），不要自動結束、不可整批結束 node／bash；仍在用的就忽略。"
                 "子 agent：是你自己開的就在交報告前結束。")
     except Exception:
