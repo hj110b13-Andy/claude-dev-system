@@ -217,10 +217,11 @@ RV-07（兩個恆真的測試）已補上真正的斷言。
 | 全套單元測試，CI ubuntu／Python 3.12 | PASS | 同上（第一次在 Linux 上跑；含安裝器的檔案鎖與安裝—更新—解除安裝循環） |
 | 全套單元測試，CI macOS／Python 3.12 | PASS | 同上（第一次在 macOS 上跑；前三輪依序抓到 CX-02、CX-03 與兩個測試的環境依賴，修完後第 4 輪通過） |
 | 打包 exe＋不開視窗的冒煙測試（新版 action） | PASS | 試跑分支手動觸發，全部步驟成功、沒有 Node 20 警告 |
-| 發布到 Release（建 Release、附兩個檔） | 見 `PROJECT-STATUS.md` | 只有真的推 tag 才會跑到 |
+| 發布到 Release（建 Release、附兩個檔） | PASS | 2026-11-12 推 `v0.27.0`：tag 與版本號比對、測試、打包、冒煙測試、附加都成功；`gh release view v0.27.0` 有 exe（13,594,450 位元組）與 `.sha256`；沒有 Node 20 警告 |
 | 稽核時的 19 支重現腳本，對修正後的程式重跑 | PASS | 壞行為全部消失 |
 | 邊界與異常情境（壞設定檔、同時寫入、失敗的外部命令、不合法輸入） | PASS | 各模組的 `*_audit` 測試 |
 | 舊版安裝 → 新版更新 → 驗證 → 解除安裝，使用者設定位元組不變 | PASS | 審查者的腳本（含 8.3 短檔名家目錄、CRLF 的 CLAUDE.md、使用者自己的 hook） |
+| 這台實際安裝更新到 0.27.0（`update --with-web --with-video`）後 `verify` | PASS | 49 項全 ✅；update 前後 settings.json 只差 PostToolUse 的 matcher 多了 Monitor，其他鍵不變 |
 | 靜態分析：pyflakes | PASS | 只剩 3 條（1 條是刻意的可用性檢查、2 條在既有測試檔） |
 | 靜態分析：bandit | PASS | 沒有 `shell=True`；中風險 5 條都是 `urlopen`，網址是程式內的常數或官方回應；高風險 2 條是把 sha1 當快取鍵 |
 | 最低 Python 版本 3.10 | PASS | vermin 靜態檢查＋CI 實跑 |
