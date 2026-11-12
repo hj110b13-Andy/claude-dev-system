@@ -6,7 +6,62 @@
 
 使用者（2026-11-11）交辦全方位健檢，原話：「對目前開啟的整個專案進行一次地毯式、全方位、深層次的完整檢查與改善」「不可只提出建議而不處理。對於已確認且可安全修復的問題，應實際修改並驗證。」完整問題清單與逐條處理結果在 `PROJECT-AUDIT-REPORT.md`，最終狀態在 `PROJECT-STATUS.md`。
 
-（條目於健檢第四階段補齊；這一行在補齊後移除。）
+做法：6 個唯讀稽核 agent 分模組查出 101 條、main 自己實跑確認 4 條 → 5 個 agent 分模組修（各在自己的 git worktree）→ 合併後用稽核時的 19 支重現腳本重跑確認 → 另派 1 個沒參與修正的 agent 審查整批修改，又找到 7 條並修掉。測試從 187 項變成 486 項。
+
+**更新後會感覺到的行為改變**
+- `install.py web --key …`（以及 `--env`、`--key-mode`、`--usage-guard`）在聯網來源**還沒啟用**時只存偏好，不再順便註冊 6 個 MCP、改 `env`。要啟用仍是不帶參數的 `install.py web` 或 `--with-web`。
+- `install.py web --usage-guard on|off` 立即增刪 hook（原本要再跑一次 update；中間 verify 會有 7 條 ❌）。這個開關關的是**整支 hook**（7 個事件），視窗上的標示也改了。
+- `uninstall --restore-backup` 只認安裝那一次留下的備份；安裝前沒有 settings.json 或那份備份已不在時**不還原**並說明原因（原本會把 7 條指向已刪腳本的 hook 寫回去）。
+- `uninstall` 遇到 MCP 移除失敗回結束碼 1、保留紀錄可重跑（原本照樣印完成）。之後 `status`／`verify`／`web`／視窗會說「上次解除安裝沒有完成」。
+- 安裝、更新、解除安裝在寫入前先檢查 settings.json 與 CLAUDE.md，不合格整個不動（原本裝到一半才失敗）；同一個設定目錄同時只跑一個，第二個回結束碼 2。
+- 用量讀不到、而上次讀到的數字重置時間已過時，不再每一則提示都叫你收尾。
+- `progress-diff.py` 判定變嚴：數字、日期、否定字被改會列「疑似改寫」，有遺漏或疑似就 exit 1，讀檔失敗 exit 2。
+- `resgate.py`：`same_project` 不再把上層資料夾當同專案；`done` 找不到編號回 1；`run -- npm／npx／tsc` 在 Windows 跑得起來了。
+- `cleanup.py`：還在用的 worktree（有被忽略的真檔、沒有自己的 commit、24 小時內動過）不再列為可刪。
+- 視窗：數值填錯會顯示「表單有誤」而不是無聲退回舊值；套用失敗時不會自動關窗；開窗的自動檢查也會查 exe 有沒有新版。
+
+**安裝器（`installer/cds/`）**——稽核 IN-01～15 與 main 實跑的還原備份問題
+- 還原備份：備份紀錄加選用鍵 `preInstall`（**不升 `MANIFEST_SCHEMA`**：舊版 exe 的 `read_state` 讀到較新的 schema 會直接報錯，選用鍵舊程式忽略即可）；`pre_install_backup()` 是唯一來源；修剪永遠保留那一筆＋最近 9 筆，`web` 的備份也會修剪（原本只增不減）。重現：update 11 次後 `--restore-backup`，修前殘留 7 條 hook、修後 0 條且與原檔相同。
+- 預檢 `_preflight`：settings.json（合法 JSON、最外層物件、沒有 BOM）與 CLAUDE.md（UTF-8、標記成對且只有一組），與 `check` 共用 `checks.settings_error`。重現：CLAUDE.md 是 cp950 時，修前已寫 27 個檔與 7 條 hook 才丟錯，修後 0 個檔。
+- 檔案鎖：`fsio.acquire_lock`（Windows `msvcrt.locking`、其他平台 `fcntl.flock`；作業系統層級，程序結束自動釋放）；`atomic_write_bytes` 暫存檔名唯一、`os.replace` 遇 PermissionError 重試。依據開源 tox-dev/filelock（MIT）的做法。重現：3 個程序各 update 8 次，修前 24 次中 11 次 PermissionError、紀錄 9 筆備份但磁碟 8 個檔；修後例外 0。
+- `web.sync_mcp`／`remove_mcp` 移除失敗不再丟失「這是本工具加的」的紀錄；`--key`／`--env`／`--key-mode` 格式錯誤的訊息不印值（原本會把金鑰印出來）；verify 多檢查 hook 用的 Python 還在不在、改成只在記憶體編譯（不再寫 `_verify.pyc`）；路徑正規化一致（`~/.claude` 是 junction 時兩種寫法算出同一個 `.claude.json`）；CLAUDE.md 混合換行時區塊外位元組不變、出現兩組標記會擋下；衝突解除後清掉 `.new`；manifest 缺鍵自動補；`local.json` 的 null 當空、POSIX 上設 0600。
+
+**設定視窗與自我更新（`gui.py`、`gui_model.py`、`appdir.py`）**——稽核 GU-01～12
+- `find_system_python` 逐行解析（原本用空白切，`C:\Program Files\…` 變成 `C:/Program`，exe 模式下所有 hook 被註冊成壞路徑）。
+- local.json 是壞檔時，會寫它的套用不再用空內容整檔蓋掉（原本金鑰無聲消失、畫面顯示成功），改成不寫、回 2、❌。
+- 版本比較唯一函式 `appdir.is_newer`：不合法的版本字串（`latest`、`vtest`）不再丟 TypeError。
+- 數值驗證唯一來源 `gm.valid_threshold` 等，表單、匯入、寫入共用；只檢查這次動過的欄位。寫 `taskCheck`／`usageThresholdPct` 保留使用者自加的鍵。匯入做型別檢查。
+- 工作執行緒不再直接讀 tk 變數；更新後重開帶 `--claude-home`；清舊 exe 共用一份實作；子程序輸出解碼容忍系統碼頁；`test_selfupdate.py` 不再連網。
+- 視窗層（`gui.py`）的改動**沒有實際開視窗驗證**：以抽出的純函式測試、ast 守門測試、`--selfcheck` 與審查者的腳本為準。
+
+**hook（`hooks/usage_guard.py`）**——稽核 HK-01～13、TB-14
+- 狀態檔寫入：唯一的 `_atomic_write_json`／`_save_json_state`（原子替換、作業系統層級鎖最多等 0.3 秒、鎖內重讀做三方合併、壞檔改名 `.corrupt` 不覆寫）；先輸出提醒再存狀態。重現：8 個程序各 40 次讀改寫，修前留下 10／320 個鍵、讀到壞 JSON 44 次；修後 3 次留下 308／314／317 個鍵、壞 JSON 0 次。usage.json 被別的程序開著時，修前整則 hook 沒有輸出，修後照常提醒。
+- Windows 路徑比對不分大小寫（小寫磁碟代號的家目錄原本被當成專案、要求跑 project-init）；stdin 一律當 UTF-8（沒有 `PYTHONUTF8` 時中文路徑原本變亂碼）；跳過系統合成訊息（「You've hit your 5-hour limit」原本觸發語言提醒，健檢途中就誤報了 4 次）；去重改成對話清單（兩場對話交替原本每則都注入）；狀態鍵修剪；`_sub_scan` 容忍寫到一半的行。
+- Stop 守門改從檔尾讀對話紀錄：12 份真實紀錄（2.1～164.7 MB）新舊結果相同，合計 6.57 秒 → 0.045 秒。
+- 原始碼計數改呼叫 `tools/project-scan.py` 的 `count_code_files`（原本兩邊各一套、結果相反）；背景任務判定與 matcher 加上 Monitor。
+- 各事件耗時改前改後差距在 ±11% 內（量測雜訊約 ±10%）。
+
+**工具（`tools/`）**——稽核 TA-01～21、TB-01～18
+- `resgate.py`：延後清單讀改寫包在檔案鎖裡、壞檔改名保留。重現：12 個程序同時 defer 連 3 輪，修前剩 10／7／8 筆，修後皆 12 筆。`--project 名稱` 記專案根（原本記成 `cwd\名稱`）；macOS 的記憶體後備走得到（只有 mock 驗證）。
+- `procs.py`：列得到 PowerShell 工具開出的程序（實際程序鏈是 claude → cmd.exe → pwsh，原本只認 bash）；父 PID 被重用也判孤兒。
+- `cleanup.py`：見上；`--apply --json` 有錯回 1；build 自動產生的 `next-env.d.ts`、`*.tsbuildinfo` 不算珍貴資料。
+- `video.py`：兩條取字幕的路共用 `choose_caption`（偏好語言的人工字幕 → 與影片同語系的人工字幕 → 與影片語言一致的自動字幕 → 其他人工字幕）；快取清理只碰本工具命名的資料夾（原本會刪掉快取資料夾底下任何舊子資料夾）；參數錯誤一行說明＋exit 2（`--older-than` 負數原本會把快取刪光）；轉檔先寫 `.part`；無副檔名的本機檔不當 YouTube ID。
+- `progress-diff.py` 重寫，見上。0.26.0 的 core.md 瘦身用新工具重驗：`3fc934c^` 的 core.md 對 `3fc934c` 的 core.md＋core-detail.md，103 句整句相同 103、疑似改寫 0、找不到 0。
+- `project-scan.py`：重跑保留 `refactorDecision`；Python 匯入解析補 src 版面、腳本資料夾、`__init__` 相對匯入、多行括號（這個 repo 的依賴邊 37 → 51）；入口認 `__main__` 守衛；`.github` 不再被排除；`--max-cycles N` 閘門旗標；索引原子寫入、不合法時 exit 2。`depgraph.py` 的走訪、別名、Tarjan 改成載入 `project-scan.py` 的同一份（**兩支要一起複製**，單獨複製會印說明並 exit 2）。
+- `agent-audit.py`：「有過記憶體閘門」「上網前先讀速查」改成看先後順序；模型名統一成家族名。`moduleInventory.py` 遇到非 UTF-8 檔不崩潰、root 不存在 exit 2。
+
+**文件與規則**——稽核 DC-01～22
+- README 不再寫死版本號（原寫「目前 0.9.5」）；hook 事件 2 個 → 7 個；自測題數不寫死（原寫九題，實際 11 題）；firecrawl 預設開；skill 數（原寫七個，實際 10 個）；`dispatch-config.json` 不生 `.new`；遷移鏈 0→1→2→3。
+- `rules/workflow.md` 新增〈hook 標籤對照〉（20 個標籤）；預設門檻 80→85 的更正；`rules/core.md` 三處小改（＋110 位元組）並同步 `core-detail.md`；固定條款 2 補「前景有時限先 `resgate.py check`，不足就背景跑」；「定期／過長／不夠」寫出判定條件。
+- 新文件：`docs/ARCHITECTURE.md`、`docs/PROJECT-INVENTORY.md`、`PROJECT-AUDIT-REPORT.md`、`PROJECT-STATUS.md`。
+
+**CI 與發布**
+- 新增 `.github/workflows/tests.yml`：push master、PR、`ci/**` 分支都跑測試（Windows × Python 3.10／3.12／3.14）；`ci/all-os/**` 加跑 ubuntu、macos。
+- `release.yml`：action 升到 Node 24 的大版（最近一次發布有 Node.js 20 淘汰警告），第三方 action 釘在 commit SHA；tag 只認 `v主.次.修`；發布前比對 tag 與 `config/VERSION`；權限預設唯讀；少附件就失敗。
+
+**測試**：187 → 486 項。新增 `test_cli.py`（命令列入口，原本覆蓋率 0%）、`test_installer_audit.py`、`test_gui_audit.py`、`test_hooks_audit.py`、`test_tools_runtime.py`、`test_tools_scan.py`、`test_review_fixes.py`、`test_docs_consistency.py`（文件與程式對不對得上）、`test_project_gate.py`（循環依賴 0 組的閘門）。
+
+**這次沒做、記在 `PROJECT-STATUS.md` 的**：四個大檔不拆；`procs`／`resgate`／hook 三份設定讀取沒有合併；macOS／Linux 仍未實機驗證；exe 沒有程式碼簽章；視窗層沒有自動化的畫面測試。
 
 ## 0.26.1（2026-11-11，視窗會自動換 exe）
 
