@@ -5,12 +5,15 @@
 刪 worktree 前發現裡面有 12 個 .cache 子目錄是 junction 指回主目錄的資料——直接遞迴刪會把主資料一起刪掉。
 
 項目（--only 可選，逗號分隔）：
-  worktrees  已收工的 git worktree：沒有未提交變更、而且分支內容已在主分支才刪。判斷「已在主分支」依序：
+  worktrees  已收工的 git worktree：沒有未提交變更、而且分支內容已在主分支才刪。0.27.0 起寧可少刪，這些情況一律保留：
+             有被 git 忽略的檔（輸出、.env 等；可重建的快取如 node_modules、.next 不算）｜分支沒有自己的 commit、與主分支同一個 SHA
+             （剛建好或還在進行中）｜--keep-hours 小時內有檔案變動（可能還在用）。判斷「已在主分支」依序：
              ①SHA 是主分支的祖先 ②把分支合併進主分支不會改變任何檔（git merge-tree，內容比對；`git pull --rebase` 改寫 merge 後 SHA 不同也認得）
              ③git 太舊沒有 merge-tree 時才用 `git cherry`（patch-id）全部已在。判不出就保留。
              刪除時先拆掉資料夾裡的目錄連結（junction／symlink，只拆連結、不跟隨），再 `git worktree remove`（不加 --force）。分支預設保留（--delete-branch 才刪）。
              .claude/worktrees/ 底下沒登記的資料夾只列出、不刪。
-  temp       Claude 對話暫存（<TEMP>/claude）底下非目前對話、超過 --keep-hours 小時沒動過的資料夾。
+  temp       Claude 對話暫存（<TEMP>/claude）底下非目前對話、超過 --keep-hours 小時沒動過的資料夾
+             （只排除「目前這場」；別場還開著但閒置超過門檻的對話也會被列出，刪之前確認）。
   npm        npm cache（`npm cache clean --force`；npx 套件不動）。
   cache      --project 的可重建快取：.next、.turbo、node_modules/.cache、.pytest_cache、.mypy_cache、.ruff_cache、coverage（不含 .cache：很多專案把資料放那）。
 被系統鎖住、刪不掉的檔照實列出，不重試、不硬刪。
@@ -37,6 +40,9 @@ from pathlib import Path
 CACHE_DIRS = (".next", ".turbo", "node_modules/.cache", ".pytest_cache", ".mypy_cache", ".ruff_cache", "coverage")
 ALL = ("worktrees", "temp", "npm", "cache")
 HASH_DIR = re.compile(r"^[0-9a-f]{16}$")
+# worktree 裡被 git 忽略、但「可重建」不算珍貴的資料夾名稱：CACHE_DIRS 的最後一段＋node_modules、__pycache__（後兩個是 0.27.0 自己加的，
+# 不然所有裝過套件的 worktree 都因 node_modules 永遠不能清，失去這支工具的原意）。其餘被忽略的檔（輸出、.env）一律保留。
+REBUILDABLE = {c.rsplit("/", 1)[-1] for c in CACHE_DIRS} | {"node_modules", "__pycache__"}
 
 
 def _is_link_dir_fallback(path) -> bool:
@@ -178,6 +184,28 @@ def worktrees(repo):
     return items
 
 
+def ignored_precious(status_lines):
+    """git status --porcelain --ignored 的輸出裡，被忽略（!!）且不是可重建快取的路徑（輸出、.env 之類，刪掉就沒了）。"""
+    out = []
+    for ln in status_lines:
+        if not ln.startswith("!! "):
+            continue
+        rel = ln[3:].strip().strip(chr(34)).rstrip("/")
+        parts = [x for x in rel.replace(chr(92), "/").split("/") if x]
+        if not any(x in REBUILDABLE for x in parts):
+            out.append(rel)
+    return out
+
+
+def has_own_commits(repo, branch):
+    """分支有沒有自己 commit 過：看 reflog 有沒有 `commit` 開頭的紀錄（剛 worktree add 的分支只有「branch: Created from」）。
+    讀不到回 False（當作沒有 → 呼叫端保留，寧可少刪）。"""
+    if not branch:
+        return False
+    rc, out, _ = git(repo, "reflog", "show", "--format=%gs", f"refs/heads/{branch}")
+    return rc == 0 and any(ln.startswith("commit") for ln in out.splitlines())
+
+
 def merged_reason(repo, main, head):
     """分支內容已在主分支 → 回理由字串；判不出或沒合併回 None（保留）。"""
     if git(repo, "merge-base", "--is-ancestor", head, main)[0] == 0:
@@ -205,7 +233,9 @@ def _same_path_key(p) -> str:
         return os.path.normcase(os.path.abspath(str(p)))
 
 
-def plan_worktrees(repo: Path, main=None):
+def plan_worktrees(repo: Path, main=None, keep_hours=None, now=None):
+    """keep_hours 給了才加「最近這麼多小時內有檔案變動就保留」（命令列一律給；沿用 --keep-hours，不另立數字）。"""
+    now = now or time.time()
     items = []
     wts = worktrees(repo)
     if not wts:
@@ -224,13 +254,25 @@ def plan_worktrees(repo: Path, main=None):
         elif w.get("locked"):
             it["why"] = "已鎖定（git worktree lock）"
         else:
-            rc, st, _ = git(path, "status", "--porcelain")
-            size, _newest, links = scan_tree(str(path))
+            rc, st, _ = git(path, "status", "--porcelain", "--ignored")
+            size, newest, links = scan_tree(str(path))
             it["size"], it["links"] = size, links
+            lines = [ln for ln in st.splitlines() if ln.strip()]
+            dirty = [ln for ln in lines if not ln.startswith("!! ")]
+            precious = ignored_precious(lines)
+            age_h = (now - newest) / 3600 if newest else 1e9
+            same_sha = git(repo, "rev-parse", head)[1].strip() == git(repo, "rev-parse", main)[1].strip() != ""
             if rc != 0:
                 it["why"] = "讀不到狀態，保留"
-            elif st.strip():
-                it["why"] = f"有未提交變更 {len(st.splitlines())} 個檔"
+            elif dirty:
+                it["why"] = f"有未提交變更 {len(dirty)} 個檔"
+            elif precious:
+                shown = "、".join(precious[:3]) + ("…" if len(precious) > 3 else "")
+                it["why"] = f"有被 git 忽略的檔（{shown}；刪掉就沒了），保留"
+            elif same_sha and not has_own_commits(repo, br):
+                it["why"] = "分支與主分支同一個 SHA、沒有自己的 commit（未開始或進行中），保留"
+            elif keep_hours is not None and age_h < keep_hours:
+                it["why"] = f"{age_h:.0f} 小時內有檔案變動（可能還在用），保留"
             else:
                 why = merged_reason(repo, main, head)
                 if why:
@@ -297,7 +339,7 @@ def plan_temp(root: Path, keep_hours=24.0, current=None, now=None):
         elif age_h < keep_hours:
             it["why"] = f"{age_h:.0f} 小時內動過（可能還在用）"
         else:
-            it.update(action="delete", why=f"{age_h / 24:.0f} 天沒動過")
+            it.update(action="delete", why=f"{age_h / 24:.0f} 天沒動過（可能屬於別場還開著的對話，確認不是「下次繼續」那場再刪）")
         items.append(it)
     return items
 
@@ -349,7 +391,7 @@ def plan_cache(project: Path):
 def build_plan(only, project: Path | None, keep_hours, temp_root=None, main=None):
     items = []
     if "worktrees" in only and project:
-        items += plan_worktrees(project, main)
+        items += plan_worktrees(project, main, keep_hours)
     if "temp" in only:
         items += plan_temp(Path(temp_root) if temp_root else claude_temp_root(), keep_hours)
     if "npm" in only:
@@ -388,7 +430,7 @@ def main(argv=None) -> int:
     ap.add_argument("--only", default=",".join(ALL), help="逗號分隔：" + ",".join(ALL))
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--delete-branch", action="store_true", help="worktree 刪掉後也刪它的分支（預設保留）")
-    ap.add_argument("--keep-hours", type=float, default=24.0, help="對話暫存幾小時內動過的不刪（預設 24）")
+    ap.add_argument("--keep-hours", type=float, default=24.0, help="對話暫存與 worktree 幾小時內有檔案變動的不刪（預設 24）")
     ap.add_argument("--claude-temp", help="對話暫存根目錄（預設 <TEMP>/claude）")
     ap.add_argument("--main", help="主分支名稱（預設＝主工作目錄目前的分支）")
     ap.add_argument("--json", action="store_true")
@@ -400,11 +442,12 @@ def main(argv=None) -> int:
         return 2
     project = Path(a.project).resolve() if a.project else None
     items = build_plan(only, project, a.keep_hours, a.claude_temp, a.main)
+    freed, errors = 0, []
     if a.apply:
         freed, errors = apply_plan(items, project, a.delete_branch)
     if a.json:
         print(json.dumps(items, ensure_ascii=False, indent=1))
-        return 0
+        return 1 if a.apply and errors else 0  # 與不加 --json 一致：有刪不掉的回 1（稽核 TA-09）
     total = sum(it["size"] for it in items if it["action"] == "delete")
     empty = [it for it in items if it["kind"] == "temp" and it["size"] == 0 and not it.get("errors")]
     if empty:

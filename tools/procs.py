@@ -6,9 +6,15 @@
 
 判定（可判定，不猜）：
 - 對話程序＝環境變數 CLAUDE_PID（Claude Code 給工具指令的），沒有就從自己往上找名稱是 claude／claude.exe 的祖先。
-- 工具指令程序＝對話程序底下名稱是 bash／sh／zsh／pwsh／powershell 的直接子程序（Bash／PowerShell 工具都這樣開），連同它的子孫。
+- 工具指令程序＝對話程序底下的直接子程序，連同它的子孫。直接子程序有兩種：
+  ①名稱是 bash／sh／zsh／pwsh／powershell（Bash 工具：claude.exe → bash.exe -c "source …shell-snapshots…"）；
+  ②Windows 的 PowerShell 工具是 claude.exe → cmd.exe /d /s /c "chcp 65001 & pwsh.exe …" → pwsh.exe，所以 cmd.exe 也算，
+    但只認命令列含 CLAUDE_CODE_SHELL_LAUNCHER_SCRIPT 的（Claude 開殼才有這個標記；使用者自己開的 cmd 不收）。
+    （2026-11-12 稽核 TA-11：本機 pwsh 工具實測的程序鏈，原本這條路開出的程序完全抓不到。）
 - 跑超過 min_minutes 分鐘（預設讀 dispatch-config.json 的 procCheck.minMinutes，60）才列；自己這條指令（祖先鏈）不列。
-- 上層已不在的工具指令程序（對話關了還留著）也列，標「對話已結束」。
+- 上層已不在的工具指令程序（對話關了還留著）也列，標「對話已結束」：命令列含 shell-snapshots 或上面那個標記，而且命令列含目前資料夾；
+  「上層已不在」＝父 PID 沒有這個程序，或父 PID 被別的程序重用（父程序建立時間比子程序晚，稽核 TA-12）。
+  PowerShell 工具的命令列裡沒有工作資料夾，所以它的孤兒殼在有給資料夾時認不出是哪個專案、不列（只列得出仍在對話底下的）。
 是不是殘留由 Claude 對照仍在跑的背景任務／agent 判斷：已結束的 agent 或已交報告的任務留下的才是殘留，告訴使用者 PID 與命令、由使用者決定，不自動結束。
 
 用法：
@@ -16,6 +22,8 @@
   python procs.py --min-minutes 0 # 全部列
   python procs.py --json
 Windows 用 Toolhelp32／NtQueryInformationProcess（ctypes，數十毫秒）；其他系統用 ps。
+非 Windows 平台未驗證：`ps -eo pid=,ppid=,etimes=,comm=,args=` 在 macOS（BSD ps）可能不支援 etimes、comm 欄含空白也可能切錯欄
+（稽核 TA-13；這台只有 Windows，沒有機器可實測，所以沒改程式）。
 """
 from __future__ import annotations
 
@@ -28,6 +36,8 @@ import sys
 import time
 
 SHELLS = {"bash", "sh", "zsh", "pwsh", "powershell"}
+# Claude Code 開 PowerShell 工具的殼是 cmd.exe /d /s /c "chcp 65001 & pwsh.exe …-Command $env:CLAUDE_CODE_SHELL_LAUNCHER_SCRIPT…"（2026-11-12 本機實測）。
+LAUNCHER_MARKER = "CLAUDE_CODE_SHELL_LAUNCHER_SCRIPT"
 DEFAULTS = {"enabled": True, "minMinutes": 60, "everyMinutes": 10}
 
 
@@ -198,24 +208,46 @@ def ancestors(rows, pid):
     return out
 
 
+def _tool_shell(r, details) -> bool:
+    """這個程序是不是 Claude 工具開的殼：名稱在 SHELLS，或是命令列含 LAUNCHER_MARKER 的 cmd.exe（不收使用者自己的 cmd）。"""
+    b = _base(r["name"])
+    if b in SHELLS:
+        return True
+    if b == "cmd":
+        details(r)
+        return LAUNCHER_MARKER in (r.get("cmd") or "")
+    return False
+
+
+def _parent_gone(r, by, details) -> bool:
+    """上層已不在：父 PID 不在程序表，或父 PID 被較新的程序重用（父程序建立時間比子程序晚；稽核 TA-12）。"""
+    p = by.get(r["ppid"])
+    if p is None:
+        return True
+    details(r)
+    details(p)
+    return r.get("start") is not None and p.get("start") is not None and p["start"] > r["start"]
+
+
 def leftovers(rows, details, root_pid, min_minutes=60.0, now=None, exclude=None, cwd_hint=None):
     """工具指令開出、跑超過 min_minutes 的程序群組：[{pid, name, minutes, cmd, children:[{pid,name,cmd}], orphan}]。
     root_pid 為 None 時只看「上層已不在、命令列含 cwd_hint」的工具殼。"""
     now = now or time.time()
     exclude = exclude or set()
     kids: dict[int, list] = {}
-    pids = {r["pid"] for r in rows}
+    by = {r["pid"]: r for r in rows}
     for r in rows:
         kids.setdefault(r["ppid"], []).append(r)
     tops = []
     if root_pid is not None:
-        tops = [(r, False) for r in kids.get(root_pid, []) if _base(r["name"]) in SHELLS]
+        tops = [(r, False) for r in kids.get(root_pid, []) if _tool_shell(r, details)]
     for r in rows:  # 上層已不在的工具殼：對話關了還留著
-        if r["ppid"] not in pids and r["ppid"] != root_pid and _base(r["name"]) in SHELLS:
-            details(r)
-            c = r.get("cmd") or ""
-            if "shell-snapshots" in c and (not cwd_hint or cwd_hint.replace("\\", "/").lower() in c.replace("\\", "/").lower()):
-                tops.append((r, True))
+        if r["ppid"] == root_pid or not _tool_shell(r, details) or not _parent_gone(r, by, details):
+            continue
+        details(r)
+        c = r.get("cmd") or ""
+        if ("shell-snapshots" in c or LAUNCHER_MARKER in c) and (not cwd_hint or cwd_hint.replace("\\", "/").lower() in c.replace("\\", "/").lower()):
+            tops.append((r, True))
     out = []
     for top, orphan in tops:
         if top["pid"] in exclude:

@@ -17,7 +17,7 @@
   ask     網址|檔案 "問題" [--model gemini-flash-latest] [--clip 開始 結束]   Gemini 真的看影片（需 `gemini` 金鑰；公開 YouTube 免下載）
   download 網址 [--out 資料夾] [--max-height 1080] [--audio-only] [--cookies-from-browser firefox | --cookies cookies.txt]   使用者要存檔時：最高畫質下載（預設 local.json video.downloadDir，未設為 ~/Downloads）
   setup                                              檢查依賴與金鑰
-  clean   [--older-than 30] [--all] [--media-only]    清快取（影音檔大，逐字稿小）；每次執行也會自動清超過 7 天沒更新的影音檔、30 天沒更新的整個資料夾（以檔案修改時間算）
+  clean   [--older-than 30] [--all] [--media-only]    清快取（影音檔大，逐字稿小）；每次執行也會自動清超過 7 天沒更新的影音檔、30 天沒更新的整個資料夾（以資料夾裡最新檔案的修改時間算；只處理 yt_／url_／file_ 開頭的快取資料夾）
 
 金鑰讀 <CLAUDE_HOME>/claude-dev-system/config/local.json 的 keys.youtube／keys.gemini（`install.py web --key youtube=…`）。
 快取：<CLAUDE_HOME>/claude-dev-system/cache/video/<影片ID>/（info.json、transcript.*.txt、audio.m4a、video.mp4、frames/）。
@@ -172,11 +172,20 @@ def _preload_cuda_dlls() -> None:
 # ---------- 來源判斷與快取 ----------
 
 YT_ID_RE = re.compile(r"(?:v=|youtu\.be/|/shorts/|/live/|/embed/)([A-Za-z0-9_-]{11})")
+# 快取子資料夾命名的唯一來源：source_key 照這個產生，is_cache_key 照這個判斷（clean_cache 只動符合的資料夾；
+# 使用者把 video.cacheDir 指到一般資料夾時，裡面別的資料夾不能被刪，稽核 TA-15）。
+KEY_YT, KEY_URL, KEY_FILE = "yt_", "url_", "file_"
+CACHE_KEY_RE = re.compile("(?:" + KEY_YT + "[A-Za-z0-9_-]{11}|" + KEY_URL + "[0-9a-f]{12}|" + KEY_FILE + "[0-9a-f]{12})")
+
+
+def is_cache_key(name: str) -> bool:
+    return CACHE_KEY_RE.fullmatch(name) is not None
 
 
 def youtube_id(src: str) -> str | None:
     if re.fullmatch(r"[A-Za-z0-9_-]{11}", src):
-        return src
+        # 沒有副檔名的本機檔（例如 lecture_001）剛好 11 個字元：路徑存在時優先當本機檔（稽核 TA-17）
+        return None if os.path.exists(src) else src
     m = YT_ID_RE.search(src)
     return m.group(1) if m and ("youtube.com" in src or "youtu.be" in src) else None
 
@@ -188,10 +197,10 @@ def is_url(src: str) -> bool:
 def source_key(src: str) -> str:
     vid = youtube_id(src)
     if vid:
-        return "yt_" + vid
+        return KEY_YT + vid
     if is_url(src):
         import hashlib
-        return "url_" + hashlib.sha1(src.encode("utf-8")).hexdigest()[:12]
+        return KEY_URL + hashlib.sha1(src.encode("utf-8")).hexdigest()[:12]
     p = Path(src).resolve()
     import hashlib
     try:
@@ -199,7 +208,7 @@ def source_key(src: str) -> str:
         tag = f"{st.st_mtime_ns}:{st.st_size}"  # 同路徑檔案被換掉（重錄、覆蓋）就是新快取，不會拿到舊逐字稿
     except OSError:
         tag = ""
-    return "file_" + hashlib.sha1(f"{p}|{tag}".encode("utf-8")).hexdigest()[:12]
+    return KEY_FILE + hashlib.sha1(f"{p}|{tag}".encode("utf-8")).hexdigest()[:12]
 
 
 def cache_dir(src: str) -> Path:
@@ -324,6 +333,8 @@ def download(src: str, kind: str) -> Path:
     target = d / ("audio.m4a" if kind == "audio" else "video.mp4")
     if target.exists() and target.stat().st_size > 0:
         return target
+    for stale in d.glob("audio.part.*"):  # 上次轉檔中途被砍留下的半截檔：不可被下面的 glob 當成下載結果
+        stale.unlink(missing_ok=True)
     yt_dlp = need_ytdlp()
     h = CFG["downloadHeight"]
     fmt = "bestaudio[ext=m4a]/bestaudio/best" if kind == "audio" else f"bestvideo[height<={h}][ext=mp4]+bestaudio[ext=m4a]/best[height<={h}][ext=mp4]/best[height<={h}]/best"
@@ -343,7 +354,13 @@ def download(src: str, kind: str) -> Path:
     got = hits[-1]
     if got != target:
         if kind == "audio" and ff and got.suffix not in (".m4a",):
-            subprocess.run([ff, "-y", "-loglevel", "error", "-i", str(got), "-vn", "-c:a", "aac", "-b:a", "64k", str(target)], check=True)
+            # 先寫暫存檔名（保留 .m4a 讓 ffmpeg 認得格式），成功才改名成最終檔名：中途被殺不會留下半截 audio.m4a 被下次當完整檔重用（稽核 TA-18）
+            part = d / "audio.part.m4a"
+            try:
+                subprocess.run([ff, "-y", "-loglevel", "error", "-i", str(got), "-vn", "-c:a", "aac", "-b:a", "64k", str(part)], check=True)
+                part.replace(target)
+            finally:
+                part.unlink(missing_ok=True)
             got.unlink(missing_ok=True)
         else:
             got.replace(target)
@@ -399,31 +416,95 @@ def hms(sec: float) -> str:
 
 
 def parse_time(s: str) -> float:
-    if re.fullmatch(r"\d+(\.\d+)?", s):
-        return float(s)
+    """秒數、分:秒、時:分:秒（可帶小數）換算成秒；不是這幾種格式丟 ValueError。"""
+    s = (s or "").strip()
+    if not re.fullmatch(r"\d+(\.\d+)?(:\d+(\.\d+)?){0,2}", s):
+        raise ValueError(f"不是時間格式：{s!r}")
     parts = [float(x) for x in s.split(":")]
     while len(parts) < 3:
         parts.insert(0, 0)
     return parts[0] * 3600 + parts[1] * 60 + parts[2]
 
 
+def _arg_error(a) -> str | None:
+    """參數檢查（純函式，回錯誤說明或 None）：在任何網路、下載、自動清快取之前先擋，main 印一行說明並 exit 2
+    （docstring 寫「2 參數或缺依賴」；稽核 TA-16：原本 --grep 不合法／--start 不是時間是 traceback、exit 1）。"""
+    g = lambda k: getattr(a, k, None)  # noqa: E731
+    if g("cmd") in ("search", "comments") and g("n") is not None and g("n") < 1:
+        return "-n 至少 1"
+    if g("cmd") == "clean" and g("older_than") is not None and g("older_than") < 0:
+        return "--older-than 不可小於 0（負數會讓所有快取都算「太舊」而被刪光）"
+    if g("cmd") == "download" and g("max_height") is not None and g("max_height") < 1:
+        return "--max-height 至少 1"
+    if g("cmd") == "transcript":
+        if g("grep"):
+            try:
+                re.compile(g("grep"), re.I)
+            except re.error as e:
+                return f"--grep 不是合法的正規表達式：{e}"
+        try:
+            s0 = parse_time(g("start")) if g("start") else 0.0
+            e0 = parse_time(g("end")) if g("end") else float("inf")
+        except ValueError as e:
+            return f"--start／--end {e}（要 秒數、分:秒 或 時:分:秒，例如 90、1:30、1:02:03）"
+        if s0 > e0:
+            return "--start 比 --end 晚"
+    if g("cmd") == "frames" and g("at"):
+        for x in g("at").split(","):
+            if x.strip():
+                try:
+                    parse_time(x)
+                except ValueError:
+                    return f"--at 的 {x.strip()!r} 不是時間格式（要 秒數、分:秒 或 時:分:秒，用逗號分隔，例如 12:30,14:05）"
+    if g("cmd") == "ask" and g("clip"):
+        for x in g("clip"):
+            try:
+                parse_time(x)
+            except ValueError:
+                return f"--clip 的 {x!r} 不是時間格式（要 秒數、分:秒 或 時:分:秒，例如 --clip 1:20 3:00）"
+    return None
+
+
 # ---------- 逐字稿 ----------
 
-def _caption_choice(info: dict, prefer: list[str]) -> tuple[str, str] | None:
-    """回傳 (語言碼, 'manual'|'auto')：手動字幕依偏好序 → 自動字幕依偏好序 → 任一手動 → 無。"""
-    manual, auto = set(info.get("subtitles") or []), set(info.get("automatic_captions") or [])
-    manual = {m for m in manual if not m.startswith("live_chat")}
+def choose_caption(manual, auto, prefer: list[str], spoken: str | None = None, asr_available: bool = False):
+    """字幕選擇的唯一來源（transcript-api 與 yt-dlp 兩條路共用；稽核 TA-14：原本兩條路順序不一致，英文影片只有西班牙文手動字幕時
+    一條拿到西班牙文、一條拿到英文自動字幕）。manual／auto 是可用的語言碼清單，spoken 是影片語言（可能沒有）。
+    順序：①符合偏好語言的手動字幕 ②與影片語言一致的原生自動字幕（影片語言不明就看偏好語言）③其他手動字幕（語言碼排序第一個）。
+    都沒有而有自動字幕（語言與影片不符，多半是誤判語言或翻譯稿）：有語音辨識就不用它、否則姑且使用，各附一句說明。
+    回 ((語言碼, 'manual'|'auto') 或 None, 說明或 None)。"""
+    manual = [m for m in manual if not m.startswith("live_chat")]
+    auto = list(auto)
+
+    def find(cands, lang):
+        return next((c for c in cands if c.lower() == lang.lower()), None)
     for lang in prefer:
-        for cand in (lang, lang.lower()):
-            if cand in manual:
-                return cand, "manual"
+        hit = find(manual, lang)
+        if hit:
+            return (hit, "manual"), None
+    native = [c for c in auto if (_lang_match(c, spoken) if spoken else any(_lang_match(c, p) for p in prefer))]
     for lang in prefer:
-        for cand in (lang, lang.lower()):
-            if cand in auto:
-                return cand, "auto"
+        hit = find(native, lang)
+        if hit:
+            return (hit, "auto"), None
+    if native:
+        return (native[0], "auto"), None
     if manual:
-        return sorted(manual)[0], "manual"
-    return None
+        return (sorted(manual)[0], "manual"), None
+    if auto:
+        want = spoken or "／".join(prefer[:2])
+        if asr_available:
+            return None, f"只有 {','.join(auto)} 自動字幕，與影片語言 {want} 不符（常是語言誤判或翻譯稿，不可信），改用本機語音辨識"
+        return (auto[0], "auto"), f"只有 {auto[0]} 自動字幕且本機沒有 faster-whisper，姑且使用；內容可能是誤判語言的機器稿"
+    return None, None
+
+
+def _caption_choice(info: dict, prefer: list[str]) -> tuple[str, str] | None:
+    """yt-dlp 路：用 choose_caption 從 info.json 的字幕清單挑；回 (語言碼, 'manual'|'auto') 或 None（有說明會 warn）。"""
+    choice, note = choose_caption(info.get("subtitles") or [], info.get("automatic_captions") or [], prefer, info.get("language"), have("faster_whisper"))
+    if note:
+        warn(note)
+    return choice
 
 
 def _yt_tracks(vid: str) -> list | None:
@@ -504,11 +585,15 @@ def _asr(src: str, model_size: str, lang: str | None) -> tuple[list[tuple[float,
     d = cache_dir(src)
     wav = d / "audio16k.wav"
     if not wav.exists():
-        r = subprocess.run([ff, "-y", "-loglevel", "error", "-i", str(audio), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav)],
+        part = d / "audio16k.part.wav"  # 先寫暫存檔名，成功才改名（半截 wav 不會被下次當完整檔重用，稽核 TA-18）
+        part.unlink(missing_ok=True)
+        r = subprocess.run([ff, "-y", "-loglevel", "error", "-i", str(audio), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(part)],
                            capture_output=True, text=True, encoding="utf-8", errors="replace")
         if r.returncode != 0:
+            part.unlink(missing_ok=True)
             audio.unlink(missing_ok=True)  # 多半是下載到壞檔；刪掉讓下次重抓
             die("ffmpeg 轉音訊失敗（已刪快取的音訊檔，重跑一次會重新下載）：" + r.stderr.strip()[-300:], 3)
+        part.replace(wav)
     _preload_cuda_dlls()
     from faster_whisper import WhisperModel
     device = "cuda"
@@ -549,20 +634,15 @@ def get_transcript(src: str, prefer: list[str], asr: bool, model_size: str, lang
     spoken = info.get("language")  # 上傳者標的影片語言（可能沒有）
     tracks = _yt_tracks(vid) if (vid and not asr) else None
     if tracks is not None:
-        # 1) 手動字幕依偏好序  2) YouTube 原生自動字幕，但語言要和影片語言（或偏好）一致  3) 不一致 → ASR（有裝時）
-        manual = [t for t in tracks if not t.is_generated]
-        auto = [t for t in tracks if t.is_generated]
-        pick = next((t for p in prefer for t in manual if t.language_code.lower() == p.lower()), None) or (manual[0] if manual else None)
-        kind = "manual"
-        if pick is None and auto:
-            ok = [t for t in auto if (_lang_match(t.language_code, spoken) if spoken else any(_lang_match(t.language_code, p) for p in prefer))]
-            if ok:
-                pick, kind = ok[0], "auto"
-            elif have("faster_whisper"):
-                warn(f"YouTube 自動字幕語言是 {','.join(t.language_code for t in auto)}，與影片語言 {spoken or '／'.join(prefer[:2])} 不符（常是語言誤判，翻譯稿不可信），改用本機語音辨識")
-            else:
-                pick, kind = auto[0], "auto"
-                warn(f"只有 {pick.language_code} 自動字幕且本機沒有 faster-whisper，姑且使用；內容可能是誤判語言的機器稿")
+        # 選哪一軌由 choose_caption 決定（與 yt-dlp 那條路同一個排序）：手動(偏好語言) → 原生自動字幕(與影片語言一致) → 其他手動 → ASR／姑且用自動字幕
+        choice, note = choose_caption([t.language_code for t in tracks if not t.is_generated],
+                                      [t.language_code for t in tracks if t.is_generated], prefer, spoken, have("faster_whisper"))
+        if note:
+            warn(note)
+        pick = kind = None
+        if choice:
+            code, kind = choice
+            pick = next((t for t in tracks if t.language_code == code and bool(t.is_generated) == (kind == "auto")), None)
         if pick is not None:
             segs = _fetch_track(pick)
             if segs:
@@ -821,7 +901,7 @@ def cmd_search(a) -> int:
             days = {"hour": 1 / 24, "today": 1, "week": 7, "month": 31, "year": 365}[a.date]
             params["publishedAfter"] = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
         res = yt_api("search", params)
-        print(f"來源：YouTube Data API search.list（每天 100 次；這次用 1 次）")
+        print("來源：YouTube Data API search.list（每天 100 次；這次用 1 次）")
         for it in res.get("items", []):
             s, vid = it["snippet"], it["id"]["videoId"]
             print(f"{vid} | {s['title']} | {s['channelTitle']} | {s['publishedAt'][:10]} | https://www.youtube.com/watch?v={vid}")
@@ -963,12 +1043,15 @@ def _dir_age_days(d: Path, now: float) -> float:
 
 
 def clean_cache(media_days: float | None, all_days: float | None, force_all: bool = False, media_only: bool = False) -> tuple[int, int]:
-    """刪快取：影音檔（video.*／audio*）超過 media_days 沒更新（修改時間）就刪；整個資料夾超過 all_days 沒更新就刪。回 (資料夾數, 位元組)。"""
+    """刪快取。只處理名稱符合本工具命名（yt_／url_／file_ 開頭，見 is_cache_key）的子資料夾，別的資料夾一律不碰
+    （video.cacheDir 可被 local.json 指到一般資料夾；稽核 TA-15）。比的是「資料夾裡最新那個檔案」的修改時間（只被讀取不會更新它；
+    新寫一份逐字稿就會讓整個資料夾的舊影音一起延壽）：影音檔（video.*／audio*／live_*.mp4）超過 media_days 就刪；
+    整個資料夾超過 all_days 就刪。回 (資料夾數, 位元組)。"""
     root = cache_root()
     now = time.time()
     freed, n = 0, 0
     for d in root.iterdir():
-        if not d.is_dir():
+        if not d.is_dir() or not is_cache_key(d.name):
             continue
         age = _dir_age_days(d, now)
         if not media_only and (force_all or (all_days is not None and age > all_days)):
@@ -1114,6 +1197,9 @@ def main(argv=None) -> int:
     p.add_argument("--media-only", action="store_true")
     p.set_defaults(fn=cmd_clean)
     a = ap.parse_args(argv)
+    bad = _arg_error(a)
+    if bad:
+        die(bad, 2)
     if a.cmd not in ("clean", "setup"):
         auto_clean()
     return a.fn(a)
