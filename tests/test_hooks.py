@@ -1,8 +1,12 @@
-"""hooks/usage_guard.py 的查證守門（Stop）：假逐字稿，不打網路。"""
+"""hooks/usage_guard.py 的單元測試：查證／建議守門（Stop）、專案健康檢查與全域對照、工具後提醒、殘留程序／延後工作／磁碟清理、
+派工補充（SubagentStart）、巡檢排程、agent 壓縮判定（SessionStart）、語言提醒、報告守門（PreToolUse／SubagentStop）。
+全部用暫存資料夾（setUp 建、addCleanup 刪），不碰真實 ~/.claude、不打網路。健檢 fix-hook 補的回歸測試在 tests/test_hooks_audit.py。
+直接執行 `py -3 tests/test_hooks.py` 與 `py -3 -m unittest tests.test_hooks` 跑的項數相同（健檢 HK-11：原本 unittest.main() 夾在檔案中間）。"""
 from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import sys
 import tempfile
 import time
@@ -33,6 +37,7 @@ LONG = "AI 會出現幻覺的原因有三層。" * 12
 class SourceGuard(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="cds-hook-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self.tp = self.tmp / "t.jsonl"
         # 不可寫到使用者真實的 ~/.claude/state（0.11.8～0.11.16 的測試把「AI 幻覺的原因是什麼？」寫進了真實 source-guard.log）
         self._saved = (ug.STATE_DIR, ug.PA_STATE)
@@ -104,6 +109,7 @@ class SourceGuard(unittest.TestCase):
 class Health(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="cds-health-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self._saved = (ug.STATE_DIR, ug.PA_STATE, ug.CONFIG)
         ug.STATE_DIR = str(self.tmp / "state")
         ug.PA_STATE = str(self.tmp / "state" / "project-auto.json")
@@ -248,6 +254,7 @@ class ToolReminders(unittest.TestCase):
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="cds-remind-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self._saved = (ug.HOME, ug.STATE_DIR, ug.PA_STATE, ug.CONFIG)
         ug.HOME = str(self.tmp / "home")
         ug.STATE_DIR = str(self.tmp / "state")
@@ -351,15 +358,13 @@ class ToolReminders(unittest.TestCase):
         self.assertFalse(ug._needs_verify_skill(str(self.proj)))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class SessionUpkeep(unittest.TestCase):
     """0.16.0：殘留程序（C）、延後工作（E）、對話暫存（I）。全部節流、只提醒。"""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="cds-upkeep-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self._saved = (ug.HOME, ug.STATE_DIR, ug.PA_STATE, ug.CONFIG, ug.DEFERRED, dict(ug._TOOL_CACHE))
         ug.HOME = str(self.tmp / "home")
         ug.STATE_DIR = str(self.tmp / "state")
@@ -476,6 +481,7 @@ class SubagentBrief(unittest.TestCase):
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self.old = (ug.HOME, ug.CONFIG)
         ug.HOME = str(self.tmp / "home")
         ug.CONFIG = str(self.tmp / "home" / "claude-dev-system" / "config" / "dispatch-config.json")
@@ -531,6 +537,7 @@ class PatrolReminder(unittest.TestCase):
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self.old = (ug.STATE_DIR, ug.PA_STATE, ug.CONFIG)
         ug.STATE_DIR = str(self.tmp / "state")
         ug.PA_STATE = str(self.tmp / "state" / "project-auto.json")
@@ -576,6 +583,7 @@ class SubagentCompaction(unittest.TestCase):
         import datetime
         self.dt = datetime
         self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self.main = self.tmp / "sess.jsonl"
         self.sub = self.tmp / "sess" / "subagents"
         self.sub.mkdir(parents=True)
@@ -619,22 +627,22 @@ class SubagentCompaction(unittest.TestCase):
     def test_different_model_matching_active_agent_is_subagent(self):
         self.main.write_text(self.msg("claude-sonnet-5-5") + chr(10), encoding="utf-8")
         (self.sub / "agent-a1.jsonl").write_text(self.msg("claude-haiku-5-5") + chr(10), encoding="utf-8")
-        self.assertTrue(ug.compact_from_subagent(dict(self.payload, model="claude-haiku-5-5"), poll=0))
-        self.assertFalse(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5"), poll=0), "模型對不上任何正在跑的 agent：不當證據")
+        self.assertTrue(ug.compact_from_subagent(dict(self.payload, model="claude-haiku-5-5")))
+        self.assertFalse(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5")), "模型對不上任何正在跑的 agent：不當證據")
 
     def test_same_model_decided_by_where_boundary_lands(self):
         self.main.write_text(self.msg("claude-opus-5-5") + chr(10), encoding="utf-8")
         (self.sub / "agent-a1.jsonl").write_text(self.msg("claude-opus-5-5") + chr(10) + self.boundary(0.3) + chr(10), encoding="utf-8")
-        self.assertTrue(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5"), poll=0))
+        self.assertTrue(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5")))
         self.main.write_text(self.msg("claude-opus-5-5") + chr(10) + self.boundary(0.3) + chr(10), encoding="utf-8")
-        self.assertFalse(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5"), poll=0), "主對話自己剛壓縮：照舊注入")
+        self.assertFalse(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5")), "主對話自己剛壓縮：照舊注入")
 
     def test_no_active_agent_or_no_evidence_keeps_injecting(self):
         self.main.write_text(self.msg("claude-opus-5-5") + chr(10), encoding="utf-8")
-        self.assertFalse(ug.compact_from_subagent(dict(self.payload, model="claude-haiku-5-5"), poll=0), "沒有正在跑的 agent")
+        self.assertFalse(ug.compact_from_subagent(dict(self.payload, model="claude-haiku-5-5")), "沒有正在跑的 agent")
         (self.sub / "agent-a1.jsonl").write_text(self.msg("claude-opus-5-5") + chr(10) + self.boundary(600) + chr(10), encoding="utf-8")
-        self.assertFalse(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5"), poll=0), "模型相同又沒有新的壓縮標記：判不出來就照舊")
-        self.assertFalse(ug.compact_from_subagent({"source": "compact", "session_id": "none", "transcript_path": str(self.tmp / "x.jsonl")}, poll=0))
+        self.assertFalse(ug.compact_from_subagent(dict(self.payload, model="claude-opus-5-5")), "模型相同又沒有新的壓縮標記：判不出來就照舊")
+        self.assertFalse(ug.compact_from_subagent({"source": "compact", "session_id": "none", "transcript_path": str(self.tmp / "x.jsonl")}))
 
 
 class AutoTurnGuard(unittest.TestCase):
@@ -644,6 +652,7 @@ class AutoTurnGuard(unittest.TestCase):
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self.t = self.tmp / "t.jsonl"
         self.old = (ug.SG_LOCAL, ug.STATE_DIR)
         ug.SG_LOCAL = str(self.tmp / "local.json")
@@ -686,6 +695,7 @@ class SubagentLangNudge(unittest.TestCase):
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self.old = (ug.HOME, ug.CONFIG, ug.STATE_DIR, ug.SUB_LANG_STATE)
         ug.HOME = str(self.tmp / "home")
         ug.CONFIG = str(self.tmp / "home" / "nope.json")
@@ -743,6 +753,7 @@ class SubagentReportGuard(unittest.TestCase):
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self.old = (ug.HOME, ug.CONFIG, ug.STATE_DIR, ug.SUB_GUARD_STATE)
         ug.HOME = str(self.tmp / "home")
         ug.CONFIG = str(self.tmp / "home" / "nope.json")
@@ -892,3 +903,7 @@ class RecoGuard(unittest.TestCase):
         self.assertIsNotNone(ug.sg_judge(q, self.LONG + "2008 年跌了 32%。〔不含待查證事實〕"))
         self.assertIsNone(ug.sg_judge(q, self.LONG + "我算的：多 2.5%。〔不含待查證事實〕"))
         self.assertIsNone(ug.sg_judge(q, self.LONG + "研究顯示多 2.5%。來源：https://x.y"))
+
+
+if __name__ == "__main__":
+    unittest.main()

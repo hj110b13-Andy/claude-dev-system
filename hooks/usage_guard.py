@@ -1,8 +1,23 @@
 """claude-dev-system 用量守門 hook（通用版；來源：Stock-web tools/claude-setup/usage_guard.py，2026-10-17 抽成跨專案版）。
 
-掛在 UserPromptSubmit、PostToolUse、Stop（0.11.8 起，只做查證守門，見 source_guard）與 SessionStart（0.12.0 起，壓縮／接續後重新開工，見 compact_msg）：
+掛在 7 個事件（安裝器 installer/cds/settings_ops.py 的 HOOK_SPECS 登記）：
+- UserPromptSubmit：用量守門、專案自動化、全域系統對照、專案健康檢查、殘留程序、延後工作、磁碟清理、看板逾時。
+- PostToolUse：用量守門（每 alertRepeat 秒最多一次）、殘留程序、工具後提醒（改到安裝副本、背景任務巡檢、波及範圍、共用工作目錄）、
+  agent 裡的語言提醒、看板逾時。
+- Stop（0.11.8 起）：巡檢排程校正（patrol_sync）＋查證守門／建議守門（source_guard），不查用量。
+- SessionStart（0.12.0 起）：壓縮／接續後重新開工（compact_msg，含健康檢查、專案自動化、建議開新對話）；agent 自己的壓縮不注入。
+- SubagentStart（0.21.0 起）：派工補充（subagent_brief）。
+- PreToolUse(SubagentHandback)（0.22.0 起）：報告守門（subagent_report_guard）。
+- SubagentStop（0.22.0 起）：報告守門後備（subagent_stop_guard）。
+會注入的標籤：【用量守門（自動）】【專案自動化（hook）】【全域系統對照（hook）】【專案健康檢查（hook）】【殘留程序（hook）】【延後工作（hook）】
+【磁碟清理（hook）】【看板逾時提醒（自動）】【改到安裝副本（hook）】【背景任務巡檢（hook）】【波及範圍（hook）】【共用工作目錄（hook）】
+【語言（hook）】【查證守門（hook）】【建議守門（hook）】【壓縮後重新開工（hook）】【建議開新對話（hook）】【派工補充（hook）】【報告守門（hook）】。
+狀態檔都在 <CLAUDE_HOME>/state，JSON 狀態一律經 _atomic_write_json／_save_json_state 寫（鎖＋合併＋原子替換，健檢 HK-01／HK-02）。
+
+用量守門：
 1. 讀本機 Claude 登入憑證（<CLAUDE_HOME>/.credentials.json）的 OAuth access token，呼叫 Anthropic 用量端點
-   （非公開文件、社群工具同做法）取得 5 小時／7 天用量 %。端點改版時本腳本安靜失效、不擋操作。
+   （非公開文件、社群工具同做法）取得 5 小時／7 天用量 %。端點改版或抓不到時不擋操作：其他提醒照常；
+   上次的數字只在重置時間還沒到時才拿來判門檻（健檢 HK-03，原本寫「安靜失效」，實際會沿用過期的數字一直叫你收尾）。
 2. 寫進 <CLAUDE_HOME>/state/usage.json（只有百分比與重置時間，不含權杖）。
 3. 達門檻時注入「立刻收尾」提醒。門檻讀取順序（先找到者為準）：①專案 `.claude/dispatch-config.json`（從 hook 的 cwd 往上層找）
    →②全域 <CLAUDE_HOME>/claude-dev-system/config/dispatch-config.json →③內建預設 85／97。
@@ -102,20 +117,198 @@ def load_limits(cwd=None):
     return cfg, source
 
 
-def load_state():
+# ---------- 狀態檔讀寫（健檢 HK-01／HK-02，2026-11-12）：所有 state/*.json 都走這一組，唯一來源 ----------
+# 原本 usage.json 用固定檔名 usage.json.tmp＋os.replace（Windows 上目標檔被別的程序開著讀時丟 PermissionError，整則提醒消失），
+# 其餘直接 open("w") 先截斷再寫（並行的 hook 讀到半份 JSON 當成空的、再把空內容寫回去：8 程序×40 次只留下 12 個鍵、讀到壞 JSON 58 次）。
+# 現在：①暫存檔與目標同目錄、檔名帶 PID，os.replace 遇 PermissionError 重試；②寫入前拿作業系統層級的檔案鎖（拿不到最多等 LOCK_WAIT 秒，
+# 之後照舊不帶鎖寫，hook 不可被卡住），鎖內重讀磁碟上的內容、只把這一輪改過的鍵合併進去（別的程序同時加的鍵不會被蓋掉）；
+# ③磁碟上的檔是壞 JSON：改名成 .corrupt 保留一份、這一輪不寫；④任何錯誤都不丟例外給呼叫端。
+# 鎖的做法依據開源 tox-dev/filelock（MIT）：Unix 用 fcntl.flock(fd, LOCK_EX | LOCK_NB)（src/filelock/_unix.py:50）；Windows 舊版用
+# msvcrt.locking(fd, LK_NBLCK, 1)，新版改 LockFileEx 是為了避開「locking 從目前檔案位置算起」——這裡鎖檔永遠不寫內容、鎖與解鎖前都 lseek 到 0。
+# 程序結束時作業系統自動釋放，不會留下卡住的鎖（.lock 空檔本身會留著，無害）。
+LOCK_WAIT = 0.3  # 派工規格：拿鎖最多等約 0.3 秒
+REPLACE_TRIES = 5  # 派工規格：3～5 次、每次約 50 ms
+REPLACE_SLEEP = 0.05
+
+
+class _JState(dict):
+    """讀進來的狀態：記住讀到時的原文（_orig）與「是不是壞檔／讀不到」（_bad），寫回時用來算這一輪改了哪些鍵。"""
+    _orig = None
+    _bad = False
+
+
+def _read_json_file(path):
+    """回 (內容 dict 或 None, 狀態)。狀態：ok／missing（沒有檔）／bad（壞 JSON 或不是物件）／error（開檔失敗，例如被鎖住）。
+    Windows 上別的程序 os.replace 的瞬間開檔會得到 PermissionError：重試 REPLACE_TRIES 次（每次 REPLACE_SLEEP 秒）。"""
+    text = None
+    for i in range(REPLACE_TRIES):
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            break
+        except FileNotFoundError:
+            return None, "missing"
+        except PermissionError:
+            if i + 1 < REPLACE_TRIES:
+                time.sleep(REPLACE_SLEEP)
+        except Exception:
+            return None, "error"
+    if text is None:
+        return None, "error"
     try:
-        with open(USAGE, encoding="utf-8") as f:
-            return json.load(f)
+        d = json.loads(text) if text.strip() else None
     except Exception:
-        return {}
+        return None, "bad"
+    if d is None:
+        return None, "bad" if text.strip() else "missing"
+    return (d, "ok") if isinstance(d, dict) else (None, "bad")
+
+
+def _load_json_state(path):
+    """讀狀態檔成 _JState（一般 dict 用法不變）。壞檔或讀不到時內容為空、_bad=True，寫回時不會拿空內容蓋掉既有檔。"""
+    d, status = _read_json_file(path)
+    st = _JState(d or {})
+    st._orig = json.dumps(d or {}, ensure_ascii=False)
+    st._bad = status in ("bad", "error")
+    return st
+
+
+def _lock_fd(fd, lock):
+    os.lseek(fd, 0, 0)
+    if os.name == "nt":
+        import msvcrt
+        msvcrt.locking(fd, msvcrt.LK_NBLCK if lock else msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(fd, (fcntl.LOCK_EX | fcntl.LOCK_NB) if lock else fcntl.LOCK_UN)
+
+
+def _acquire_lock(path, wait=LOCK_WAIT):
+    """拿 path + '.lock' 的排他鎖。回 (fd 或 None, 有沒有拿到)。拿不到（逾時或不支援）也回 fd，呼叫端照舊不帶鎖做。"""
+    try:
+        fd = os.open(path + ".lock", os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError:
+        return None, False
+    t0 = time.monotonic()
+    while True:
+        try:
+            _lock_fd(fd, True)
+            return fd, True
+        except Exception:
+            if time.monotonic() - t0 >= wait:
+                return fd, False
+            time.sleep(0.01)
+
+
+def _release_lock(fd, locked):
+    if fd is None:
+        return
+    try:
+        if locked:
+            _lock_fd(fd, False)
+    except Exception:
+        pass
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
+_TMP_SEQ = [0]
+
+
+def _atomic_write_json(path, obj, ensure_ascii=False):
+    """唯一的狀態檔寫入：同目錄暫存檔（檔名帶 PID）→ os.replace；PermissionError 重試 REPLACE_TRIES 次後放棄並刪暫存檔。
+    回 True／False，永不丟例外。"""
+    tmp = None
+    try:
+        d = os.path.dirname(path) or "."
+        os.makedirs(d, exist_ok=True)
+        _TMP_SEQ[0] += 1
+        tmp = f"{path}.{os.getpid()}-{_TMP_SEQ[0]}.tmp"
+        with open(tmp, "x", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=ensure_ascii)
+        for i in range(REPLACE_TRIES):
+            try:
+                os.replace(tmp, path)
+                tmp = None
+                return True
+            except PermissionError:
+                if i + 1 < REPLACE_TRIES:
+                    time.sleep(REPLACE_SLEEP)
+        return False
+    except Exception:
+        return False
+    finally:
+        if tmp:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+def _merge_state(disk, orig, new):
+    """三方合併：以 new（這一輪的結果）的順序為主；這一輪沒改的鍵用磁碟上現在的值（可能被別的程序改過），
+    這一輪刪掉的鍵刪掉，別的程序新加的鍵保留。兩邊都是 dict 的值往下一層同樣合併（例如 remind 底下各場對話）。"""
+    out = {}
+    for k, v in new.items():
+        if k in orig and orig[k] == v:
+            if k in disk:
+                out[k] = disk[k]
+        elif isinstance(v, dict) and isinstance(orig.get(k), dict) and isinstance(disk.get(k), dict):
+            out[k] = _merge_state(disk[k], orig[k], v)
+        else:
+            out[k] = v
+    for k, v in disk.items():
+        if k not in out and k not in orig:
+            out[k] = v
+    return out
+
+
+def _save_json_state(path, st, ensure_ascii=False, prune=None):
+    """把 st 寫回 path：這一輪沒改任何東西就不寫（也不拿鎖）；要寫才拿鎖、重讀、合併、原子寫入。回 True／False，永不丟例外。
+    prune：寫入前對合併結果做的修剪函式（可為 None）。"""
+    try:
+        orig_text = getattr(st, "_orig", None)
+        new = dict(st)
+        if orig_text is not None and json.dumps(new, ensure_ascii=False) == orig_text:
+            return True  # 內容（含順序）都沒變
+        fd, locked = _acquire_lock(path)
+        try:
+            disk, status = _read_json_file(path)
+            if status == "bad":
+                # 壞檔：留一份 .corrupt 給人查，這一輪不寫（下一輪從空的開始）
+                try:
+                    os.replace(path, path + ".corrupt")
+                except OSError:
+                    pass
+                return False
+            if status == "error":
+                return False  # 讀不到（例如被別的程序鎖住）：寧可這一輪不寫，也不拿不完整的內容蓋掉
+            orig = json.loads(orig_text) if orig_text is not None else {}
+            merged = _merge_state(disk or {}, orig, new)
+            if prune:
+                prune(merged)
+            ok = _atomic_write_json(path, merged, ensure_ascii=ensure_ascii)
+            if ok and isinstance(st, _JState):  # 同一個物件之後再存一次時，以這次寫進去的內容為基準
+                st.clear()
+                st.update(merged)
+                st._orig = json.dumps(merged, ensure_ascii=False)
+                st._bad = False
+            return ok
+        finally:
+            _release_lock(fd, locked)
+    except Exception:
+        return False
+
+
+def load_state():
+    return _load_json_state(USAGE)
 
 
 def save_state(s):
-    os.makedirs(STATE_DIR, exist_ok=True)
-    tmp = USAGE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(s, f, ensure_ascii=False)
-    os.replace(tmp, USAGE)
+    """usage.json；回 True／False，永不丟例外（HK-02：原本丟 PermissionError 讓整則提醒消失）。"""
+    return _save_json_state(USAGE, s)
 
 
 def fetch():
@@ -201,6 +394,19 @@ def _pa_count_sources(cwd, limit=3000, budget=0.5):
     return n, False
 
 
+def _path_key(p):
+    """路徑比較用的鍵（唯一來源）：絕對路徑＋normcase（Windows 不分大小寫、/ 與 \\ 視為相同）。
+    健檢 HK-04：SubagentStart 等 payload 的 cwd 會是小寫磁碟代號 `c:\\Users\\…`，原本直接字串比較，家目錄被當成專案要求 project-init。"""
+    return os.path.normcase(os.path.abspath(p))
+
+
+def _same_path(a, b):
+    try:
+        return _path_key(a) == _path_key(b)
+    except Exception:
+        return False
+
+
 def _pa_skip(cwd):
     """家目錄、磁碟根目錄、claude-dev-system 本身不做。回正規化的專案資料夾（子資料夾會往上找 git 根目錄）或 None。"""
     if not cwd or not os.path.isdir(cwd):
@@ -211,12 +417,12 @@ def _pa_skip(cwd):
     # cd 到 installer/ 後被判成「沒有 CLAUDE.md、非 git 的新專案」要求初始化。只認 .git（上層的 CLAUDE.md 可能是工作區共用的，不代表專案根）。
     if not os.path.exists(os.path.join(cwd, ".git")) and not os.path.exists(os.path.join(cwd, "CLAUDE.md")):
         d = os.path.dirname(cwd)
-        while d and d != os.path.dirname(d) and d != home:
+        while d and not _same_path(d, os.path.dirname(d)) and not _same_path(d, home):
             if os.path.exists(os.path.join(d, ".git")):
                 cwd = d
                 break
             d = os.path.dirname(d)
-    if cwd in (home, os.path.dirname(cwd)) or os.path.dirname(cwd) == cwd:
+    if _same_path(cwd, home) or _same_path(os.path.dirname(cwd), cwd):
         return None
     if os.path.exists(os.path.join(cwd, "installer", "cds", "paths.py")) and os.path.exists(os.path.join(cwd, "rules", "core.md")):
         return None
@@ -224,20 +430,33 @@ def _pa_skip(cwd):
 
 
 def _pa_load():
-    try:
-        with open(PA_STATE, encoding="utf-8") as f:
-            return json.load(f) or {}
-    except Exception:
-        return {}
+    """project-auto.json。壞檔或讀不到時回空的 _JState 且 _bad=True（呼叫端照空的判斷；寫回時不會拿空內容蓋掉既有檔）。"""
+    return _load_json_state(PA_STATE)
+
+
+# 健檢 HK-09：每場對話一個鍵的這幾類原本永不刪，project-auto.json 會無限長大。採「每類只留最近 PA_KEEP_PER_KIND 個」而不是「30 天內」：
+# compactions| 的值是單純次數（舊格式沒有時間戳），用個數修剪三類都不必改格式；更新時把鍵移到最後，所以「最近」＝最近寫過。
+# 200 是自己定的：遠多於同時進行的對話數（remind 只留 30 場），每個鍵不到 200 位元組，整類最多約 40 KB。
+PA_PRUNE_PREFIXES = ("compactions|", "procs|", "deferred|")
+PA_KEEP_PER_KIND = 200
+
+
+def _pa_prune(st):
+    for pre in PA_PRUNE_PREFIXES:
+        ks = [k for k in st if k.startswith(pre)]
+        for k in ks[:max(0, len(ks) - PA_KEEP_PER_KIND)]:
+            st.pop(k, None)
+
+
+def _pa_touch(st, key, value):
+    """設定 st[key] 並移到最後（修剪時保留最近寫過的）。"""
+    st.pop(key, None)
+    st[key] = value
 
 
 def _pa_save(st):
-    try:
-        os.makedirs(os.path.dirname(PA_STATE), exist_ok=True)
-        with open(PA_STATE, "w", encoding="utf-8") as f:
-            json.dump(st, f, ensure_ascii=False)
-    except Exception:
-        pass
+    """回 True／False，永不丟例外。"""
+    return _save_json_state(PA_STATE, st, prune=_pa_prune)
 
 
 def _git_ignored(cwd):
@@ -401,6 +620,17 @@ def project_health(cwd):
     return out
 
 
+def _health_rec(v):
+    """健康檢查去重記錄 → {"day", "sessions"}。舊格式（0.27.0 以前）是字串「日期」或「日期|session」。"""
+    if isinstance(v, dict):
+        ss = v.get("sessions")
+        return {"day": str(v.get("day") or ""), "sessions": [str(x) for x in ss] if isinstance(ss, list) else []}
+    if isinstance(v, str) and v:
+        day, _, sid = v.partition("|")
+        return {"day": day, "sessions": [sid or "-"]}
+    return {"day": "", "sessions": []}
+
+
 def health_msg(cwd, force=False, session_id=None):
     """UserPromptSubmit：同一資料夾、同一場對話每天最多提醒一次；SessionStart（壓縮後）force=True 每次都看。
     0.13.0 加對話：原本只看資料夾＋日期，舊對話當天先用掉，同一天新開的對話就收不到（Stock-web 2026-11-03）。"""
@@ -410,11 +640,14 @@ def health_msg(cwd, force=False, session_id=None):
             return None
         st = _pa_load()
         key = "health|" + c.lower()
-        mark = time.strftime("%Y-%m-%d") + ("|" + session_id if session_id else "")
-        if not force and st.get(key) == mark:
+        day, token = time.strftime("%Y-%m-%d"), session_id or "-"
+        rec = _health_rec(st.get(key))
+        if not force and rec["day"] == day and token in rec["sessions"]:
             return None
         probs = project_health(c)
-        st[key] = mark
+        # 健檢 HK-08：值改成 {"day", "sessions": 當天看過的對話（最多 30 場）}，兩場對話交替時不再每則都注入；舊格式 "日期|session" 照樣認得
+        sessions = _add_session(rec["sessions"] if rec["day"] == day else [], token)
+        st[key] = {"day": day, "sessions": sessions}
         _pa_save(st)
         if not probs:
             return None
@@ -487,6 +720,17 @@ def _hook_debug(tag, payload):
         pass
 
 
+def _is_synthetic(d):
+    """對話紀錄的這一行是不是 Claude Code 自己合成的助理訊息（不是模型寫的）：isApiErrorMessage 為真，或 message.model 以 < 開頭
+    （例如 <synthetic> 的「You've hit your 5-hour limit」）。唯一來源：讀「助理最後說了什麼」的地方都用它（健檢 HK-06）。"""
+    if not isinstance(d, dict):
+        return False
+    if d.get("isApiErrorMessage"):
+        return True
+    m = d.get("message")
+    return isinstance(m, dict) and str(m.get("model") or "").startswith("<")
+
+
 def _last_model(path):
     """這份對話紀錄最後一則助理訊息用的模型（讀尾端）。讀不到回 None。"""
     try:
@@ -502,8 +746,8 @@ def _last_model(path):
                 d = json.loads(line)
             except Exception:
                 continue
-            m = (d.get("message") or {}).get("model") if d.get("type") == "assistant" else None
-            if m and not str(m).startswith("<"):
+            m = (d.get("message") or {}).get("model") if d.get("type") == "assistant" and not _is_synthetic(d) else None
+            if m:
                 return str(m)
         return None
     except Exception:
@@ -576,14 +820,14 @@ def _waiting_on_tool(path):
         return False
 
 
-def compact_from_subagent(payload, now=None, poll=None):
+def compact_from_subagent(payload, now=None):
     """SessionStart(compact) 是不是某個 agent 自己壓縮觸發的（不是主對話）。有明確證據才回 True，判不出來回 False（照舊注入）。
     2026-11-11 實測（hook-debug）：hook 執行當下 compact_boundary 還沒寫進檔（非同步，等 2 秒也沒有），prompt_id 主對話與 agent 共用，
     都不能用。依序用這三個依據（前提都是有正在跑的 agent）：
     ①payload.model（正在壓縮那一方的模型）≠ 主對話最後一則助理訊息的模型，且＝某個正在跑的 agent 的模型 → agent。
     ②主對話正卡在等工具結果（例如前景 agent）→ 它不可能在壓縮 → agent。
     ③模型相同、主對話沒在等工具：比 context 大小，agent 的估計值 ≥ 主對話的 COMPACT_TOKEN_MARGIN 倍 → agent。
-    poll 參數保留給舊呼叫相容，沒有作用。"""
+    （原本的 poll 參數沒有作用、只有測試傳 0，健檢 M 拿掉。）"""
     try:
         tp = payload.get("transcript_path") or ""
         sid = str(payload.get("session_id") or "")
@@ -625,17 +869,21 @@ def compact_msg(cwd, session_id):
                  "②有盤點索引就跑 `project-scan.py . --check`；③要上網查資料先重讀 `~/.claude/claude-dev-system/rules/web-quick.md`；"
                  "④改到被 3 處以上引用的函式／資料層前用 skill `cds-blast-radius`，派 agent 前用 `cds-agent-dispatch`。"]
         if c:
-            h = health_msg(c, force=True)
+            # 健檢 HK-08：帶實際的 session_id——原本傳 None，記錄被蓋成「沒有對話」，壓縮後下一則提示又把同樣內容注入一次
+            h = health_msg(c, force=True, session_id=session_id)
             if h:
                 parts.append(h)
-            pa = project_auto_msg(c, None)
+            pa = project_auto_msg(c, session_id, force=True)
             if pa:
                 parts.append(pa)
         if session_id:
             st = _pa_load()
             k = "compactions|" + session_id
-            n = int(st.get(k, 0)) + 1
-            st[k] = n
+            try:
+                n = int(st.get(k, 0)) + 1
+            except (TypeError, ValueError):
+                n = 1
+            _pa_touch(st, k, n)  # 移到最後：HK-09 修剪時保留最近的
             _pa_save(st)
             lim = _pa_config(c)["newSessionAfterCompactions"] if c else 3
             if lim and n >= lim and n % lim == 0:
@@ -649,11 +897,32 @@ def compact_msg(cwd, session_id):
 LF_JOIN = chr(10)
 
 
-def project_auto_msg(cwd, session_id=None):
+SEEN_SESSIONS_MAX = 30  # 健檢 HK-08：去重記錄保留最近這麼多場對話（派工規格：上限 30，與 REMIND_KEEP_SESSIONS 相同）
+
+
+def _seen_sessions(rec):
+    """去重記錄裡看過的對話清單。新格式 {"sessions": [...]}；舊格式 {"session": "A"}（0.27.0 以前）也認得。"""
+    if not isinstance(rec, dict):
+        return []
+    ss = rec.get("sessions")
+    if isinstance(ss, list):
+        return [str(x) for x in ss]
+    return [str(rec["session"])] if rec.get("session") else []
+
+
+def _add_session(seen, sid):
+    """把 sid 加到清單最後（已在就移到最後），只留最近 SEEN_SESSIONS_MAX 個。"""
+    out = [x for x in seen if x != sid] + [sid]
+    return out[-SEEN_SESSIONS_MAX:]
+
+
+def project_auto_msg(cwd, session_id=None, force=False):
     """回要注入的提示字串，或 None。可判定條件（與 core.md「專案自動化」同一套）：
     init  ＝ 沒有 CLAUDE.md、算專案（git 或原始碼 ≥ minSourceFiles）、autoInit；
     audit ＝ 有 CLAUDE.md、沒有 .claude/project-scan.json、原始碼 ≥ minSourceFiles、autoAudit。
-    同一個資料夾同一場對話只注入一次；claude-dev-system 自己、家目錄、磁碟根目錄不做。"""
+    同一個資料夾同一場對話只注入一次；claude-dev-system 自己、家目錄、磁碟根目錄不做。
+    force=True（壓縮後重新開工）：這場對話注入過也照樣注入，並記下這場對話（之後的提示不再重複注入）。
+    健檢 HK-07：先用便宜的判斷（有沒有 CLAUDE.md／索引、開關、去重）排除，最後真的需要才數原始碼檔（家目錄實測 0.24 秒）。"""
     try:
         cwd = _pa_skip(cwd)
         if not cwd:
@@ -662,24 +931,32 @@ def project_auto_msg(cwd, session_id=None):
         has_md = os.path.exists(os.path.join(cwd, "CLAUDE.md"))
         has_idx = os.path.exists(os.path.join(cwd, ".claude", "project-scan.json"))
         is_git = os.path.exists(os.path.join(cwd, ".git"))
+        if not has_md and not cfg["autoInit"]:
+            return None
+        if has_md and (has_idx or not cfg["autoAudit"]):
+            return None
+        # 同一場對話同一資料夾只提醒一次（健檢 HK-08：記最近 30 場對話，兩場對話交替時不再每則都注入）
+        key = cwd.lower()
+        st = _pa_load()
+        seen = _seen_sessions(st.get(key))
+        if session_id and not force and session_id in seen:
+            return None
         n, truncated = _pa_count_sources(cwd)
         is_project = is_git or n >= cfg["minSourceFiles"]
         if not is_project:
             return None
-        if not has_md and cfg["autoInit"]:
+        if not has_md:
             what, skill = "init", "cds-project-init"
-        elif has_md and not has_idx and n >= cfg["minSourceFiles"] and cfg["autoAudit"]:
+        elif n >= cfg["minSourceFiles"]:
             what, skill = "audit", "cds-project-audit"
         else:
             return None
-        # 同一場對話同一資料夾只提醒一次
-        key = cwd.lower()
-        st = _pa_load()
-        if session_id and isinstance(st.get(key), dict) and st[key].get("session") == session_id:
-            return None
-        st[key] = {"session": session_id, "what": what, "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        if session_id:
+            seen = _add_session(seen, session_id)
+        st[key] = {"session": session_id if session_id else (seen[-1] if seen else None), "sessions": seen, "what": what,
+                   "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
         _pa_save(st)
-        facts = f"沒有 CLAUDE.md、" if not has_md else "有 CLAUDE.md 但沒有盤點索引、"
+        facts = "沒有 CLAUDE.md、" if not has_md else "有 CLAUDE.md 但沒有盤點索引、"
         facts += f"原始碼約 {n}{'+' if truncated else ''} 檔、{'git 專案' if is_git else '非 git'}"
         if what == "init":
             return ("【專案自動化（hook）】這個資料夾" + facts + f"，autoInit=true → 回答使用者之前先執行 skill `{skill}`"
@@ -883,12 +1160,13 @@ def _task_check(cwd):
 def _installed_copy(fp):
     """fp 是 claude-dev-system 的安裝副本（rules／tools／hooks／CHANGELOG、本工具裝的 skills）→ 回顯示用相對路徑，否則 None。
     config/ 不算：dispatch-config.json 本來就給使用者改，local.json 是金鑰。"""
-    ap = os.path.normcase(os.path.abspath(fp))
-    base = os.path.normcase(os.path.join(HOME, "claude-dev-system"))
-    sk = os.path.normcase(os.path.join(HOME, "skills"))
+    ap = _path_key(fp)
+    base = _path_key(os.path.join(HOME, "claude-dev-system"))
+    sk = _path_key(os.path.join(HOME, "skills"))
     if ap.startswith(base + os.sep):
         r = os.path.relpath(ap, base).replace(os.sep, "/")
-        if r.split("/")[0] in ("rules", "tools", "hooks") or r == "changelog.md":
+        # 健檢：非 Windows 的 normcase 不轉小寫，CHANGELOG.md 原本比不到 "changelog.md"
+        if r.split("/")[0] in ("rules", "tools", "hooks") or r.lower() == "changelog.md":
             return "claude-dev-system/" + r
     elif ap.startswith(sk + os.sep):
         parts = os.path.relpath(ap, sk).split(os.sep)
@@ -1004,6 +1282,7 @@ def tool_reminders(payload):
                                "逐條判定並實跑最關鍵的一條證明安全；這場對話已對它做過就忽略。")
         # 0.14.1：逾時被自動移到背景的也算；有任務 ID 就每個任務各提醒一次（巡檢排程全部結束會刪，之後再派要重建；Stock-web 2026-11-04 只提醒一次，
         # 排程刪掉後再派的任務沒有巡檢，指令卡 34 分鐘要使用者問才發現）。提醒句本來就是「先 CronList，沒有才建」，重複提醒不會重複建。
+        # 0.25.0 起：這場對話記得有巡檢排程（sess["patrol"]）就整個不提醒，只有沒有排程時才每個任務各提醒一次（健檢 HK-12 註解更正）。
         tid = _background_task_id(payload)
         bg = name in ("Agent", "Task", "Workflow") or (name in ("Bash", "PowerShell") and (ti.get("run_in_background") is True or bool(tid)))
         if bg:
@@ -1019,7 +1298,7 @@ def tool_reminders(payload):
         while len(rem) > REMIND_KEEP_SESSIONS:
             rem.pop(next(iter(rem)))
         st["remind"] = rem
-        _pa_save(st)
+        _pa_save(st)  # 健檢 HK-09：_pa_save 內容（含對話順序）沒變就不寫檔；原本每次 PostToolUse 都整份重寫
         return out
     except Exception:
         return []
@@ -1104,18 +1383,20 @@ def _deferred_hint(cwd=None):
 def deferred_msg(cwd, session_id, st, now=None, every=600):
     """UserPromptSubmit（含 agent 完成通知那一輪）：延後清單有項目、而且現在記憶體夠 → 提醒依登記順序開跑。同一場對話最多每 10 分鐘一次。"""
     try:
-        items, others = _deferred_mine(cwd)  # 0.26.1：只提這個專案登記的；別的專案的由那邊的對話處理
-        if not items:
+        if not _deferred_items():
             return None
         now = now or time.time()
         key = "deferred|" + str(session_id or "-")
         if now - float(st.get(key, 0)) < every:
+            return None  # 健檢 HK-07：節流判斷移到載入 resgate 之前（原本每則提示都先載入模組才看節流）
+        items, others = _deferred_mine(cwd)  # 0.26.1：只提這個專案登記的；別的專案的由那邊的對話處理
+        if not items:
             return None
         rg = _tool_mod("resgate")
         ok, free, need = rg.enough(rg.load_cfg(cwd))
         if not ok:
             return None
-        st[key] = now
+        _pa_touch(st, key, now)
         x = items[0]
         return (f"【延後工作（hook）】延後清單有 {len(items)} 項之前「記憶體不足、沒有執行」的工作，現在可用記憶體 "
                 f"{'量不到' if free is None else f'{free:.1f} GB'} ≥ {need:g} GB → 依登記順序開跑第一項 #{x.get('id')}"
@@ -1145,7 +1426,7 @@ def proc_msg(cwd, session_id, st, now=None):
         groups = pr.session_leftovers(float(cfg["minMinutes"]), cwd)
         seen = set(rec.get("seen") or [])
         new = [g for g in groups if g["pid"] not in seen]
-        st[key] = {"at": now, "seen": sorted(seen | {g["pid"] for g in groups})[-200:]}
+        _pa_touch(st, key, {"at": now, "seen": sorted(seen | {g["pid"] for g in groups})[-200:]})
         if not new:
             return None
         return (f"【殘留程序（hook）】這場對話的工具指令開出、已跑超過 {cfg['minMinutes']:g} 分鐘的程序：{pr.fmt(new)}。"
@@ -1271,35 +1552,79 @@ def _sg_text(content):
     return None
 
 
-def sg_last_turn(transcript_path):
-    """回 (最後一則使用者提示, 之後所有助理文字合併)。讀不到回 (None, None)。"""
-    prompt, answer = None, []
+SG_CHUNK = 1 << 20  # 從檔尾往前每次讀 1 MB
+
+
+def _rev_lines(path):
+    """從檔尾往前逐行產生（bytes，不含行尾 \\n），不一次讀整份。健檢 HK-13：165 MB 的主對話紀錄每次 Stop 從頭讀要 1.1＋0.8 秒。"""
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        pos = f.tell()
+        rest = b""
+        while pos > 0:
+            n = min(SG_CHUNK, pos)
+            pos -= n
+            f.seek(pos)
+            parts = (f.read(n) + rest).split(b"\n")
+            rest = parts[0]
+            for p in reversed(parts[1:]):
+                yield p
+        yield rest
+
+
+def _sg_line(line):
+    """一行對話紀錄的分類（與 0.27.0 以前逐行從頭掃的判斷完全相同，另外跳過系統合成訊息）：
+    ('user', 文字或 None)／('asst', [文字…])／None（不相關）。"""
+    if '"type":"user"' in line or '"type": "user"' in line:
+        try:
+            d = json.loads(line)
+        except Exception:
+            return None
+        if d.get("type") != "user" or d.get("isSidechain"):
+            return None
+        return "user", _sg_text((d.get("message") or {}).get("content"))
+    if '"type":"assistant"' in line or '"type": "assistant"' in line:
+        try:
+            d = json.loads(line)
+        except Exception:
+            return None
+        if d.get("type") != "assistant" or d.get("isSidechain") or _is_synthetic(d):
+            return None
+        return "asst", [b["text"] for b in (d.get("message") or {}).get("content") or []
+                        if isinstance(b, dict) and b.get("type") == "text" and b.get("text")]
+    return None
+
+
+def _sg_scan_back(transcript_path, stop):
+    """從檔尾往前，把每行分類交給 stop(分類)；stop 回 True 就停。讀不到丟例外給呼叫端。"""
+    it = _rev_lines(transcript_path)
     try:
-        with open(transcript_path, encoding="utf-8", errors="replace") as f:
-            for line in f:
-                if '"type":"user"' in line or '"type": "user"' in line:
-                    try:
-                        d = json.loads(line)
-                    except Exception:
-                        continue
-                    if d.get("type") != "user" or d.get("isSidechain"):
-                        continue
-                    t = _sg_text((d.get("message") or {}).get("content"))
-                    if t is not None and t.strip():
-                        prompt, answer = t, []
-                elif '"type":"assistant"' in line or '"type": "assistant"' in line:
-                    try:
-                        d = json.loads(line)
-                    except Exception:
-                        continue
-                    if d.get("type") != "assistant" or d.get("isSidechain"):
-                        continue
-                    for b in (d.get("message") or {}).get("content") or []:
-                        if isinstance(b, dict) and b.get("type") == "text" and b.get("text"):
-                            answer.append(b["text"])
+        for raw in it:
+            c = _sg_line(raw.decode("utf-8", errors="replace"))
+            if c and stop(c):
+                return
+    finally:
+        it.close()
+
+
+def sg_last_turn(transcript_path):
+    """回 (最後一則使用者提示, 之後所有助理文字合併)。讀不到回 (None, None)。
+    從檔尾往前讀、找到最後一則使用者提示就停（結果與從頭掃相同，對 ~/.claude/projects 的真實紀錄逐值比對過，見健檢 fix-hook 報告）。"""
+    found, rev = [], []
+
+    def stop(c):
+        if c[0] == "user":
+            if c[1] is not None and c[1].strip():
+                found.append(c[1])
+                return True
+            return False
+        rev.append(c[1])
+        return False
+    try:
+        _sg_scan_back(transcript_path, stop)
     except Exception:
         return None, None
-    return prompt, "\n".join(answer)
+    return (found[0] if found else None), "\n".join(x for texts in reversed(rev) for x in texts)
 
 
 # 0.19.0：建議守門與跳過條件收緊（Stock-web 2026-11-10 使用者：「你要照著規則與長期記憶來辦事阿，不然那些規則是說假的是不是」——
@@ -1370,25 +1695,19 @@ def sg_is_auto(prompt, crons=None):
 
 
 def sg_last_human(transcript_path, crons=None):
-    """最後一則真的由使用者打的提示（跳過 agent 訊息、完成通知、排程）。讀不到回 None。"""
-    last = None
+    """最後一則真的由使用者打的提示（跳過 agent 訊息、完成通知、排程）。讀不到回 None。從檔尾往前讀，找到就停。"""
+    found = []
+
+    def stop(c):
+        if c[0] == "user" and c[1] is not None and c[1].strip() and not sg_is_auto(c[1], crons):
+            found.append(c[1])
+            return True
+        return False
     try:
-        with open(transcript_path, encoding="utf-8", errors="replace") as f:
-            for line in f:
-                if '"type":"user"' not in line and '"type": "user"' not in line:
-                    continue
-                try:
-                    d = json.loads(line)
-                except Exception:
-                    continue
-                if d.get("type") != "user" or d.get("isSidechain"):
-                    continue
-                t = _sg_text((d.get("message") or {}).get("content"))
-                if t is not None and t.strip() and not sg_is_auto(t, crons):
-                    last = t
+        _sg_scan_back(transcript_path, stop)
     except Exception:
         return None
-    return last
+    return found[0] if found else None
 
 
 def source_guard(payload):
@@ -1516,10 +1835,12 @@ def _sub_cjk_ratio(text):
 
 
 def _sub_scan(path):
-    """讀 agent 自己的對話紀錄：第一則派工說明、用過的工具、Read 過的路徑、Bash 指令。讀不到回 None（不擋）。"""
+    """讀 agent 自己的對話紀錄：第一則派工說明、用過的工具、Read 過的路徑、Bash 指令。讀不到回 None（不擋）。
+    健檢 TB-14：agent 還在跑時最後一行可能寫到一半（UTF-8 多位元組字被切開），嚴格解碼會讓整份回 None → 記憶與上網都被判成沒做；
+    改成 errors="replace"，壞行在 json.loads 那裡跳過。"""
     try:
         prompt, tools, reads, cmds = None, [], [], []
-        with open(path, encoding="utf-8") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             for line in f:
                 try:
                     r = json.loads(line)
@@ -1561,6 +1882,8 @@ def sub_memory_read(blob, mem_dir):
     except OSError:
         return False
     key = os.path.basename(os.path.dirname(mem_dir)) + "/memory"
+    if os.name == "nt":  # 健檢 HK-04 同類：Windows 路徑不分大小寫（agent 可能打成 C:\Users\… 或 c:\users\…）
+        norm, key, names = norm.lower(), key.lower(), [n.lower() for n in names]
     return key in norm and any(n in norm for n in names)
 
 
@@ -1609,11 +1932,7 @@ def subagent_lang_nudge(payload):
         tp = _sub_transcript(payload)
         if not tp:
             return None
-        try:
-            with open(SUB_LANG_STATE, encoding="utf-8") as f:
-                seen = json.load(f) or {}
-        except Exception:
-            seen = {}
+        seen = _load_json_state(SUB_LANG_STATE)
         rec = seen.get(aid)
         rec = rec if isinstance(rec, dict) else ({"n": 1, "last": "", "at": float(rec)} if rec else {"n": 0, "last": "", "at": 0})
         if rec["n"] >= SUB_LANG_MAX:
@@ -1631,7 +1950,9 @@ def subagent_lang_nudge(payload):
                 d = json.loads(line)
             except Exception:
                 continue
-            for b in (d.get("message") or {}).get("content") or [] if d.get("type") == "assistant" else []:
+            if d.get("type") != "assistant" or _is_synthetic(d):  # HK-06：用量上限等系統合成訊息不是 agent 寫的
+                continue
+            for b in (d.get("message") or {}).get("content") or []:
                 if isinstance(b, dict) and b.get("type") == "text":
                     t = (b.get("text") or "").strip()
                     if len(t) > 40 and _sub_cjk_ratio(t) < SUB_LANG_MIN_RATIO:
@@ -1639,12 +1960,11 @@ def subagent_lang_nudge(payload):
         if not hit or hit[:80] == rec["last"]:
             return None  # 沒有不合語言的文字，或同一則已經提醒過
         now = time.time()
-        seen = {k: v for k, v in seen.items() if now - float(v["at"] if isinstance(v, dict) else v) < 3 * 86400}
+        for k in [k for k, v in seen.items() if now - float(v["at"] if isinstance(v, dict) else v) >= 3 * 86400]:
+            del seen[k]
         n = rec["n"] + 1
         seen[aid] = {"n": n, "last": hit[:80], "at": now}
-        os.makedirs(STATE_DIR, exist_ok=True)
-        with open(SUB_LANG_STATE, "w", encoding="utf-8") as f:
-            json.dump(seen, f, ensure_ascii=False)
+        _save_json_state(SUB_LANG_STATE, seen)
         again = "" if n == 1 else f"這是第 {n} 次提醒，前面提醒過你又寫回原來的語言。"
         return (f"【語言（hook）】{again}你剛才在工具呼叫之間寫的說明文字不是使用者設定的語言（{lang}）：「{hit[:50]}…」。"
                 "使用者會看這些過程文字：從現在起，每一則說明文字與最終報告都用該語言（與全域 CLAUDE.md 同一種文字）；指令、程式碼、檔名照原樣。")
@@ -1657,11 +1977,7 @@ def _sub_guard_reason(payload, report, scan, how):
     aid = str(payload.get("agent_id") or "")
     if not aid or not report.strip() or payload.get("agent_type") in SUB_LIGHT_TYPES or not _sub_cfg(payload.get("cwd"))["guard"]:
         return None
-    try:
-        with open(SUB_GUARD_STATE, encoding="utf-8") as f:
-            seen = json.load(f) or {}
-    except Exception:
-        seen = {}
+    seen = _load_json_state(SUB_GUARD_STATE)
     if aid in seen:
         return None
     mem = os.path.normpath(os.path.join(os.path.dirname(payload.get("transcript_path") or ""), "memory"))
@@ -1669,13 +1985,17 @@ def _sub_guard_reason(payload, report, scan, how):
     if not bad:
         return None
     now = time.time()
-    seen = {k: v for k, v in seen.items() if now - float(v) < 3 * 86400}
+    for k in [k for k, v in seen.items() if now - float(v) >= 3 * 86400]:
+        del seen[k]
     seen[aid] = now
-    os.makedirs(STATE_DIR, exist_ok=True)
-    with open(SUB_GUARD_STATE, "w", encoding="utf-8") as f:
-        json.dump(seen, f)
-    with open(os.path.join(STATE_DIR, "source-guard.log"), "a", encoding="utf-8") as f:
-        f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} block-agent {aid} {len(bad)} 項：{'｜'.join(b[:24] for b in bad)}" + chr(10))
+    if not _save_json_state(SUB_GUARD_STATE, seen, ensure_ascii=True):
+        return None  # 記不下「已退回過」就不退回：否則每次交報告都被擋、agent 卡死（與原本寫檔丟例外時放行一致）
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(os.path.join(STATE_DIR, "source-guard.log"), "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} block-agent {aid} {len(bad)} 項：{'｜'.join(b[:24] for b in bad)}" + chr(10))
+    except Exception:
+        pass  # 記 log 失敗不可讓這次退回失效
     return ("【報告守門（hook）】這份報告還不能交，有 " + str(len(bad)) + " 項不合格：" + chr(10)
             + chr(10).join(f"{i}. {b}" for i, b in enumerate(bad, 1)) + chr(10) + how + "只退回這一次，之後不會再擋。")
 
@@ -1714,13 +2034,47 @@ def subagent_stop_guard(payload):
         return None
 
 
+def _read_payload():
+    """stdin 一律當 UTF-8 讀（健檢 HK-05）：沒有 PYTHONUTF8 的裝置 sys.stdin 是系統碼頁（cp950），中文路徑會變亂碼。
+    測試會把 sys.stdin 換成 StringIO（沒有 .buffer），那時直接讀文字。"""
+    buf = getattr(sys.stdin, "buffer", None)
+    text = buf.read().decode("utf-8-sig", "replace") if buf is not None else sys.stdin.read()
+    return json.loads(text) or {}
+
+
+def _parse_ts(v):
+    """ISO 時間字串 → epoch 秒；解析不了回 None。"""
+    try:
+        import datetime
+        d = datetime.datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=datetime.timezone.utc)
+        return d.timestamp()
+    except Exception:
+        return None
+
+
+def current_pct(s, pct_key, reset_key, now=None):
+    """門檻判斷用的用量百分比（健檢 HK-03）。重置時間已經過了 → 舊百分比已不代表現在，當未知（None）；
+    最後一次抓取是失敗的、重置時間又解析不了 → 也當未知。原本抓不到用量時沿用 11/01 重置前的 90%，每則提示都叫主對話停工收尾。"""
+    v = s.get(pct_key)
+    if v is None:
+        return None
+    ts = _parse_ts(s.get(reset_key)) if s.get(reset_key) else None
+    now = now or time.time()
+    if ts is not None:
+        return v if ts > now else None
+    last_failed = s.get("fetch_failed_at") is not None and s.get("fetch_failed_at") == s.get("fetched_at")
+    return None if last_failed else v
+
+
 def main():
     printing = "--print" in sys.argv
     event = ""
     payload = {}
     if not printing:
         try:
-            payload = json.load(sys.stdin) or {}
+            payload = _read_payload()
             event = payload.get("hook_event_name", "")
         except Exception:
             event = ""
@@ -1788,10 +2142,12 @@ def main():
             s["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
             save_state(s)
     five, seven = s.get("five_hour_pct"), s.get("seven_day_pct")
-    if printing:
+    if printing:  # --print 照舊印原始數字（格式不變）
         print(f"5 小時 {five}%（重置 {s.get('five_hour_resets_at')}）；7 天 {seven}%（重置 {s.get('seven_day_resets_at')}）"
               f"；門檻 {lim['fiveHourLimit']:.0f}／{lim['sevenDayLimit']:.0f}（來源：{source}）")
         return
+    five = current_pct(s, "five_hour_pct", "five_hour_resets_at", now)  # HK-03：重置時間已過的舊數字不拿來判門檻
+    seven = current_pct(s, "seven_day_pct", "seven_day_resets_at", now)
     hit = []
     if five is not None and five >= lim["fiveHourLimit"]:
         hit.append(f"5 小時用量 {five:.0f}%（門檻 {lim['fiveHourLimit']:.0f}%）")
@@ -1825,7 +2181,7 @@ def main():
         msgs.extend(m for m in extra if m)
     if event == "PostToolUse":  # 0.14.0：改安裝副本、背景任務巡檢、波及範圍、共用目錄 git
         msgs.extend(tool_reminders(payload))
-        nudge = subagent_lang_nudge(payload)  # 0.23.0：只在 agent 裡、只一次
+        nudge = subagent_lang_nudge(payload)  # 0.23.0：只在 agent 裡；0.26.0 起每出現一則新的就提醒、同一個 agent 最多 SUB_LANG_MAX（5）次
         if nudge:
             msgs.append(nudge)
     stale = stale_agents()
@@ -1837,9 +2193,10 @@ def main():
                     "。主 agent：SendMessage 追問；已交最終報告的就 TaskStop。子 agent 忽略此則。")
     if not msgs:
         return
-    save_state(s)
     out = {"hookSpecificOutput": {"hookEventName": event or "UserPromptSubmit", "additionalContext": "\n".join(msgs)}}
-    print(json.dumps(out, ensure_ascii=True))  # Windows 主控台 cp950 會讓 UTF-8 中文變亂碼，ASCII 跳脫最安全
+    print(json.dumps(out, ensure_ascii=True), flush=True)  # Windows 主控台 cp950 會讓 UTF-8 中文變亂碼，ASCII 跳脫最安全
+    # 健檢 HK-02：先輸出再存狀態——存檔失敗（Windows 上 usage.json 被別的 hook 開著）原本丟例外，整則提醒跟著消失
+    save_state(s)
 
 
 if __name__ == "__main__":
