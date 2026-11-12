@@ -19,4 +19,4 @@
 
 ## 平台
 - Windows：已實測（Windows 11、Python 3.14、Claude Code 2.1.296）。hook 指令以 Git Bash 執行，結尾 `# claude-dev-system` 為註解。
-- macOS／Linux：路徑邏輯（`~/.claude`、`CLAUDE_CONFIG_DIR`、正斜線路徑）已寫好，**未實機驗證**。首次使用請跑 `python3 -m unittest discover -s tests -v` 與 `verify` 並回報結果。
+- macOS／Linux：路徑邏輯（`~/.claude`、`CLAUDE_CONFIG_DIR`、正斜線路徑）已寫好，**未實機驗證**（單元測試 2026-11-12 起在 GitHub Actions 的 ubuntu-latest、macos-latest 通過）。首次使用請跑 `python3 -m unittest discover -s tests -v` 與 `verify` 並回報結果。

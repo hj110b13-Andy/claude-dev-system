@@ -6,7 +6,7 @@
 |---|---|---|
 | Claude Code | ≥2.1.0、<3.0.0 | 2.1.296（Windows） |
 | Python | ≥3.10（只用標準庫） | 3.14.4（開發機）；GitHub Actions 的 `tests` 流程每次 push 另跑 3.10、3.12、3.14 |
-| 作業系統 | Windows／macOS／Linux | Windows 11 已驗證；macOS、Linux **未驗證** |
+| 作業系統 | Windows／macOS／Linux | Windows 11 已驗證；macOS、Linux **未實機驗證**（2026-11-12 起單元測試在 GitHub Actions 的 ubuntu-latest、macos-latest 通過，但沒有實機安裝、hook 沒有在 Claude Code 裡跑過） |
 | Node.js | 不需要 | — |
 
 ## 使用的 Claude Code 官方機制（2.1.296 實測確認）
