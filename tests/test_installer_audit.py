@@ -4,7 +4,6 @@
 """
 from __future__ import annotations
 
-import copy
 import datetime as _dt
 import json
 import os
@@ -12,7 +11,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
 
