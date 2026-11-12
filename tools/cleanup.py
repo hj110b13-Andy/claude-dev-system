@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import importlib.util
 import json
 import os
@@ -42,7 +43,12 @@ ALL = ("worktrees", "temp", "npm", "cache")
 HASH_DIR = re.compile(r"^[0-9a-f]{16}$")
 # worktree 裡被 git 忽略、但「可重建」不算珍貴的資料夾名稱：CACHE_DIRS 的最後一段＋node_modules、__pycache__（後兩個是 0.27.0 自己加的，
 # 不然所有裝過套件的 worktree 都因 node_modules 永遠不能清，失去這支工具的原意）。其餘被忽略的檔（輸出、.env）一律保留。
-REBUILDABLE = {c.rsplit("/", 1)[-1] for c in CACHE_DIRS} | {"node_modules", "__pycache__"}
+# 審查 RV-04：原本取 CACHE_DIRS 每項的最後一段，`node_modules/.cache` 會變成 `.cache`——worktree 裡真的放資料的 `.cache` 就不受保護了
+# （本檔 cache 類的說明寫「不含 .cache：很多專案把資料放那」）；node_modules 底下的 .cache 已由 node_modules 涵蓋，所以只收不含斜線的項。
+REBUILDABLE = {c for c in CACHE_DIRS if "/" not in c} | {"node_modules", "__pycache__"}
+# 被忽略但由 build／tsc 自動重產的檔（Next.js 的 next-env.d.ts、tsc 增量編譯的 *.tsbuildinfo）：有它們不算「有珍貴資料」，
+# 否則跑過 build 的 Next.js／TS worktree 永遠清不掉（實測 Stock-web 的 worktree 就是只剩這兩個）。
+REBUILDABLE_FILES = ("*.tsbuildinfo", "next-env.d.ts")
 
 
 def _is_link_dir_fallback(path) -> bool:
@@ -192,9 +198,24 @@ def ignored_precious(status_lines):
             continue
         rel = ln[3:].strip().strip(chr(34)).rstrip("/")
         parts = [x for x in rel.replace(chr(92), "/").split("/") if x]
+        if parts and any(fnmatch.fnmatch(parts[-1], pat) for pat in REBUILDABLE_FILES):
+            continue
         if not any(x in REBUILDABLE for x in parts):
             out.append(rel)
     return out
+
+
+def _has_real_files(path) -> bool:
+    """path 底下（不跟隨連結）有沒有真的檔。path 本身是連結、不存在、或只含連結與空資料夾 → False。"""
+    if is_link(path) or not os.path.lexists(path):
+        return False
+    if not os.path.isdir(path):
+        return True
+    try:
+        entries = list(os.scandir(path))
+    except OSError:
+        return True  # 讀不到就當有（寧可保留）
+    return any(_has_real_files(e.path) for e in entries)
 
 
 def has_own_commits(repo, branch):
@@ -259,7 +280,9 @@ def plan_worktrees(repo: Path, main=None, keep_hours=None, now=None):
             it["size"], it["links"] = size, links
             lines = [ln for ln in st.splitlines() if ln.strip()]
             dirty = [ln for ln in lines if not ln.startswith("!! ")]
-            precious = ignored_precious(lines)
+            # 被忽略的路徑如果是連結、或裡面只有連結沒有真的檔（例如 worktree 的 .cache/backtest 是指向主目錄資料的 junction），不算珍貴：
+            # 刪 worktree 前只拆連結、不動目標，沒有東西會消失
+            precious = [r for r in ignored_precious(lines) if _has_real_files(os.path.join(str(path), r))]
             age_h = (now - newest) / 3600 if newest else 1e9
             same_sha = git(repo, "rev-parse", head)[1].strip() == git(repo, "rev-parse", main)[1].strip() != ""
             if rc != 0:

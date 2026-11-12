@@ -17,7 +17,7 @@
         # （wait 仍可用，但後面不可接管線：管線的 exit code 是最後一個指令的，閘門 exit 1 會被蓋掉）
         # 注意：run 可能先等最多 waitMinutes 分鐘（預設 10）才開跑，等待時間與工作本身共用呼叫端的時限；
         #       長工作或有前景時限的環境（例如 Bash 工具前景 10 分鐘）請用背景執行，否則等完才開跑的工作會被砍。
-        # 指令不經 shell：-- 後面的參數原樣交給作業系統；要用 &&、管線、重導就寫成 `-- bash -c "…"`。
+        # 指令不經 shell：-- 後面的參數原樣交給作業系統；要用 &&、管線、重導就包一層殼：Windows 寫 `-- pwsh -c "…"`（PATH 裡的 `bash` 可能是 WSL 的，不是 Git Bash；要用 Git Bash 就寫完整路徑），其他平台寫 `-- bash -c "…"`。
         # Windows 的 npm／npx／tsc 等是 .cmd，開跑前用 shutil.which 照 PATHEXT 找到完整路徑（不改成 shell=True）。
   python resgate.py list                                    # 延後清單（依登記順序）
   python resgate.py next                                    # 記憶體夠且清單有項目：印最早一筆 exit 0；否則 exit 1

@@ -730,7 +730,10 @@ class N_MainPaths(HookCase):
                 self.ug.main()
         finally:
             sys.stdin = saved
-        buf.getvalue().encode("ascii")  # ensure_ascii：不可有非 ASCII 字元
+        out = buf.getvalue()
+        self.assertTrue(out.strip(), "超過門檻一定要有輸出（審查 RV-07：原本沒輸出時這個測試也會過）")
+        out.encode("ascii")  # ensure_ascii：不可有非 ASCII 字元
+        self.assertIn("hookSpecificOutput", json.loads(out))
 
     def test_stale_agents(self):
         Path(self.ug.BOARD_FILE).write_text('<div class="ct">🟡 agent-x 修 hook</div><div class="cm">8 分鐘前｜該追問</div>'

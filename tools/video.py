@@ -470,7 +470,7 @@ def _arg_error(a) -> str | None:
 def choose_caption(manual, auto, prefer: list[str], spoken: str | None = None, asr_available: bool = False):
     """字幕選擇的唯一來源（transcript-api 與 yt-dlp 兩條路共用；稽核 TA-14：原本兩條路順序不一致，英文影片只有西班牙文手動字幕時
     一條拿到西班牙文、一條拿到英文自動字幕）。manual／auto 是可用的語言碼清單，spoken 是影片語言（可能沒有）。
-    順序：①符合偏好語言的手動字幕 ②與影片語言一致的原生自動字幕（影片語言不明就看偏好語言）③其他手動字幕（語言碼排序第一個）。
+    順序：①符合偏好語言的手動字幕 ①之二：與影片同語系的手動字幕（影片語言不明就看偏好語言的語系）②與影片語言一致的原生自動字幕（影片語言不明就看偏好語言）③其他手動字幕（語言碼排序第一個）。
     都沒有而有自動字幕（語言與影片不符，多半是誤判語言或翻譯稿）：有語音辨識就不用它、否則姑且使用，各附一句說明。
     回 ((語言碼, 'manual'|'auto') 或 None, 說明或 None)。"""
     manual = [m for m in manual if not m.startswith("live_chat")]
@@ -482,6 +482,11 @@ def choose_caption(manual, auto, prefer: list[str], spoken: str | None = None, a
         hit = find(manual, lang)
         if hit:
             return (hit, "manual"), None
+    # 審查 RV-01：與影片同語系的手動字幕（zh-CN、zh-HK、en-GB…不在偏好清單裡）也要優先於自動字幕——
+    # 少了這一步，上傳者附了簡中／港澳人工字幕的中文影片會從人工字幕降成機器辨識稿（transcript-api 那條路原本拿得到人工字幕）。
+    same = sorted(m for m in manual if (_lang_match(m, spoken) if spoken else any(_lang_match(m, p) for p in prefer)))
+    if same:
+        return (same[0], "manual"), None
     native = [c for c in auto if (_lang_match(c, spoken) if spoken else any(_lang_match(c, p) for p in prefer))]
     for lang in prefer:
         hit = find(native, lang)

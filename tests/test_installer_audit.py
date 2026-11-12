@@ -470,7 +470,10 @@ class IN08_HookPythonMissing(Base):
         self.assertTrue(any(x.startswith("✅") and "hook 用的 Python 存在" in x for x in out))
 
     def test_name_on_path_is_ok(self):
-        self.assertEqual(commands._python_row(Path(sys.executable).name)[0] if shutil.which(Path(sys.executable).name) else "✅", "✅")
+        from unittest import mock
+        name = Path(sys.executable).name
+        with mock.patch.object(commands.shutil, "which", lambda n: sys.executable if n == name else None):  # 審查 RV-07：原本 PATH 找不到時變成 ✅ == ✅
+            self.assertEqual(commands._python_row(name)[0], "✅")
         self.assertEqual(commands._python_row("no-such-python-xyz")[0], "❌")
 
 

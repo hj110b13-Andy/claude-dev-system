@@ -41,7 +41,11 @@ def scan_mod():
     載入失敗就讓錯誤浮出來（不放第二份備案實作——兩份實作漂移就是 TB-03 的根因）。"""
     global _SCAN
     if _SCAN is None:
-        spec = importlib.util.spec_from_file_location("cds_project_scan_dep", Path(__file__).resolve().parent / "project-scan.py")
+        src = Path(__file__).resolve().parent / "project-scan.py"
+        if not src.is_file():  # 審查 RV-05：單獨複製 depgraph.py 到別處時，不可用 traceback 的 exit 1（與「閘門不通過」同碼）
+            print(f"depgraph.py 需要同資料夾的 project-scan.py（找不到 {src}）；兩支要一起複製", file=sys.stderr)
+            sys.exit(2)
+        spec = importlib.util.spec_from_file_location("cds_project_scan_dep", src)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)  # type: ignore[union-attr]
         _SCAN = mod

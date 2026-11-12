@@ -664,7 +664,7 @@ def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.de
         f_pkgs = ex.submit(lambda: {mod: importer(mod) for mod in video.IMPORTS})
         env_items, pkgs = f_env.result(), f_pkgs.result()
     return {
-        "installed": bool(m),
+        "installed": bool(m) and bool(m.get("version")),  # 審查 RV-03：只剩「沒移掉的 MCP 名稱」的紀錄不算已安裝（按套用會重新安裝並接著移除）
         "version": m.get("version") if m else None,
         "repo_version": repo_version(repo),
         "env": env_items,

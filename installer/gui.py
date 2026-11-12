@@ -542,9 +542,15 @@ class App:
                 f.key_notes[n] = nv.get().strip()
         # GU-05：數值欄位的檢查全在 gm.valid_*（唯一來源）；不合法就丟 ValueError，由 update_diff 顯示「表單有誤：…」、套用／匯出前跳訊息，
         # 不再無聲退回舊值（原本 0、-5、nan 都寫得進去，亂打字則「將變更」顯示「無」）
-        f.thresholds = {"fiveHour": gm.valid_threshold(self.five_var.get(), gm.THRESHOLD_LABELS["fiveHour"]),
-                        "sevenDay": gm.valid_threshold(self.seven_var.get(), gm.THRESHOLD_LABELS["sevenDay"])}
-        f.task_check = {"enabled": self.tc_var.get(), "minutes": gm.valid_task_minutes(self.tc_min_var.get())}
+        # 審查 RV-02：欄位值與目前狀態相同（沒動過）就沿用原值、不檢查——使用者手改進設定檔的舊值（例如門檻 0.5）不該讓整張表單一直「有誤」
+        base = gm.form_from_state(self.state)
+
+        def keep_or(raw, cur, check):
+            return cur if gm._unchanged(raw, cur) else check(raw)
+        f.thresholds = {k: keep_or(var.get(), base.thresholds.get(k), lambda raw, k=k: gm.valid_threshold(raw, gm.THRESHOLD_LABELS[k]))
+                        for k, var in (("fiveHour", self.five_var), ("sevenDay", self.seven_var))}
+        f.task_check = {"enabled": self.tc_var.get(),
+                        "minutes": keep_or(self.tc_min_var.get(), base.task_check.get("minutes"), lambda raw: gm.valid_task_minutes(raw))}
         f.sub_brief = {k: v.get() for k, v in self.sb_vars.items()}
         f.mem_gb = gm.valid_mem_gb(self.mem_var.get())
         f.project_auto = {k: v.get() for k, v in self.pa_vars.items()}

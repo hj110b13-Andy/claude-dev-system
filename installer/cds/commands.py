@@ -44,6 +44,15 @@ def _locked(fn):
     return wrapper
 
 
+INCOMPLETE_MSG = "上次解除安裝沒有完成（還有 MCP 沒移掉）：請重跑 `uninstall` 接著移除，或直接 `install` 重新安裝"
+
+
+def incomplete_uninstall(m) -> bool:
+    """有安裝紀錄但沒有版本＝上次 uninstall 的 MCP 移除失敗、紀錄只留下還沒移掉的名稱（IN-02）。審查 RV-03：
+    這種紀錄原本被 status／verify／web／video／視窗當成「已安裝」：顯示「已安裝 vNone」、verify 7 條 hook ❌、web 子命令噴 traceback。"""
+    return bool(m) and not m.get("version")
+
+
 def _ver(s) -> tuple:
     """版本比較用的唯一來源：解析不出來（None、"0"、亂寫）一律當 (0, 0, 0)，不讓比較丟 TypeError（IN-12）。"""
     return parse_ver(str(s or "")) or (0, 0, 0)
@@ -367,6 +376,8 @@ def web_config(lay: Layout, keys=(), enable=(), disable=(), env=(), off: bool = 
     m = mf.load(lay.manifest)
     if not m:
         return 2, ["尚未安裝（找不到 manifest），請先 `install`"]
+    if incomplete_uninstall(m):
+        return 2, [INCOMPLETE_MSG]
     log: list = []
     try:
         local = web.load_local(lay)
@@ -442,6 +453,8 @@ def video_config(lay: Layout, python: str, off: bool = False, show: bool = False
     m = mf.load(lay.manifest)
     if not m:
         return 2, ["尚未安裝（找不到 manifest），請先 `install`"]
+    if incomplete_uninstall(m):
+        return 2, [INCOMPLETE_MSG]
     log: list = []
     try:
         keys = (web.load_local(lay).get("keys") or {})
@@ -584,7 +597,9 @@ def uninstall(lay: Layout, force: bool = False, restore_backup: bool = False, ru
                 d.rmdir()
             log.append(f"移除資料夾 {d}")
         else:
-            log.append(f"{WARN} 保留 {d}（內有非本工具的檔案）")
+            only_record = d == lay.payload and all(x.name in (LOCK_NAME, lay.manifest.name) for x in d.iterdir())
+            log.append(f"{WARN} 保留 {d}（只剩安裝紀錄：還有 MCP 沒移掉，重跑 `uninstall` 會清掉）" if only_record
+                       else f"{WARN} 保留 {d}（內有非本工具的檔案）")
     if restore_backup:
         _restore_pre_install(lay, m, log)
     failed = any(x.startswith(BAD) for x in log)  # IN-02：比照 apply，有 ❌ 就回 1、最後一行 ❌
@@ -608,6 +623,9 @@ def verify(lay: Layout, repo: Path | None = REPO, check_claude: bool = True, imp
     m = mf.load(lay.manifest)
     if not m:
         return 1, [f"{BAD} 找不到安裝紀錄 {lay.manifest}（尚未安裝）"]
+    if incomplete_uninstall(m):
+        left = "、".join((m.get("web") or {}).get("mcpAdded") or []) or "（無）"
+        return 1, [f"{BAD} {INCOMPLETE_MSG}；還沒移掉的 MCP：{left}"]
     rows.append((OK, f"安裝紀錄 v{m['version']}（schema {m['schemaVersion']}）"))
     vf = lay.payload / "config" / "VERSION"
     inst_ver = vf.read_text(encoding="utf-8").strip() if vf.exists() else None
@@ -693,6 +711,9 @@ def status(lay: Layout, repo: Path = REPO) -> tuple:
     rv = repo_version(repo)
     if not m:
         return 0, [f"未安裝；repo 版本 {rv}；設定目錄 {lay.home}"]
+    if incomplete_uninstall(m):
+        left = "、".join((m.get("web") or {}).get("mcpAdded") or []) or "（無）"
+        return 0, [f"{WARN} {INCOMPLETE_MSG}；還沒移掉的 MCP：{left}；repo 版本 {rv}；設定目錄 {lay.home}"]
     s = read_json(lay.settings) if lay.settings.exists() else {}
     marked = sum(len(settings_ops.has_marked(s, e)) for e, _ in settings_ops.HOOK_SPECS)
     upd = "（repo 較新，可 update）" if _ver(rv) > _ver(m.get("version")) else ""
