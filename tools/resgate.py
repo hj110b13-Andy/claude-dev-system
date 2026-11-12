@@ -266,8 +266,10 @@ def _update(fn, path=None):
 
 
 def _git_root(path):
-    """往上找到 git 根目錄（含 worktree 的 .git 檔）；找不到就用原路徑。回絕對路徑（保留大小寫）。"""
-    p = os.path.normpath(os.path.abspath(path or os.getcwd()))
+    """往上找到 git 根目錄（含 worktree 的 .git 檔）；找不到就用原路徑。回絕對路徑（保留大小寫）。
+    先解開連結（realpath）：同一個資料夾經連結有兩種寫法時要算同一個專案——2026-11-12 CI 在 macOS 上發現
+    （暫存資料夾 /var 是 /private/var 的連結，getcwd 回後者，登記的專案與傳進來的路徑對不上）。"""
+    p = os.path.normpath(os.path.realpath(path or os.getcwd()))
     d = p
     while True:
         if os.path.exists(os.path.join(d, ".git")):
