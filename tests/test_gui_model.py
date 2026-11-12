@@ -525,6 +525,7 @@ class NewDeviceFlow(unittest.TestCase):
         self.assertIn("找不到系統的 Python", msg)
         self.assertNotIn("NoneType", msg)
 
+    @unittest.skipUnless(os.name == "nt", "從登錄檔補 PATH 是 Windows 才有的功能（os.pathsep 在其他平台是冒號，C:/b 會被切開）")
     def test_refresh_path_adds_new_dirs_only(self):
         env = {"PATH": os.pathsep.join(["C:/a", "C:/b"])}
         self.assertEqual(gm.refresh_path(env, lambda: ["C:/b", "", "C:/new", "C:/new"]), ["C:/new"])

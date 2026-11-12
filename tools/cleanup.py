@@ -53,7 +53,12 @@ REBUILDABLE_FILES = ("*.tsbuildinfo", "next-env.d.ts")
 
 def _is_link_dir_fallback(path) -> bool:
     try:
-        return os.path.islink(path) or bool(getattr(os.path, "isjunction", lambda _p: False)(path))
+        if os.path.islink(path):
+            return True
+        isj = getattr(os.path, "isjunction", None)  # Python 3.12+；3.10／3.11 改看重解析點種類（與 project-scan.is_link_dir 同規則）
+        if isj:
+            return bool(isj(path))
+        return getattr(os.lstat(path), "st_reparse_tag", 0) == getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003)
     except OSError:
         return True
 

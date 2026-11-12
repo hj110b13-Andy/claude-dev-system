@@ -303,7 +303,8 @@ class SameProjectScope(_RgBase):
             os.chdir(old)
         self.assertEqual(rc, 0)
         item = self.rg.load_jobs()["items"][0]
-        self.assertEqual(os.path.normcase(item["project"]), os.path.normcase(str(self.proj)))
+        self.assertEqual(os.path.normcase(os.path.realpath(item["project"])), os.path.normcase(os.path.realpath(str(self.proj))),
+                         "比 realpath：macOS 的暫存資料夾 /var 是 /private/var 的連結")
         self.assertTrue(self.rg.same_project(item["project"], str(self.proj)))
         self.assertFalse(self.rg.same_project(item["project"], str(self.other)))
 
@@ -824,6 +825,8 @@ class VideoPartialFiles(_VideoBase):
         seen = []
 
         def fake_run(cmd, **kw):
+            if cmd[-1] == "--version":  # 沒裝 ffmpeg／JS 執行環境的機器（CI）會先探測版本，不是轉檔呼叫
+                return SimpleNamespace(returncode=1, stdout="", stderr="")
             out = Path(cmd[-1])
             seen.append(out.name)
             self.assertNotEqual(out.name, "audio.m4a", "不可直接寫最終檔名")

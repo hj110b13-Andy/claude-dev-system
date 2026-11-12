@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import os
+import stat
 import re
 import subprocess
 import sys
@@ -71,6 +72,9 @@ def git_ignored(root: Path) -> tuple[set[str], set[str]]:
     return {e for e in entries if not e.endswith("/")}, {e.rstrip("/") for e in entries if e.endswith("/")}
 
 
+JUNCTION_TAG = getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003)  # Windows junction 的重解析點標記
+
+
 def is_link_dir(path) -> bool:
     """目錄連結（symlink 或 Windows junction）＝不跟隨。唯一來源：project-scan、depgraph、cleanup、usage_guard hook 都用這個判斷。
     0.16.0：Windows 的 os.walk 會走進 junction（os.path.islink 對 junction 回 False，Python 3.14 實測），
@@ -79,7 +83,13 @@ def is_link_dir(path) -> bool:
         if os.path.islink(path):
             return True
         isj = getattr(os.path, "isjunction", None)  # Python 3.12+
-        return bool(isj and isj(path))
+        if isj:
+            return bool(isj(path))
+        # Python 3.10／3.11 沒有 os.path.isjunction：看重解析點的種類（junction 是 MOUNT_POINT）。
+        # 2026-11-12 健檢第一次在 CI 用 3.10 跑測試才發現：原本這裡直接回 False，3.10／3.11 上 junction 完全認不出來，
+        # cleanup 會跟著 junction 刪到 worktree 外面的資料（4 個連結相關測試在 3.10 失敗；以前 CI 只跑 3.12）。
+        # 只認 MOUNT_POINT，不認所有重解析點：OneDrive 等雲端資料夾也是重解析點，不可當成連結跳過。
+        return getattr(os.lstat(path), "st_reparse_tag", 0) == JUNCTION_TAG
     except OSError:
         return True
 

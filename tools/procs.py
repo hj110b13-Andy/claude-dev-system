@@ -139,9 +139,19 @@ def _snapshot_windows():
     return rows, details
 
 
+def _etime_seconds(s: str) -> int:
+    """ps 的 etime 欄：[[dd-]hh:]mm:ss → 秒。"""
+    days, rest = s.split("-", 1) if "-" in s else ("0", s)
+    nums = [int(x) for x in rest.split(":")]
+    nums = [0] * (3 - len(nums)) + nums
+    return int(days) * 86400 + nums[0] * 3600 + nums[1] * 60 + nums[2]
+
+
 def _snapshot_posix():
+    # 2026-11-12 健檢第一次在 CI 的 macos-latest 跑：原本用 etimes（只有 Linux 的 procps 有），macOS 的 ps 直接報錯、回空表，
+    # 等於 macOS 上永遠列不出任何程序。改用兩邊都有的 etime（[[dd-]hh:]mm:ss）自己換算；-A 是 POSIX 的「全部程序」。
     try:
-        out = subprocess.run(["ps", "-eo", "pid=,ppid=,etimes=,comm=,args="], capture_output=True, text=True, timeout=10).stdout
+        out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,etime=,comm=,args="], capture_output=True, text=True, timeout=10).stdout
     except (OSError, subprocess.SubprocessError):
         return [], lambda r: None
     now = time.time()
@@ -151,7 +161,7 @@ def _snapshot_posix():
         if len(parts) < 4:
             continue
         try:
-            rows.append({"pid": int(parts[0]), "ppid": int(parts[1]), "start": now - int(parts[2]), "name": parts[3],
+            rows.append({"pid": int(parts[0]), "ppid": int(parts[1]), "start": now - _etime_seconds(parts[2]), "name": parts[3],
                          "cmd": parts[4] if len(parts) > 4 else parts[3]})
         except ValueError:
             continue

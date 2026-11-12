@@ -48,6 +48,7 @@ class GU01_FindSystemPython(unittest.TestCase):
         res = gm.find_system_python(which=which or (lambda n: "C:/Windows/py.exe" if n == "py" else None), run=run, exists=exists)
         return res, run
 
+    @unittest.skipUnless(os.name == "nt", "找系統 Python 是 Windows exe 模式才用的功能，路徑寫法也是 Windows 的（CI 在 ubuntu／macos 上失敗才加）")
     def test_path_with_spaces_is_not_truncated(self):
         out = (winpath("C:", "Program Files", "Python314", "python.exe") + chr(10) + "3.14.0" + chr(10)).encode()
         (exe, ver), _ = self.find(out)

@@ -6,12 +6,14 @@ depgraph 單獨複製走時用 exit 1 崩潰。RV-02（視窗層）沒辦法在�
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "installer"))
@@ -108,6 +110,45 @@ class RV05_DepgraphAlone(unittest.TestCase):
         self.assertEqual(r.returncode, 2, err)
         self.assertIn("project-scan.py", err)
         self.assertNotIn("Traceback", err)
+
+
+class CI_FirstRunOnOtherVersionsAndPlatforms(unittest.TestCase):
+    """2026-11-12 第一次讓 CI 在 Python 3.10 與 ubuntu／macos 跑測試才發現的問題。"""
+
+    def _scan(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("cds_scan_rvtest", REPO / "tools" / "project-scan.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    @unittest.skipUnless(os.name == "nt", "junction 是 Windows 才有的")
+    def test_junction_detected_without_os_path_isjunction(self):
+        """Python 3.10／3.11 沒有 os.path.isjunction：原本直接當成「不是連結」，cleanup 會跟著 junction 刪到外面的資料。"""
+        tmp = Path(tempfile.mkdtemp(prefix="cds-junc-"))
+        target, link, plain = tmp / "target", tmp / "link", tmp / "plain"
+        target.mkdir()
+        plain.mkdir()
+        (target / "precious.txt").write_text("x", encoding="utf-8")
+        r = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True)
+        self.addCleanup(shutil.rmtree, tmp, True)
+        self.addCleanup(lambda: os.path.lexists(link) and os.rmdir(link))  # 先拆連結，rmtree 才不會碰到目標
+        if r.returncode != 0:
+            self.skipTest("建不了 junction")
+        scan = self._scan()
+        with mock.patch.object(os.path, "isjunction", None, create=True):  # 模擬 3.10／3.11
+            self.assertTrue(scan.is_link_dir(str(link)), "沒有 isjunction 時也要認得 junction")
+            self.assertFalse(scan.is_link_dir(str(plain)), "一般資料夾不是連結")
+            self.assertTrue(cleanup._is_link_dir_fallback(str(link)))
+            self.assertFalse(cleanup._is_link_dir_fallback(str(plain)))
+        self.assertTrue(scan.is_link_dir(str(link)))
+
+    def test_ps_etime_parsing(self):
+        import procs
+        self.assertEqual(procs._etime_seconds("00:05"), 5)
+        self.assertEqual(procs._etime_seconds("12:34"), 12 * 60 + 34)
+        self.assertEqual(procs._etime_seconds("01:02:03"), 3723)
+        self.assertEqual(procs._etime_seconds("2-03:04:05"), 2 * 86400 + 3 * 3600 + 4 * 60 + 5)
 
 
 if __name__ == "__main__":

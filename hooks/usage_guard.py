@@ -1457,7 +1457,13 @@ def _dir_size_until(root, limit_bytes, budget=0.5):
     try:
         is_link = _tool_mod("project-scan").is_link_dir
     except Exception:
-        is_link = lambda p: os.path.islink(p) or bool(getattr(os.path, "isjunction", lambda _p: False)(p))  # noqa: E731
+        def is_link(p):  # 工具載不到時的後備，與 project-scan.is_link_dir 同規則（3.10／3.11 沒有 isjunction，改看重解析點種類）
+            if os.path.islink(p):
+                return True
+            isj = getattr(os.path, "isjunction", None)
+            if isj:
+                return bool(isj(p))
+            return getattr(os.lstat(p), "st_reparse_tag", 0) == 0xA0000003
     while stack:
         if time.time() - t0 > budget:
             return total, False
