@@ -389,6 +389,20 @@ def build_dep_graph(root: Path, src: list[str], texts: dict) -> dict[str, set[st
     return g
 
 
+def big_file_exceptions(root: Path) -> dict[str, str]:
+    """行數上限例外清單：唯一來源 hooks/usage_guard.big_file_exceptions（專案 .claude/dispatch-config.json projectAutomation.bigFileExceptions）。
+    0.27.1：盤點也讀它——Stock-web 已停用的任務看板檔（列在例外裡）每次盤點仍被列成「問題」，掩蓋真正的問題訊號（Stock-web 健檢 QA2-13）。
+    讀不到（hooks 不在、設定壞掉）＝{}，照舊全部列問題。"""
+    try:
+        hooks_dir = str(Path(__file__).resolve().parent.parent / "hooks")
+        if hooks_dir not in sys.path:
+            sys.path.insert(0, hooks_dir)
+        from usage_guard import big_file_exceptions as _bfe  # type: ignore
+        return _bfe(str(root))
+    except Exception:
+        return {}
+
+
 def scan(root: Path, max_lines: int, ignore: set | None = None) -> dict:
     files = {}
     unreadable = []
@@ -430,10 +444,15 @@ def scan(root: Path, max_lines: int, ignore: set | None = None) -> dict:
     #（研究／回測腳本每天加分支，長得比產品碼快）。測試檔不算。
     big = sorted(((f["lines"], r) for r, f in files.items() if f["kind"] in ("source", "script") and f["lines"]), reverse=True)
     problems = []
+    known: list[dict] = []
+    exceptions = big_file_exceptions(root)
     for n, r in big:
         if n > max_lines:
             tag = "（腳本）" if files[r]["kind"] == "script" else ""
-            problems.append({"kind": "big-file", "file": r, "detail": f"{n} 行 > {max_lines}{tag}"})
+            if r in exceptions:
+                known.append({"file": r, "detail": f"{n} 行 > {max_lines}{tag}", "reason": exceptions[r]})
+            else:
+                problems.append({"kind": "big-file", "file": r, "detail": f"{n} 行 > {max_lines}{tag}"})
     for cyc in cycles:
         problems.append({"kind": "cycle", "files": cyc, "detail": f"{len(cyc)} 個檔互相依賴"})
     hot = sorted(dependents.items(), key=lambda kv: -kv[1])[:10]
@@ -444,7 +463,7 @@ def scan(root: Path, max_lines: int, ignore: set | None = None) -> dict:
     return {"version": 2, "root": str(root), "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%S"), "maxLines": max_lines,
             "counts": {**{k: sum(1 for f in files.values() if f["kind"] == k) for k in ("source", "test", "script", "config", "doc", "other")}, "asset": assets},
             "languages": _lang_counts(files), "entryPoints": entry_points(root, texts, files), "files": files, "graphEdges": sum(len(v) for v in g.values()),
-            "cycles": cycles, "mostDepended": hot, "biggest": [(r, n) for n, r in big[:10]], "problems": problems, "unreadable": unreadable,
+            "cycles": cycles, "mostDepended": hot, "biggest": [(r, n) for n, r in big[:10]], "problems": problems, "knownExceptions": known, "unreadable": unreadable,
             "refactorDecision": None}
 
 
@@ -467,6 +486,8 @@ def render_md(d: dict) -> str:
          "## 被引用最多的模組（改到要走 cds-blast-radius）", *([f"- {r}：被 {n} 個檔引用" for r, n in d["mostDepended"]] or ["- 無依賴資訊"]), "",
          "## 問題清單（門檻：單檔 > %d 行、循環依賴、≥10 個原始碼檔卻沒有測試）" % d["maxLines"],
          *([f"- {p['kind']}：{p.get('file') or ', '.join(p.get('files', []))} — {p['detail']}" for p in d["problems"]] or ["- 無"]), "",
+         "## 已知例外（.claude/dispatch-config.json projectAutomation.bigFileExceptions，不算問題）",
+         *([f"- {k['file']} — {k['detail']}；原因：{k['reason']}" for k in d.get("knownExceptions", [])] or ["- 無"]), "",
          "## 無法讀取的檔", *([f"- {u}" for u in d["unreadable"]] or ["- 無"]), "",
          "## 設定檔", *[f"- {r}" for r, f in sorted(d["files"].items()) if f["kind"] == "config"][:40], "",
          "每個檔的雜湊在 `.claude/project-scan.json`；`python project-scan.py <root> --check` 列出自上次盤點後改過的檔。"]

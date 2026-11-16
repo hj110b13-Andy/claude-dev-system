@@ -613,3 +613,18 @@ class TestFileLayout(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BigFileExceptions(Base):
+    """0.27.1：例外清單（.claude/dispatch-config.json projectAutomation.bigFileExceptions）裡的大檔不算問題、另列已知例外（Stock-web QA2-13）。"""
+
+    def test_exception_moves_to_known(self):
+        write(self.root, "tools/old.py", NL.join(f"x{i} = {i}" for i in range(30)))
+        write(self.root, "src/big.py", NL.join(f"y{i} = {i}" for i in range(30)))
+        write(self.root, ".claude/dispatch-config.json", json.dumps({"projectAutomation": {"bigFileExceptions": {"tools/old.py": "已停用的一次性工具", "src/big.py": "  "}}}))
+        d = self.ps.scan(self.root, 10)
+        probs = [p.get("file") for p in d["problems"] if p["kind"] == "big-file"]
+        self.assertNotIn("tools/old.py", probs)
+        self.assertIn("src/big.py", probs, "原因空白不算例外")
+        self.assertEqual([k["file"] for k in d["knownExceptions"]], ["tools/old.py"])
+        self.assertIn("已停用的一次性工具", self.ps.render_md(d))
