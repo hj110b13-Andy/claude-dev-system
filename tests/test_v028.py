@@ -275,3 +275,62 @@ class GrepGuard(unittest.TestCase):
     def test_second_stop_not_blocked(self):
         self.entries()
         self.assertIsNone(ug.grep_guard({"transcript_path": str(self.tr), "stop_hook_active": True}))
+
+
+class RulesReload(unittest.TestCase):
+    """0.32.0：對話中途改了 CLAUDE.md → 下一則提示提醒讀新版；每次修改只提醒一次；壓縮／接續重設基準。"""
+
+    def setUp(self):
+        import os
+        self.os = os
+        self.tmp = Path(tempfile.mkdtemp(prefix="cds-rr-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        home, proj = self.tmp / "home", self.tmp / "proj" / "sub"
+        home.mkdir()
+        proj.mkdir(parents=True)
+        saved = (ug.HOME, ug.RR_STATE)
+        ug.HOME, ug.RR_STATE = str(home), str(self.tmp / "state" / "rules-reload.json")
+        self.addCleanup(lambda: (setattr(ug, "HOME", saved[0]), setattr(ug, "RR_STATE", saved[1])))
+        self.g, self.p, self.cwd = home / "CLAUDE.md", self.tmp / "proj" / "CLAUDE.md", str(proj)
+        self.g.write_text("global v1", encoding="utf-8")
+        self.p.write_text("project v1", encoding="utf-8")
+        self.t = 1_000_000.0
+
+    def touch(self, path, text):
+        path.write_text(text, encoding="utf-8")
+        self.t += 10
+        self.os.utime(path, (self.t, self.t))
+
+    def msg(self, sid="s1", reset=False):
+        return ug.rules_reload_msg(self.cwd, sid, reset=reset)
+
+    def test_first_prompt_records_only(self):
+        self.assertIsNone(self.msg())
+        self.assertIsNone(self.msg())
+
+    def test_edit_triggers_once(self):
+        self.msg()
+        self.touch(self.p, "project v2")
+        m = self.msg()
+        self.assertIn("規則已更新", m)
+        self.assertIn("CLAUDE.md", m)
+        self.assertIsNone(self.msg(), "同一次修改不重複提醒")
+        self.touch(self.g, "global v2")
+        self.assertIn(str(self.g), self.msg())
+
+    def test_new_file_counts_and_sessions_independent(self):
+        self.msg("s1")
+        self.msg("s2")
+        local = self.tmp / "proj" / "CLAUDE.local.md"
+        self.touch(local, "new")
+        self.assertIn("CLAUDE.local.md", self.msg("s1"))
+        self.assertIn("CLAUDE.local.md", self.msg("s2"))
+
+    def test_reset_on_compact_no_reminder(self):
+        self.msg()
+        self.touch(self.p, "project v2")
+        self.assertIsNone(self.msg(reset=True))
+        self.assertIsNone(self.msg())
+
+    def test_no_session_id(self):
+        self.assertIsNone(ug.rules_reload_msg(self.cwd, None))

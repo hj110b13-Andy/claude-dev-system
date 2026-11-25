@@ -11,7 +11,7 @@
 - SubagentStop（0.22.0 起）：報告守門後備（subagent_stop_guard）。
 會注入的標籤：【用量守門（自動）】【專案自動化（hook）】【全域系統對照（hook）】【專案健康檢查（hook）】【殘留程序（hook）】【延後工作（hook）】
 【磁碟清理（hook）】【看板逾時提醒（自動）】【改到安裝副本（hook）】【背景任務巡檢（hook）】【波及範圍（hook）】【共用工作目錄（hook）】
-【語言（hook）】【驗證守門（hook）】【查證守門（hook）】【建議守門（hook）】【壓縮後重新開工（hook）】【建議開新對話（hook）】【派工補充（hook）】【報告守門（hook）】。
+【語言（hook）】【規則已更新（hook）】【驗證守門（hook）】【查證守門（hook）】【建議守門（hook）】【壓縮後重新開工（hook）】【建議開新對話（hook）】【派工補充（hook）】【報告守門（hook）】。
 狀態檔都在 <CLAUDE_HOME>/state，JSON 狀態一律經 _atomic_write_json／_save_json_state 寫（鎖＋合併＋原子替換，健檢 HK-01／HK-02）。
 
 用量守門：
@@ -867,6 +867,67 @@ def compact_from_subagent(payload, now=None):
         return bool(mt) and at >= mt * COMPACT_TOKEN_MARGIN
     except Exception:
         return False
+
+
+# 0.32.0 規則已更新（UserPromptSubmit）。使用者 2026-11-25 同意「改了規則之後，不用重開對話就能生效」：官方 prompt-caching 文件：
+# 「Claude Code reads these files at session start and holds them in memory. To reload them, run /clear or /compact, or restart」。
+# 不整份重新注入（hook 注入的內容會留在對話、壓縮時被摘要掉，見 context-window 文件），只提醒一句讓 Claude 自己 Read 新版。
+RR_STATE = os.path.join(STATE_DIR, "rules-reload.json")
+RR_KEEP_SEC = 7 * 86400  # 自己定的：7 天沒動的對話記錄清掉
+
+
+def rules_files(cwd):
+    """對話開始時會載入的規則檔：全域 CLAUDE.md，加上工作資料夾往上每一層的 CLAUDE.md、CLAUDE.local.md、.claude/CLAUDE.md（官方 memory 文件的載入範圍）。"""
+    out = [os.path.join(HOME, "CLAUDE.md")]
+    d = os.path.abspath(cwd or os.getcwd())
+    while True:
+        for name in ("CLAUDE.md", "CLAUDE.local.md", os.path.join(".claude", "CLAUDE.md")):
+            out.append(os.path.join(d, name))
+        up = os.path.dirname(d)
+        if up == d:
+            break
+        d = up
+    return out
+
+
+def _rr_snapshot(cwd):
+    """{比對用的路徑鍵（normcase）: 修改時間}，另回 {鍵: 原本寫法的路徑}（提醒裡顯示用）。"""
+    snap, shown = {}, {}
+    for p in rules_files(cwd):
+        try:
+            k = os.path.normcase(p)
+            snap[k], shown[k] = os.path.getmtime(p), p
+        except OSError:
+            pass
+    return snap, shown
+
+
+def rules_reload_msg(cwd, session_id, reset=False, now=None):
+    """這場對話開始（或上次壓縮／接續）之後被改過的規則檔 → 提醒一句；第一則提示與 reset 時只記錄基準、不提醒。"""
+    if not session_id:
+        return None
+    now = now or time.time()
+    try:
+        st = _load_json_state(RR_STATE)
+        snap, shown = _rr_snapshot(cwd)
+        rec = st.get(session_id) if isinstance(st.get(session_id), dict) else None
+        changed = []
+        if rec and not reset:
+            base = rec.get("files") or {}
+            changed = [p for p, m in snap.items() if p not in base or abs(m - base[p]) > 0.5]  # 有變就算（含換回舊檔）
+        if rec is None or reset or changed:
+            files = dict((rec or {}).get("files") or {}) if not reset else {}
+            files.update(snap)
+            st[session_id] = {"t": now, "files": files}
+            _save_json_state(RR_STATE, st, prune=lambda d: {k: v for k, v in d.items()
+                                                            if isinstance(v, dict) and now - v.get("t", 0) < RR_KEEP_SEC})
+        if not changed:
+            return None
+        names = "、".join(f"`{shown.get(p, p)}`" for p in sorted(changed))
+        return ("【規則已更新（hook）】這場對話開始之後，下列規則檔被修改過：" + names + "。對話開頭載入的是舊版（Claude Code 只在開始時讀一次）；"
+                "請先用 Read 讀這些檔的最新內容，之後以新版為準（舊版內容仍在 context 裡，兩者衝突時照新版）。")
+    except Exception:
+        return None
 
 
 def compact_msg(cwd, session_id):
@@ -2354,6 +2415,7 @@ def main():
             if from_sub:
                 return  # agent 自己的壓縮：不把主對話的開工清單塞給它，也不算進主對話的壓縮次數
         if payload.get("source") in ("compact", "resume"):
+            rules_reload_msg(payload.get("cwd"), payload.get("session_id"), reset=True)  # 壓縮／接續時 Claude Code 會重讀 CLAUDE.md：重設基準
             msg = compact_msg(payload.get("cwd"), payload.get("session_id"))
             if msg:
                 _emit({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": msg}}, event)
@@ -2415,6 +2477,9 @@ def main():
         hm = health_msg(hook_cwd, session_id=payload.get("session_id"))  # 盤點過期、CLAUDE.md／交接紀錄過大：同資料夾同對話每天一次
         if hm:
             msgs.append(hm)
+        rr = rules_reload_msg(hook_cwd, payload.get("session_id"))  # 0.32.0：對話中途改過 CLAUDE.md → 提醒讀新版（每次修改一次）
+        if rr:
+            msgs.append(rr)
     if event in ("UserPromptSubmit", "PostToolUse"):  # 0.16.0：殘留程序、延後工作、對話暫存（全部節流，平常只讀狀態檔）
         st = _pa_load()
         before = json.dumps(st, sort_keys=True)

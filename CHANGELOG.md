@@ -2,6 +2,14 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.32.0（2026-11-25）
+
+使用者：「不要每次讀取提示詞……讓claude每次都讀取我的提示詞MD檔……先去看MD檔修改時間跟之前時間比對，如果是新版的就重新讀取」→ 查證後回覆：CLAUDE.md 本來就只在對話開始讀一次、之後走快取（code.claude.com/docs/en/prompt-caching：「reads these files at session start and holds them in memory. To reload them, run /clear or /compact, or restart」），整份用 hook 重新注入不省 token、壓縮時還會被摘要掉（docs/en/context-window：hook 加的 context「Summarized with the rest of the conversation」，CLAUDE.md「Re-injected from disk」）；建議只做「改過就提醒」的小版本 → 使用者：「可以做」。
+
+- **規則已更新提醒（UserPromptSubmit，新）**：`rules_reload_msg`——每場對話第一則提示記下會載入的規則檔修改時間（全域 `CLAUDE.md`，以及工作資料夾往上每一層的 `CLAUDE.md`、`CLAUDE.local.md`、`.claude/CLAUDE.md`）；之後每則提示比對，有檔案改過或新出現就注入【規則已更新（hook）】列出檔案，請 Claude 先 Read 新版、衝突時照新版；同一次修改只提醒一次（修改時間有變就算，含換回舊檔）。SessionStart 的 compact／resume 重設基準（Claude Code 那時會重讀 CLAUDE.md）。狀態在 `state/rules-reload.json`，7 天沒動的對話記錄清掉。
+- 實測（暫存 CLAUDE_CONFIG_DIR 跑真的 hook）：第 1 則不提醒；改專案 CLAUDE.md 後下一則提醒；再一則不重複；改檔後壓縮再送不提醒。
+- 文件：`rules/workflow.md` 標籤表與 hook docstring 加【規則已更新（hook）】。測試：`tests/test_v028.py` 加 RulesReload 5 項。
+
 ## 0.31.1（2026-11-25）
 
 使用者：「腳本可用也是一樣先用免金鑰，不能用免金鑰才改用金鑰版嗎?」——search／fetch 是，但 `call`（context7 等）原本只呼叫指定的那一個，免金鑰限流就直接失敗。
