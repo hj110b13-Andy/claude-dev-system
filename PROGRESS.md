@@ -16,7 +16,9 @@
 - 載本系統全部 12 個 MCP（多 5 個 -key 版）39,865（2 次相同）→ -key 重複註冊約 3,193
 - 完整（再加 claude.ai Docs 連接器，不是本系統的）37,862～41,564，差異來自每次連上的伺服器數不同（工具 100～105 個）
 - 剩約 4,000 說不出來源（31,214 − 22,490 − 4,742）：safe-mode 另外關掉的東西（auto memory 等），未查證。
-結論：每個請求比 safe-mode 多約 1.7 萬：CLAUDE.md 27%、免金鑰 MCP 24%、-key 重複 18%、skill 8%、不明 23%。量測腳本在 scratchpad/overhead/（measure.py、measure2.py）。
+結論：每個請求比 safe-mode 多約 1.7 萬：CLAUDE.md 27%、免金鑰 MCP 24%、-key 重複 18%、skill 8%、不明 23%。
+- **更正（同日，`claude -p /context` 官方估算，用 Python 呼叫避開 Git Bash 路徑轉換）**：上一句的「skill 8%、不明 23%」不準——`--disable-slash-commands` 那組沒把 skill 關乾淨。/context 逐類：safe 17.7k → full 28.4k（+10.7k）＝Memory files（CLAUDE.md）+4.8k、MCP server instructions +4.5k、MCP tools（只有 Claude Docs 8 個是完整載入）+0.7k、Skills +3.6k（cds 10 個約 450；**claude.ai sync 13 個約 3,200**：docx、pdf、pptx、xlsx、docs、built-in-browser、chrome-browser、computer-use、deep-research、google-workspace、import-memory、morning、skill-creator）、System prompt +0.8k、System tools −3.7k（部分內建工具改延後載入）。API 實量差 15.4k～19k，比 /context 多的 5k～8k 推測是延後工具名稱清單與每輪提醒（未查證）。
+- 更正：docx／pdf／pptx 不是 Claude Code 內建，/context 標示來源是「claude.ai sync」。claude.ai 帶來的部分（sync skill 約 3.2k＋Claude Docs 約 0.7k）不是本系統造成，舊結論高估了本系統的開銷。輸出檔：scratchpad/overhead/context-safe.txt、context-full.txt。量測腳本在 scratchpad/overhead/（measure.py、measure2.py）。
 - 決策：2026-11-25｜-key 版維持與免金鑰版並存｜使用者選「維持兩版並存」｜多出約 3,200／請求，多為快取讀取；金鑰額度只在免金鑰版被限流時才用。
 
 ## 2026-11-25：v0.28.0 已發布（Release 兩個附件已確認；語言、精簡來源格式、改動分級、驗證守門、寫程式對照評測）
