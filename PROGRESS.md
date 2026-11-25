@@ -1,5 +1,12 @@
 # claude-dev-system 交接紀錄
 
+## 2026-11-25：省 token 試設驗證（使用者選「先驗證再決定」；5 小時用量 97% 收尾，還沒做成功能）
+
+- 試設：scratchpad/overhead/trial/.claude/settings.local.json＝deniedMcpServers 擋 exa、tavily、parallel、firecrawl（含 -key，8 個）＋skillOverrides 把 claude.ai sync 的 13 個 skill 設 "name-only"。依據：settings-reference「deniedMcpServers … Entries from every file merge into one denylist」、skillOverrides「name-only: Claude sees the skill by name without its description」。
+- 結果：每個請求 41,657 → 33,897（−7,760，約 19%），跑兩次相同。/context：MCP server instructions 4.5k→3k、Skills 5.9k→2.9k，但 System tools 9.9k→13k（MCP 少了以後部分內建工具不再延後載入），API 實量仍淨省 7.8k。
+- 功能：「幫我做 3 頁 PowerPoint」兩邊都沒自動叫 pptx skill（原本就不會，改用 Bash＋Write 自己做）；明講「用 pptx skill」兩邊都叫得到 anthropic-skills:pptx。name-only 在這個例子沒看到功能損失（各 1 次）。
+- 下一步（待使用者決定）：①做成指令，在指定專案寫這份 settings.local.json（可還原）②要不要也對全域套 skill name-only ③發現：原本設定下 Claude 做 PPT 也不會自動用 pptx skill，可能值得在規則提醒。
+
 ## 2026-11-25：v0.28.1（小修只驗證一次、medium 重跑評測）
 
 - 使用者：「先做『小修只驗證一次』『用 medium 重跑評測』這兩個就好了」。claude.ai 連接器（Claude Docs）不關、5 個內建 skill 不動。
