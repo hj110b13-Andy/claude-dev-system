@@ -105,7 +105,7 @@ python installer/install.py web --key cwa=… --key moenv=… --key openaq=… -
 python installer/install.py web --key exa=… --key context7=… --key parallel=… --key firecrawl=…   # 搜尋類金鑰預設「免費優先」：免金鑰版與 <名稱>-key 版並存，規則撞限流才用 -key；--key-mode exa=always 改為一律用金鑰
 python installer/install.py web --disable firecrawl      # firecrawl（JS 頁面抓取）0.7.0 起預設開、只當讀整頁第三步；不想要就關（原寫「預設關」，與 config/web-sources.json 不符）
 ```
-聯網來源整體預設不啟用（要 `--with-web` 或 `install.py web` 才開）。用官方 `claude mcp add --scope user` 註冊，不覆蓋你自己同名的 MCP 或 env；`web --off` 或 `uninstall` 只移除本工具登記過的。規則 `rules/web-sources.md` 列出實測過的免金鑰開放 API（天氣、空氣品質、地震、潮汐、匯率、加密貨幣、台股／美股、全球新聞、論文、假日、百科、地理編碼、航班位置、停車場）、社群論壇與程式難題的查法、查證型回答格式、教操作前先核對畫面。細節：`docs/web-sources.md`。
+聯網來源整體預設不啟用（要 `--with-web` 或 `install.py web` 才開）。**0.30.0 起啟用後預設不註冊 MCP**，改由 `tools/websearch.py`（skill `cds-websearch`）用到才呼叫同一批服務，每個請求省數千 token；`install.py web --web-transport mcp` 可改回註冊 MCP。用官方 `claude mcp add --scope user` 註冊，不覆蓋你自己同名的 MCP 或 env；`web --off` 或 `uninstall` 只移除本工具登記過的。規則 `rules/web-sources.md` 列出實測過的免金鑰開放 API（天氣、空氣品質、地震、潮汐、匯率、加密貨幣、台股／美股、全球新聞、論文、假日、百科、地理編碼、航班位置、停車場）、社群論壇與程式難題的查法、查證型回答格式、教操作前先核對畫面。細節：`docs/web-sources.md`。
 
 ## 選用：影片來源
 

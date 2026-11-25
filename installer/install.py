@@ -64,6 +64,7 @@ def main(argv=None) -> int:
     ap.add_argument("--key-mode", action="append", default=[], metavar="名稱=fallback|always|free")
     ap.add_argument("--usage-guard", choices=["on", "off"], help="web 子命令：開關用量守門 hook（立即同步 settings.json；off＝移除且 update 也不註冊）")
     ap.add_argument("--language", metavar="語言", help="web 子命令：設定 settings.json 的回覆語言（例如 繁體中文）；off＝移除本工具寫的值")
+    ap.add_argument("--web-transport", choices=["script", "mcp"], help="web 子命令：聯網來源走 tools/websearch.py（script，預設）或註冊成 MCP")
     ap.add_argument("--off", action="store_true")
     ap.add_argument("--show", action="store_true")
     ap.add_argument("--list", action="store_true", help="selftest：只列題目")
@@ -101,7 +102,7 @@ def main(argv=None) -> int:
             code, log = commands.set_language(lay, a.language)
         elif a.cmd == "web":
             code, log = commands.web_config(lay, keys=a.key, enable=a.enable, disable=a.disable, env=a.env, off=a.off, show=a.show,
-                                            key_mode=a.key_mode, usage_guard=a.usage_guard)
+                                            key_mode=a.key_mode, usage_guard=a.usage_guard, transport=a.web_transport)
         elif a.cmd == "video":
             code, log = commands.video_config(lay, a.python, off=a.off, show=a.show)
         elif a.cmd == "uninstall":

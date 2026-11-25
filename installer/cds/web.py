@@ -177,6 +177,20 @@ def _same(have: dict | None, want: dict, defer: bool = False) -> bool:
     return (have.get("alwaysLoad") is False) if defer else True
 
 
+WEB_TRANSPORTS = ("script", "mcp")  # 0.30.0：script（預設）＝不註冊 MCP、只寫 websearch-servers.json 給 tools/websearch.py；mcp＝照舊註冊 MCP
+
+
+def transport(local: dict) -> str:
+    """聯網來源怎麼接：local.json 的 webTransport；沒設或不認得＝script。使用者 2026-11-25 選「全部 12 個都拿掉」。"""
+    v = local.get("webTransport")
+    return v if v in WEB_TRANSPORTS else "script"
+
+
+def mcp_servers(src: dict, local: dict) -> dict[str, dict]:
+    """要註冊成 MCP 的伺服器：transport＝mcp 才是 desired_servers()，script 時為空（伺服器清單仍由 desired_servers 寫給腳本）。"""
+    return desired_servers(src, local) if transport(local) == "mcp" else {}
+
+
 def registry_path(lay: Layout) -> Path:
     """tools/websearch.py 讀的伺服器清單（0.29.0）。含金鑰，跟 local.json 一樣只在本機、不進 repo。"""
     return lay.home / "claude-dev-system" / "config" / "websearch-servers.json"
@@ -203,8 +217,8 @@ def sync_mcp(lay: Layout, old: dict, runner=default_runner, log: list | None = N
     if defer is None:
         defer = runner is default_runner and defer_supported()
     src, local = sources(lay), load_local(lay)
-    want, have = desired_servers(src, local), installed_servers(lay)
-    write_registry(lay, want)
+    write_registry(lay, desired_servers(src, local))
+    want, have = mcp_servers(src, local), installed_servers(lay)
     mine = set(old.get("mcpAdded", []))
     rec = {"mcpAdded": [], "skipped": []}
     for name, spec in want.items():
@@ -311,7 +325,12 @@ def verify_rows(lay: Layout, rec: dict, settings: dict) -> list[tuple[str, str]]
         rows.append((OK, "聯網來源：未啟用（選用；`install.py web` 可開）"))
         return rows
     src, local = sources(lay), load_local(lay)
-    want, have = desired_servers(src, local), installed_servers(lay)
+    want, have = mcp_servers(src, local), installed_servers(lay)
+    if transport(local) == "script":
+        reg = (read_json(registry_path(lay)) or {}).get("servers") if registry_path(lay).exists() else None
+        n = len(desired_servers(src, local))
+        rows.append((OK, f"聯網來源走 tools/websearch.py（不註冊 MCP）：伺服器清單 {len(reg)} 個") if reg is not None and len(reg) == n
+                    else (BAD, f"tools/websearch.py 的伺服器清單不存在或過期（應有 {n} 個；重跑 `install.py web`）"))
     for name in rec.get("mcpAdded", []):
         if name not in want:
             rows.append((WARN, f"MCP {name} 已在設定中關閉，但仍登記在紀錄（重跑 `install.py web` 會移除）"))

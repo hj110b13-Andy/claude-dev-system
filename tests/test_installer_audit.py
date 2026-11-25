@@ -29,6 +29,21 @@ def marked_count(s: dict) -> int:
     return sum(len(settings_ops.has_marked(s, e)) for e, _ in settings_ops.HOOK_SPECS)
 
 
+def mcp_transport(cls):
+    """0.30.0 起聯網來源預設走 tools/websearch.py（不註冊 MCP）；這個類別測的是「註冊成 MCP」的行為，固定 transport＝mcp。"""
+    from unittest import mock
+    from cds import web as _web
+    orig = cls.setUp
+
+    def setUp(self):
+        p = mock.patch.object(_web, "transport", lambda local: local.get("webTransport") or "mcp")
+        p.start()
+        self.addCleanup(p.stop)
+        orig(self)
+    cls.setUp = setUp
+    return cls
+
+
 class A_RestoreBackup(Base):
     """A：--restore-backup 只用安裝前那筆；update 超過 KEEP_BACKUPS 次、安裝前沒有 settings.json 都不可把指向已刪腳本的 hook 寫回。"""
 
@@ -90,6 +105,7 @@ class A_RestoreBackup(Base):
         self.assertTrue(m["backups"][0].get("preInstall"))
 
 
+@mcp_transport
 class IN01_WebPrefsOnly(Base):
     """IN-01：web 未啟用時只存偏好；--usage-guard 立刻同步 settings.json。"""
 
@@ -140,6 +156,7 @@ class IN01_WebPrefsOnly(Base):
         self.assertTrue(any("目前未啟用" in x for x in log))
 
 
+@mcp_transport
 class IN02_UninstallMcpFailure(Base):
     """IN-02：uninstall 時 MCP 移除失敗要回 1、最後一行 ❌，紀錄留下失敗的名稱，重跑可接著移除。"""
 
@@ -162,6 +179,7 @@ class IN02_UninstallMcpFailure(Base):
         self.assertFalse(self.lay.payload.exists())
 
 
+@mcp_transport
 class IN03_SyncMcpRemoveFailure(Base):
     """IN-03：sync_mcp 移除失敗時名稱留在 mcpAdded；重建時 remove 失敗就不接著 add。"""
 

@@ -26,6 +26,21 @@ def fake_env(repo, importer=None, ffmpeg=None):
             "faster_whisper": gm.EnvItem(True, "fw")}
 
 
+def mcp_transport(cls):
+    """0.30.0 起聯網來源預設走 tools/websearch.py（不註冊 MCP）；這個類別測的是「註冊成 MCP」的行為，固定 transport＝mcp。"""
+    from unittest import mock
+    from cds import web as _web
+    orig = cls.setUp
+
+    def setUp(self):
+        p = mock.patch.object(_web, "transport", lambda local: local.get("webTransport") or "mcp")
+        p.start()
+        self.addCleanup(p.stop)
+        orig(self)
+    cls.setUp = setUp
+    return cls
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="cds-gui-"))
@@ -52,6 +67,7 @@ class Base(unittest.TestCase):
         return json.loads(p.read_text(encoding="utf-8")).get("mcpServers", {}) if p.exists() else {}
 
 
+@mcp_transport
 class ReadAndDiff(Base):
     def test_fresh_home_state_and_install_via_form(self):
         s = self.state()

@@ -6,7 +6,10 @@
 
 - **web-quick.md A 段開頭加「工具對照」**：parallel／exa／tavily／firecrawl／context7／deepwiki／mslearn 都改用 `tools/websearch.py`（skill cds-websearch），免費優先與換 -key 由腳本做；內建 WebSearch／WebFetch 仍可當第一步或退路。起因：0.29.0 並存比較時，擋掉 MCP 那組一次都沒用腳本（規則只寫 MCP 名稱）。
 - **重跑擋掉 MCP 那組（3 題，medium，各 1 次）**：pwsh、docs 兩題改用 `websearch.py fetch`，py314 用內建 WebSearch；判定 6/6；token 501,644、費用估算 $0.86、101 秒（只用 MCP 那組 628,879、$1.10、96 秒）。
-- 搜尋類 MCP 還沒拿掉（待使用者決定）。
+- **拿掉本系統註冊的 12 個 MCP（使用者選「全部 12 個都拿掉」）**：`local.json` 新增 `webTransport`（`script` 預設／`mcp`），`install.py web --web-transport mcp|script` 切換。script 時 `sync_mcp` 不註冊、並移除本工具先前註冊的 MCP，伺服器清單仍由 `desired_servers()` 寫進 `websearch-servers.json`；`verify` 在 script 時檢查清單筆數。設定視窗的聯網區仍顯示「已註冊／未註冊」，script 時都是未註冊（屬正常，視窗文字未改）。
+- 規則：web-quick.md 工具對照改寫成「預設不再註冊 MCP」；web-sources.md 開頭加接法說明；README 聯網來源段落；selftest.json 5 個 expect／warn 同時接受 `websearch.py search|fetch|call …`。
+- **本機實測（拿掉後，新對話）**：`/context` 28.4k → 24.6k，MCP server instructions 4.5k → 0.7k（剩下的是 claude.ai 的 Claude Docs 連接器，不是本系統的）；API 每個請求 41,657 → 34,492（−7,165，約 17%，跑兩次相同）；`websearch.py search` 照常可用。
+- 測試：`tests/test_installer.py` 新增 ScriptTransport 3 項（預設不註冊但寫清單、mcp→script 移除註冊、錯誤值拒絕）；測 MCP 註冊行為的 6 個測試類別加 `@mcp_transport` 固定 transport＝mcp。
 
 ## 0.29.0（2026-11-25）
 

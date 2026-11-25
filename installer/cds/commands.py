@@ -371,7 +371,7 @@ def apply(lay: Layout, python: str, repo: Path = REPO, force: bool = False, mode
 
 @_locked
 def web_config(lay: Layout, keys=(), enable=(), disable=(), env=(), off: bool = False, show: bool = False,
-               runner=web.default_runner, key_mode=(), usage_guard: str | None = None) -> tuple:
+               runner=web.default_runner, key_mode=(), usage_guard: str | None = None, transport: str | None = None) -> tuple:
     """`install.py web`：改本機偏好（local.json）後立即套用；--off 關閉並移除；--show 只顯示。"""
     m = mf.load(lay.manifest)
     if not m:
@@ -398,6 +398,10 @@ def web_config(lay: Layout, keys=(), enable=(), disable=(), env=(), off: bool = 
             if usage_guard not in ("on", "off"):
                 raise ValueError("--usage-guard 只能是 on 或 off")
             local["usageGuard"] = usage_guard == "on"
+        if transport is not None:
+            if transport not in web.WEB_TRANSPORTS:
+                raise ValueError("--web-transport 只能是 " + " 或 ".join(web.WEB_TRANSPORTS))
+            local["webTransport"] = transport
     except ValueError as e:
         return 2, [str(e)]
     for n in enable:
@@ -409,13 +413,13 @@ def web_config(lay: Layout, keys=(), enable=(), disable=(), env=(), off: bool = 
     # IN-01：聯網來源原本沒啟用時，只帶 --key／--env／--key-mode／--usage-guard 是「存偏好」，不可順便註冊 6 個 MCP、改 env
     # （docs/video.md 教使用者用 `web --key youtube=…` 存影片金鑰）。不帶任何參數、--enable／--disable、--off、或已啟用時照舊同步。
     prefs_only = (not m["web"].get("enabled") and not off and not enable and not disable
-                  and bool(keys or env or key_mode or usage_guard is not None))
+                  and bool(keys or env or key_mode or usage_guard is not None or transport is not None))
     if not show and (not prefs_only or usage_guard is not None):
         try:
             _preflight(lay)  # IN-04：接下來會寫 settings.json
         except ValueError as e:
             return 2, [str(e)]
-    if keys or env or enable or disable or key_mode or usage_guard is not None:
+    if keys or env or enable or disable or key_mode or usage_guard is not None or transport is not None:
         web.save_local(lay, local)
         log.append(f"本機偏好已寫入 {web.local_path(lay)}（不進 repo、update／uninstall 不動）")
     if show:
@@ -424,6 +428,8 @@ def web_config(lay: Layout, keys=(), enable=(), disable=(), env=(), off: bool = 
         log.append(head + (", ".join(f"{n} → {web.mask(v['url'], local)}" for n, v in want.items()) or "無"))
         log.append("env：" + ", ".join(f"{k}={v}" for k, v in web.desired_env(web.sources(lay), local).items()))
         log.append("本機金鑰：" + (", ".join(sorted(k for k, v in (local.get('keys') or {}).items() if v)) or "無"))
+        log.append("接法：" + ("tools/websearch.py（不註冊 MCP；`--web-transport mcp` 可改回）" if web.transport(local) == "script"
+                              else "註冊成 MCP（`--web-transport script` 改用腳本、每個請求省數千 token）"))
         keyed = sorted(n for n in want if n.endswith("-key"))
         always = sorted(n for n, v in (local.get("keyMode") or {}).items() if v == "always")
         log.append("金鑰模式：免費優先（免金鑰版＋-key 版並存）" + (f"：{', '.join(k[:-4] for k in keyed)}" if keyed else "：無")

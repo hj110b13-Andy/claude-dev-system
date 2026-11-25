@@ -3,6 +3,9 @@
 核心規則「上網查資料」的完整版。目的：查得到、查得全、查得即時，但不浪費——**靠「知道資料在哪」，不靠裝更多工具**。
 以下端點除標註外皆於 2026-10-26 以 curl 實測可用；數字與條款會變，撞牆時先看官方頁再改本檔。
 
+
+**0.30.0 起的接法**：本檔提到的 parallel、exa、tavily、firecrawl、context7、deepwiki、mslearn 預設不再註冊成 MCP，改用 `tools/websearch.py`（`search`／`fetch`／`call`／`tools`，見 skill `cds-websearch` 與 `web-quick.md` A 段開頭的「工具對照」）；免費優先與換 `-key` 由腳本自動做。下文的 MCP 工具名稱（例如 `mcp__exa__web_search_exa`）當成「哪一家的哪個功能」讀即可。
+
 ## 1. 工具優先序
 
 ### 1-0. 速查（0.10.0 從 core.md 原文搬入；core.md 只留觸發條件，動手前先讀這段，細則在下面各節）

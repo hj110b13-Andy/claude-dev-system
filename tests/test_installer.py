@@ -35,6 +35,21 @@ USER_SETTINGS = {
 USER_MD = "# 我的全域規則\n\n- 規則一\n- 規則二（沒有結尾換行）"
 
 
+def mcp_transport(cls):
+    """0.30.0 起聯網來源預設走 tools/websearch.py（不註冊 MCP）；這個類別測的是「註冊成 MCP」的行為，固定 transport＝mcp。"""
+    from unittest import mock
+    from cds import web as _web
+    orig = cls.setUp
+
+    def setUp(self):
+        p = mock.patch.object(_web, "transport", lambda local: local.get("webTransport") or "mcp")
+        p.start()
+        self.addCleanup(p.stop)
+        orig(self)
+    cls.setUp = setUp
+    return cls
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="cds-test-"))
@@ -171,6 +186,7 @@ class KeyModeFree(Base):
             w.set_key_mode_arg(local, "exa=bogus")
 
 
+@mcp_transport
 class McpDefer(Base):
     """0.24.0：註冊 MCP 時加 alwaysLoad:false（工具延後載入）；舊註冊在下一次同步時重建。"""
 
@@ -385,6 +401,50 @@ def fake_mcp_runner(lay: Layout, calls: list):
     return run
 
 
+class ScriptTransport(Base):
+    """0.30.0 預設：聯網來源不註冊 MCP，只寫 tools/websearch.py 的伺服器清單；`--web-transport` 可切換。不套 mcp_transport。"""
+    DEFAULTS = {"parallel", "exa", "context7", "deepwiki", "mslearn", "firecrawl"}
+
+    def setUp(self):
+        super().setUp()
+        self.calls: list = []
+        self.runner = fake_mcp_runner(self.lay, self.calls)
+
+    def servers(self):
+        p = web.user_config_path(self.lay)
+        return json.loads(p.read_text(encoding="utf-8")).get("mcpServers", {}) if p.exists() else {}
+
+    def registry(self):
+        p = web.registry_path(self.lay)
+        return json.loads(p.read_text(encoding="utf-8"))["servers"] if p.exists() else None
+
+    def test_default_registers_no_mcp_but_writes_registry(self):
+        code, log = commands.apply(self.lay, PY, repo=REPO, mode="install", with_web=True, runner=self.runner)
+        self.assertEqual(code, 0, "\n".join(log))
+        self.assertEqual(self.servers(), {})
+        self.assertEqual([c for c in self.calls if c[0] == "add"], [])
+        self.assertEqual(set(self.registry()), self.DEFAULTS)
+        code, vlog = commands.verify(self.lay, check_claude=False)
+        self.assertTrue(any("tools/websearch.py" in x and "伺服器清單 6 個" in x for x in vlog), "\n".join(vlog))
+
+    def test_switch_mcp_then_script_removes_registrations(self):
+        commands.apply(self.lay, PY, repo=REPO, mode="install", with_web=True, runner=self.runner)
+        code, log = commands.web_config(self.lay, transport="mcp", runner=self.runner)
+        self.assertEqual(code, 0, "\n".join(log))
+        self.assertEqual(set(self.servers()), self.DEFAULTS)
+        code, log = commands.web_config(self.lay, transport="script", runner=self.runner)
+        self.assertEqual(code, 0, "\n".join(log))
+        self.assertEqual(self.servers(), {})
+        self.assertEqual(set(self.registry()), self.DEFAULTS)
+        self.assertEqual(mf.load(self.lay.manifest)["web"]["mcpAdded"], [])
+
+    def test_bad_transport_rejected(self):
+        commands.apply(self.lay, PY, repo=REPO, mode="install", with_web=True, runner=self.runner)
+        code, log = commands.web_config(self.lay, transport="xyz", runner=self.runner)
+        self.assertEqual(code, 2)
+
+
+@mcp_transport
 class WebSources(Base):
     ENV_KEYS = ("CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION", "CLAUDE_CODE_WEB_SEARCH_REFILLS_PER_HOUR")
     DEFAULTS = {"parallel", "exa", "context7", "deepwiki", "mslearn", "firecrawl"}  # web-sources.json 的 default:true 項目
