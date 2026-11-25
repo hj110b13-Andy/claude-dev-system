@@ -2,6 +2,16 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.29.0（2026-11-25）
+
+使用者：「擋掉搜尋類 MCP這部分，有辦法不要看專案擋掉，而是要用到搜尋類時再呼叫嗎?」→「你查證可行性」→ 選「先並存測試」；tavily 免金鑰「你再去查看看有沒有解決辦法」。
+
+- **新工具 `tools/websearch.py`＋新 skill `cds-websearch`（第一階段：與現有 MCP 並存）**：腳本直接當 MCP Streamable HTTP 客戶端（只用標準庫），呼叫本系統註冊的同一批伺服器。`search`／`fetch` 依 parallel → exa → tavily → firecrawl，每家先免金鑰、限流或額度用完（HTTP 429／402／5xx，或內容含 daily_cap_reached 等）換同家 `-key`，非限流錯誤直接換下一家；`tools <伺服器>` 用到才查參數；`call` 呼叫任意工具；完整結果存 `~/.claude/state/websearch/`（保留 7 天），只印前 6,000 字。skill 平常只佔一行說明，用到才載入。
+- 可行性實測（2026-11-25）：12 個伺服器全部可用，搜尋 0.7～2.7 秒、抓頁 0.5～3.7 秒，內容與 MCP 相同。tavily 免金鑰原本回 401，是原型漏帶 header；官方 docs.tavily.com/documentation/keyless：「Send a request with the X-Tavily-Access-Mode: keyless header」，安裝器本來就有帶。tavily 免金鑰額度用完時回 200＋`daily_cap_reached`（不是錯誤碼），腳本以內容判斷。
+- **伺服器清單唯一來源不變**：安裝器 `web.desired_servers()` 同步 MCP 時另寫 `<CLAUDE_HOME>/claude-dev-system/config/websearch-servers.json`（含金鑰，跟 local.json 一樣只在本機）；聯網來源關閉或解除安裝時刪除。
+- 下一步（未做）：用同一組查資料題比較 MCP 與腳本的品質與 token，沒變差再拿掉搜尋類 MCP、改寫 web-quick.md 的工具選擇。
+- 測試：`tests/test_websearch.py` 12 項（換家順序、限流與額度用完、SSE 解析、存檔截斷、安裝器清單往返）。
+
 ## 0.28.1（2026-11-25）
 
 使用者：「先做『小修只驗證一次』『用 medium 重跑評測』這兩個就好了」。

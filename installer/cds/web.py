@@ -177,6 +177,25 @@ def _same(have: dict | None, want: dict, defer: bool = False) -> bool:
     return (have.get("alwaysLoad") is False) if defer else True
 
 
+def registry_path(lay: Layout) -> Path:
+    """tools/websearch.py 讀的伺服器清單（0.29.0）。含金鑰，跟 local.json 一樣只在本機、不進 repo。"""
+    return lay.home / "claude-dev-system" / "config" / "websearch-servers.json"
+
+
+def write_registry(lay: Layout, want: dict[str, dict]) -> None:
+    """把 desired_servers() 的結果寫給 tools/websearch.py（唯一來源仍是 desired_servers，腳本不自己組網址與金鑰）。
+    want 為空（聯網來源關閉）就刪檔。"""
+    p = registry_path(lay)
+    if not want:
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
+        return
+    write_json(p, {"_comment": "claude-dev-system 自動產生（install.py web／update）；tools/websearch.py 讀。含金鑰，勿分享、勿進 repo。",
+                   "servers": {n: {"url": s["url"], "headers": dict(s.get("headers") or {})} for n, s in sorted(want.items())}})
+
+
 def sync_mcp(lay: Layout, old: dict, runner=default_runner, log: list | None = None, defer: bool | None = None) -> dict:
     """把 user scope 的 MCP 對齊 desired：只動本工具加過的名稱；使用者自己同名的略過；關掉的移除。
     defer＝註冊成工具延後載入（None：真的呼叫 claude 時依版本自動判斷；測試用的假 runner 預設不開）。"""
@@ -185,6 +204,7 @@ def sync_mcp(lay: Layout, old: dict, runner=default_runner, log: list | None = N
         defer = runner is default_runner and defer_supported()
     src, local = sources(lay), load_local(lay)
     want, have = desired_servers(src, local), installed_servers(lay)
+    write_registry(lay, want)
     mine = set(old.get("mcpAdded", []))
     rec = {"mcpAdded": [], "skipped": []}
     for name, spec in want.items():
@@ -234,6 +254,7 @@ def remove_mcp(lay: Layout, old: dict, runner=default_runner, log: list | None =
         local = load_local(lay)
     except ValueError:
         local = {}  # 只用來遮罩；偏好檔壞掉不該擋住移除
+    write_registry(lay, {})
     failed: list[str] = []
     for name in old.get("mcpAdded", []):
         if name not in have:
