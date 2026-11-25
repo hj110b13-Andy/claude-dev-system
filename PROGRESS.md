@@ -1,5 +1,13 @@
 # claude-dev-system 交接紀錄
 
+## 2026-11-25：搜尋類 MCP 改「用到才呼叫」的可行性（使用者：「擋掉搜尋類 MCP這部分，有辦法不要看專案擋掉，而是要用到搜尋類時再呼叫嗎?」→「你查證可行性」）
+
+- 原型：scratchpad/websearch-proto/mcpcall.py（只用標準庫的 MCP Streamable HTTP 客戶端：initialize → initialized → tools/list／tools/call，JSON 與 SSE 都解）。
+- 實測 12 個本系統註冊的伺服器：11 個直接可用——parallel、exa、firecrawl（免金鑰）與 parallel-key、exa-key、tavily-key、firecrawl-key（金鑰從 ~/.claude.json 的 url／headers 帶），搜尋 0.7～2.7 秒、抓整頁 0.5～3.7 秒，結果含正確內容；context7、deepwiki、mslearn 也可用。
+- 唯一不行：tavily 免金鑰版回 HTTP 401（推測要 Claude Code 代辦的 OAuth，腳本拿不到，未查證）。
+- 注意：firecrawl_scrape／tavily_extract 一頁回 21～30 萬字，腳本要存檔、只印摘要（現在經 MCP 會整包進 context，換成腳本反而能省）。
+- 待使用者決定是否實作（見回覆的方案）。
+
 ## 2026-11-25：省 token 試設驗證（使用者選「先驗證再決定」；5 小時用量 97% 收尾，還沒做成功能）
 
 - 試設：scratchpad/overhead/trial/.claude/settings.local.json＝deniedMcpServers 擋 exa、tavily、parallel、firecrawl（含 -key，8 個）＋skillOverrides 把 claude.ai sync 的 13 個 skill 設 "name-only"。依據：settings-reference「deniedMcpServers … Entries from every file merge into one denylist」、skillOverrides「name-only: Claude sees the skill by name without its description」。
