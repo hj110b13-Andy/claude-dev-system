@@ -21,6 +21,9 @@ video 子命令：不帶參數＝啟用（pip 安裝並登記）；--off 取消�
 gui 子命令：開設定視窗（同 `python installer/gui.py`）：所有開關、金鑰、門檻在視窗裡改，按套用才生效
 selftest 子命令：用全新無頭 claude -p 重跑 config/selftest.json 的全部題目（題數以 --list 為準），比對實際呼叫的工具（--list 列題目、--only 題號 只跑幾題、
   --report-dir 路徑 存每題呼叫清單、--dry-run 只印指令不跑、--smoke 快測三題）；每題印 token 用量，並檢查回答有沒有來源與網址；每題約一場短對話的用量、全部約 20～40 分鐘，只手動跑
+coding-eval 子命令：config/coding-eval.json 的寫程式題，在「裝了本系統」（with）與「沒裝」（without＝claude --safe-mode）各跑一次無頭 claude -p，
+  跑完放隱藏測試判定，記錄 token、耗時、工具次數、有沒有自己跑測試（--list、--dry-run、--only 題號、--condition with|without|both、
+  --report-dir 存 JSON、--work-dir 保留每場的工作目錄）；每場一次寫程式對話的用量，只手動跑；樣本小，只比成本與耗時
 結束碼：0 成功／全部通過；1 check 或 verify 有 ❌，或 install／update／web／video／uninstall 做完但有項目失敗（輸出有 ❌）；
   2 用法或狀態錯誤（尚未安裝、已安裝、參數格式錯、settings.json／CLAUDE.md／local.json 讀不懂、另一個安裝程序正在執行）。
 """
@@ -47,7 +50,7 @@ def main(argv=None) -> int:
         return 2
     ap = argparse.ArgumentParser(description="claude-dev-system 安裝器")
     ap.add_argument("--claude-home")
-    ap.add_argument("cmd", choices=["check", "install", "verify", "update", "uninstall", "status", "web", "video", "gui", "selftest"])
+    ap.add_argument("cmd", choices=["check", "install", "verify", "update", "uninstall", "status", "web", "video", "gui", "selftest", "coding-eval"])
     ap.add_argument("--python", default=Path(sys.executable).as_posix())
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--restore-backup", action="store_true")
@@ -68,6 +71,8 @@ def main(argv=None) -> int:
     ap.add_argument("--report-dir", help="selftest：把每題的工具呼叫清單與回答存成 JSON 的資料夾")
     ap.add_argument("--dry-run", action="store_true", help="selftest：只印每題會執行的指令，不跑（零用量）")
     ap.add_argument("--smoke", action="store_true", help="selftest：只跑 selftest.json 的 smoke 三題（約 10 分鐘）")
+    ap.add_argument("--condition", choices=["with", "without", "both"], default="both", help="coding-eval：跑哪個條件（without＝claude --safe-mode）")
+    ap.add_argument("--work-dir", help="coding-eval：每場的工作目錄放這裡並保留（預設用暫存資料夾、跑完刪）")
     a = ap.parse_args(argv)
     lay = Layout(claude_home(a.claude_home))
     if a.cmd == "gui":
@@ -76,6 +81,10 @@ def main(argv=None) -> int:
     if a.cmd == "selftest":
         from cds import selftest  # noqa: PLC0415
         return selftest.run(only=a.only or None, list_only=a.list, report_dir=Path(a.report_dir) if a.report_dir else None, dry_run=a.dry_run, smoke=a.smoke)
+    if a.cmd == "coding-eval":
+        from cds import codingeval  # noqa: PLC0415
+        return codingeval.run(only=a.only or None, list_only=a.list, dry_run=a.dry_run, condition=a.condition,
+                              report_dir=Path(a.report_dir) if a.report_dir else None, work_dir=Path(a.work_dir) if a.work_dir else None)
     if a.cmd == "check":
         rows = env_report(lay.home)
         for name, ok, msg in rows:

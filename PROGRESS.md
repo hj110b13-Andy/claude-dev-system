@@ -6,6 +6,7 @@
 - main 已做（未 commit）：core.md 加「語言」「依改動大小分級」、先找現成做法限中改以上；web-sources.md 第 7 節改精簡格式（原條文移成「使用者要求才展開」）；web-quick／core-detail／workflow 同步；hook 新增驗證守門 verify_guard（專案 verifyGate.command）、查證／建議守門訊息改新格式、派工補充加思考語言；settings_ops.HOOK_TIMEOUTS Stop=180 秒；`install.py web --language`（commands.set_language，解除安裝只移除本工具寫的值）；selftest.json 拿掉「查證過程」期望；tests/test_v028.py 13 項。
 - 派出 agent（opus／high）：建 `install.py coding-eval`（config/coding-eval.json、installer/cds/codingeval.py、tests/test_codingeval.py）並實跑 5 題 × 2 條件；不 commit，由 main 核對後 commit。
 - 第 4、5 項（使用者「好」）：core.md 六條縮短、原文逐字進 core-detail.md（progress-diff 0 句遺失，12,931→11,550 位元組）；hook 所有輸出走 `_emit` 並記 state/rule-hits.log，新工具 tools/rule-stats.py。教訓：Bash 工具的 heredoc 會把 `\n` 變成真的換行，含跳脫字元的程式碼改用 Edit 或 chr()。
+- 第 1 項完成：agent 報告核對過（重算原始 JSON：token 1,519,961 對 768,444＝1.98 倍、秒數 300 對 232、隱藏測試 5/5 對 5/5，與報告一致；`claude --help` 確有 --safe-mode）。下一步候選：with 條件每場多 2～3 萬 token 的固定開銷，推測主要是 13 個 MCP 伺服器的工具定義（with 99～109 個工具、without 31 個）＋skill 清單，未拆開量；selftest 也改用 clean_env()。
 - 還沒做：設定視窗（gui）沒有語言選項，只有指令；VERSION／CHANGELOG／README、update＋verify、push、tag、Release 等 agent 回來一起做。
 - 決策：2026-11-25｜分級門檻（1 檔／30 行、2～5 檔、>5 檔）先用自己定的值｜沒有現成研究給門檻｜官方只說超過「a couple of files」先用 plan mode（support.claude.com 14553240），待 coding-eval 校正。
 - 決策：2026-11-25｜思考語言只能靠規則｜官方 language 鍵只管回覆｜settings-reference「instruction to always respond in that language」，沒有控制思考的設定。

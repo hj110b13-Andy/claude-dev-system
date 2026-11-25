@@ -13,12 +13,15 @@
 - **語言**：core.md 新增「思考、回覆、agent 報告、commit 訊息一律繁體中文」；`install.py web --language 繁體中文` 寫入 `settings.json` 的官方 `language` 鍵（`--language off` 或解除安裝只移除本工具寫的、沒被改過的值）。思考語言沒有官方設定，只能靠規則。派工補充也帶上思考語言與「意思：」格式。
 - **core.md 精簡（第 4 項）**：上網查資料、影片、背景任務巡檢、教操作、專案自動化、工具後提醒六條縮成「觸發條件＋必做一步＋細則在哪」，瘦身前的短版原文逐字搬到 `core-detail.md` 各章（新增〈影片〉〈工具後提醒（hook）〉兩章）。`progress-diff.py` 比對兩次：108 句、100 句全部找得到、0 句遺失。core.md 12,931 → 11,550 位元組（0.27.0 是 11,574，這版多了「語言」「分級」兩條仍比較小）。省 token 不是目的（0.10.x 實測差異在雜訊內），目的是讓常駐規則少一點、每條更常被照做。
 - **規則觸發統計（第 5 項，新工具 `tools/rule-stats.py`）**：hook 所有輸出改走同一個 `_emit`，順便把輸出裡的每個標籤附加一行到 `state/rule-hits.log`（時間、事件、標籤、是否退回；超過 1 MB 改名 `.1`）。`rule-stats.py [--days N] [--json]` 對照 `workflow.md` 標籤表，列出每個提醒的觸發／退回次數與最後一次、紀錄期間內沒觸發過的。只列清單，要刪哪條由使用者決定。從這版才開始記，要累積幾週再看。
+- **寫程式對照評測（第 1 項，新子命令 `install.py coding-eval`）**：`config/coding-eval.json` 5 題（bugfix、shared-fn、refactor、feature、tiny；共用一個小型 Python 專案＋隱藏測試），`installer/cds/codingeval.py` 沿用 selftest 的執行與解析函式。「沒裝」的對照組用官方 `claude --safe-mode`（cli-reference：CLAUDE.md、skills、hooks、MCP 都不載入，登入與內建工具照常），兩條件固定 `--model opus --effort high`、同一組 allowedTools。只在 repo 裡跑（題目檔沒進安裝 payload）。
+  - **2026-11-25 第一輪結果（每題每條件 1 次）**：隱藏測試 5/5 對 5/5；token 合計 1,519,961 對 768,444（1.98 倍）、秒數 300 對 232（1.29 倍）；最小的 tiny 題 33 秒對 11 秒。多出來的幾乎是輸入端固定開銷（每場快取建 27k～37k 對 7k～17k），輸出 token 差不多（23,786 對 20,771）。樣本太小，不能拿來判斷品質（REALM 2026：288 次仍偵測不到 30pp 以內的差異）。
+  - 已知：`selftest.default_runner` 會把外層 session 的 `CLAUDE_*` 變數傳給子程序（coding-eval 已用 `clean_env()` 拿掉，selftest 沒改）。
 - 設定視窗還沒有語言選項（只有指令）。
 
 **其他**
 - `config/selftest.json`：拿掉 5 題對「查證過程」的期望（精簡格式不再固定寫）。
 - 修：0.28.0 開發中的測試把 log 寫進真實 `~/.claude/state`（verify-gate.log、source-guard.log 多了 4 行「台北 101」）；測試改寫暫存資料夾，已清掉那些行。
-- 測試：`tests/test_v028.py` 16 項（驗證守門 7、Stop 時限 1、退回訊息 2、語言 3、觸發紀錄 3）；`rules/workflow.md` 標籤表與 hook docstring 加【驗證守門（hook）】（`test_docs_consistency`、`test_hooks_audit` 會抓）。
+- 測試：`tests/test_codingeval.py` 18 項；`tests/test_v028.py` 16 項（驗證守門 7、Stop 時限 1、退回訊息 2、語言 3、觸發紀錄 3）；`rules/workflow.md` 標籤表與 hook docstring 加【驗證守門（hook）】（`test_docs_consistency`、`test_hooks_audit` 會抓）。
 
 ## 0.27.0（2026-11-12，視窗會自動換 exe）
 

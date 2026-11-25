@@ -140,10 +140,11 @@ def prune_reports(report_dir: Path, keep: int = 10) -> int:
     return max(0, len(files) - keep)
 
 
-def default_runner(cmd: list[str], cwd: str, timeout: int) -> tuple[int, str, str]:
+def default_runner(cmd: list[str], cwd: str, timeout: int, env: dict | None = None) -> tuple[int, str, str]:
+    """env 給了就用它當基底（coding-eval 用來拿掉外層 session 的 CLAUDE_* 變數）；沒給＝目前的環境變數。"""
     try:
         r = subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=timeout,
-                           env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
+                           env={**(os.environ if env is None else env), "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
     except subprocess.TimeoutExpired as e:
         out = e.stdout or b""
         return 124, (out.decode("utf-8", "replace") if isinstance(out, bytes) else str(out)), f"{timeout} 秒內沒跑完"
