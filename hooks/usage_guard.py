@@ -2201,6 +2201,40 @@ def current_pct(s, pct_key, reset_key, now=None):
     return None if last_failed else v
 
 
+# 0.28.0 規則觸發紀錄（使用者 2026-11-25 同意「定期刪掉沒觸發過、或從來沒被照做的規則」）：每次 hook 輸出就把裡面的全形方括號標籤
+# 各附加一行到 state/rule-hits.log（時間、事件、標籤、是否退回），由 tools/rule-stats.py 統計。用附加寫入而不是讀改寫計數器：
+# 多個 hook 程序同時跑時不會互相蓋掉。超過 RH_MAX_BYTES 就把舊檔改名成 .1（只留一份），rule-stats.py 兩份都讀。
+RH_TAG = re.compile("\u3010[^\u3011\\n]{2,20}\u3011")  # 全形方括號標籤；用跳脫寫，免得 test_docs_consistency 把這行當成標籤
+RH_MAX_BYTES = 1 << 20  # 自己定的：約 1 萬行，夠看幾個月
+
+
+def _rule_hits(obj, event):
+    try:
+        text = json.dumps(obj, ensure_ascii=False)
+        tags = sorted(set(RH_TAG.findall(text)))
+        if not tags:
+            return
+        blocked = "block" if (obj.get("decision") == "block" or '"permissionDecision": "deny"' in text) else "-"
+        path = os.path.join(STATE_DIR, "rule-hits.log")
+        os.makedirs(STATE_DIR, exist_ok=True)
+        try:
+            if os.path.getsize(path) > RH_MAX_BYTES:
+                os.replace(path, path + ".1")
+        except OSError:
+            pass
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("".join(f"{now}\t{event or '-'}\t{tg}\t{blocked}\n" for tg in tags))
+    except Exception:
+        pass
+
+
+def _emit(obj, event):
+    """唯一的 hook 輸出點：先印（ASCII 跳脫，Windows 主控台 cp950 會讓 UTF-8 中文變亂碼），再記觸發紀錄（失敗不影響輸出）。"""
+    print(json.dumps(obj, ensure_ascii=True), flush=True)
+    _rule_hits(obj, event)
+
+
 def main():
     printing = "--print" in sys.argv
     event = ""
@@ -2215,23 +2249,23 @@ def main():
         patrol_sync(payload)
         out = verify_guard(payload) or source_guard(payload)
         if out:
-            print(json.dumps(out, ensure_ascii=True))
+            _emit(out, event)
         return
     if event == "PreToolUse":  # 0.22.0：只註冊在 SubagentHandback（agent 交報告）
         if payload.get("tool_name") == "SubagentHandback":
             out = subagent_report_guard(payload)
             if out:
-                print(json.dumps(out, ensure_ascii=True))
+                _emit(out, event)
         return
     if event == "SubagentStop":  # 0.22.0 後備：沒走 SubagentHandback 的 agent
         out = subagent_stop_guard(payload)
         if out:
-            print(json.dumps(out, ensure_ascii=True))
+            _emit(out, event)
         return
     if event == "SubagentStart":  # 0.21.0：把不會自動傳給 agent 的東西補進去
         msg = subagent_brief(payload)
         if msg:
-            print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": msg}}, ensure_ascii=True))
+            _emit({"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": msg}}, event)
         return
     if event == "SessionStart":  # 0.12.0：壓縮或接續後重新開工；新對話（startup）由 UserPromptSubmit 的專案自動化處理
         if payload.get("source") == "compact":
@@ -2243,7 +2277,7 @@ def main():
         if payload.get("source") in ("compact", "resume"):
             msg = compact_msg(payload.get("cwd"), payload.get("session_id"))
             if msg:
-                print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": msg}}, ensure_ascii=True))
+                _emit({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": msg}}, event)
         return
     hook_cwd = None
     if not printing:
@@ -2327,7 +2361,7 @@ def main():
     if not msgs:
         return
     out = {"hookSpecificOutput": {"hookEventName": event or "UserPromptSubmit", "additionalContext": "\n".join(msgs)}}
-    print(json.dumps(out, ensure_ascii=True), flush=True)  # Windows 主控台 cp950 會讓 UTF-8 中文變亂碼，ASCII 跳脫最安全
+    _emit(out, event or "UserPromptSubmit")
     # 健檢 HK-02：先輸出再存狀態——存檔失敗（Windows 上 usage.json 被別的 hook 開著）原本丟例外，整則提醒跟著消失
     save_state(s)
 

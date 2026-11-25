@@ -20,6 +20,13 @@ from cds import commands, settings_ops, web  # noqa: E402
 from cds.paths import Layout  # noqa: E402
 
 
+def isolate_state(tc, tmp):
+    """hook 的狀態檔（log）寫到暫存資料夾，不寫進真實 ~/.claude/state。"""
+    saved = ug.STATE_DIR
+    ug.STATE_DIR = str(tmp / "state")
+    tc.addCleanup(setattr, ug, "STATE_DIR", saved)
+
+
 def write_transcript(path: Path, entries):
     path.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in entries) + "\n", encoding="utf-8")
 
@@ -41,6 +48,7 @@ class VerifyGate(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="cds-vg-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
+        isolate_state(self, self.tmp)
         (self.tmp / ".claude").mkdir()
         self.tr = self.tmp / "t.jsonl"
         self.calls = []
@@ -120,6 +128,7 @@ class SourceFormatText(unittest.TestCase):
     def test_block_reason_asks_inline_link_not_sections(self):
         tmp = Path(tempfile.mkdtemp(prefix="cds-sg-"))
         self.addCleanup(shutil.rmtree, tmp, True)
+        isolate_state(self, tmp)
         tr = tmp / "t.jsonl"
         write_transcript(tr, [user("台北 101 有多高？"), say("台北 101 高 508 公尺，2004 年完工。" * 15)])
         out = ug.source_guard({"transcript_path": str(tr)})
@@ -161,6 +170,52 @@ class Language(unittest.TestCase):
         self.assertEqual((s, rm), ({"x": 1}, ["設定 language"]))
         s, rm = commands._drop_own_language(self.lay, {"language": "english"})
         self.assertEqual(rm, [])
+
+
+rs_spec = importlib.util.spec_from_file_location("rule_stats", REPO / "tools" / "rule-stats.py")
+rs = importlib.util.module_from_spec(rs_spec)
+rs_spec.loader.exec_module(rs)  # type: ignore[union-attr]
+
+
+class RuleHits(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="cds-rh-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        isolate_state(self, self.tmp)
+
+    def test_emit_logs_each_tag_and_block(self):
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ug._emit({"decision": "block", "reason": "【驗證守門（hook）】失敗"}, "Stop")
+            ug._emit({"hookSpecificOutput": {"additionalContext": "【用量守門（自動）】a\n【殘留程序（hook）】b"}}, "UserPromptSubmit")
+            ug._emit({"hookSpecificOutput": {"additionalContext": "沒有標籤"}}, "PostToolUse")
+        self.assertEqual(len(buf.getvalue().strip().splitlines()), 3)  # 三則都照常輸出
+        lines = (self.tmp / "state" / "rule-hits.log").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 3)
+        self.assertTrue(lines[0].endswith("\tStop\t【驗證守門（hook）】\tblock"))
+        rows = rs.read_hits(self.tmp / "state")
+        res = {r["tag"]: r for r in rs.summarize(rows, ["【驗證守門（hook）】", "【磁碟清理（hook）】"])}
+        self.assertEqual((res["【驗證守門（hook）】"]["count"], res["【驗證守門（hook）】"]["blocked"]), (1, 1))
+        self.assertEqual(res["【磁碟清理（hook）】"]["count"], 0)
+        self.assertFalse(res["【殘留程序（hook）】"]["inTable"])
+
+    def test_known_tags_match_workflow_table(self):
+        tags = rs.known_tags(REPO / "rules" / "workflow.md")
+        for t in ("【驗證守門（hook）】", "【查證守門（hook）】", "【用量守門（自動）】"):
+            self.assertIn(t, tags)
+
+    def test_rotation_keeps_both_files_readable(self):
+        st = self.tmp / "state"
+        st.mkdir()
+        (st / "rule-hits.log").write_text("2026-11-01T00:00:00\tStop\t【查證守門（hook）】\tblock\n" + "x" * (ug.RH_MAX_BYTES + 10), encoding="utf-8")
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()):
+            ug._emit({"decision": "block", "reason": "【查證守門（hook）】"}, "Stop")
+        self.assertTrue((st / "rule-hits.log.1").exists())
+        self.assertEqual(sum(1 for r in rs.read_hits(st) if r[2] == "【查證守門（hook）】"), 2)
 
 
 if __name__ == "__main__":
