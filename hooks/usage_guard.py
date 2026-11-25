@@ -4,14 +4,14 @@
 - UserPromptSubmit：用量守門、專案自動化、全域系統對照、專案健康檢查、殘留程序、延後工作、磁碟清理、看板逾時。
 - PostToolUse：用量守門（每 alertRepeat 秒最多一次）、殘留程序、工具後提醒（改到安裝副本、背景任務巡檢、波及範圍、共用工作目錄）、
   agent 裡的語言提醒、看板逾時。
-- Stop（0.11.8 起）：巡檢排程校正（patrol_sync）＋查證守門／建議守門（source_guard），不查用量。
+- Stop（0.11.8 起）：巡檢排程校正（patrol_sync）＋驗證守門（verify_guard，0.28.0）＋查證守門／建議守門（source_guard），不查用量。
 - SessionStart（0.12.0 起）：壓縮／接續後重新開工（compact_msg，含健康檢查、專案自動化、建議開新對話）；agent 自己的壓縮不注入。
 - SubagentStart（0.21.0 起）：派工補充（subagent_brief）。
 - PreToolUse(SubagentHandback)（0.22.0 起）：報告守門（subagent_report_guard）。
 - SubagentStop（0.22.0 起）：報告守門後備（subagent_stop_guard）。
 會注入的標籤：【用量守門（自動）】【專案自動化（hook）】【全域系統對照（hook）】【專案健康檢查（hook）】【殘留程序（hook）】【延後工作（hook）】
 【磁碟清理（hook）】【看板逾時提醒（自動）】【改到安裝副本（hook）】【背景任務巡檢（hook）】【波及範圍（hook）】【共用工作目錄（hook）】
-【語言（hook）】【查證守門（hook）】【建議守門（hook）】【壓縮後重新開工（hook）】【建議開新對話（hook）】【派工補充（hook）】【報告守門（hook）】。
+【語言（hook）】【驗證守門（hook）】【查證守門（hook）】【建議守門（hook）】【壓縮後重新開工（hook）】【建議開新對話（hook）】【派工補充（hook）】【報告守門（hook）】。
 狀態檔都在 <CLAUDE_HOME>/state，JSON 狀態一律經 _atomic_write_json／_save_json_state 寫（鎖＋合併＋原子替換，健檢 HK-01／HK-02）。
 
 用量守門：
@@ -1746,7 +1746,7 @@ def source_guard(payload):
             pass
         return {"decision": "block",
                 "reason": "【建議守門（hook）】這則回覆" + reco + "，但沒有逐項標明「已查證（附來源）／未查證」（core.md「先找現成做法」）。"
-                          "請把每一項建議、方法、方向標上：已查證＝附網址與原句短引；未查證＝標「未查證」並先上網補查，查不到就刪掉或明說查不到。"
+                          "請把每一項建議、方法、方向標上：〔已查證〕＝附行內連結（引原文就加「意思：」中文整理）；〔未查證〕＝先上網補查，查不到就刪掉或明說查不到。"
                           "不可把憑印象的做法當成已確認。只補這一次，之後不會再退回。"}
     why = sg_judge(prompt, answer)
     if not why:
@@ -1758,9 +1758,125 @@ def source_guard(payload):
     except Exception:
         pass
     return {"decision": "block",
-            "reason": "【查證守門（hook）】這則回覆" + why + "，但沒有「來源」段。請補上：每個關鍵年份／數字旁附網址、資料日期、來源原句逐字短引；"
-                      "查不到的標〔未附來源〕或刪掉沒把握的數字；自己的推論另立「我的補充／推測」段；末尾固定「來源」與「查證過程」（最多 3 行）。"
+            "reason": "【查證守門（hook）】這則回覆" + why + "，但沒有附來源。請照精簡格式補（web-sources.md 第 7 節）：每個關鍵年份／數字旁附行內連結「（[來源](網址)）」；"
+                      "引用原文時原文短引後緊接「意思：」加繁體中文整理；查不到的標〔未附來源〕或刪掉沒把握的數字；推論在句尾標「（推測）」。"
+                      "不用另寫「來源」「查證過程」「我的補充／推測」段（使用者要求時才列）。"
                       "若這些數字不是事實宣稱（例如純概念舉例、你自己算的），在回覆末尾加一行「〔不含待查證事實〕」即可，不必重寫。只補這一次，之後不會再退回。"}
+
+
+# 0.28.0 驗證守門（Stop）。使用者 2026-11-25 同意「把『完成前要跑測試』從規則改成 hook」：官方 best-practices 把
+# 「Tests, typecheck, a Stop hook, CI」列為確定性的「完成了沒」判斷（code.claude.com/docs/en/best-practices）。
+# 只在專案 .claude/dispatch-config.json 設了 verifyGate.command 才跑；這一輪用 Edit／Write／NotebookEdit 改到程式檔才跑；
+# 失敗退回一次（stop_hook_active 時不再擋），逾時或記憶體不足不擋（只記 log）。偵測不到用 Bash（sed、heredoc）改的檔，已知限制。
+VG_EDIT_TOOLS = {"Edit", "Write", "NotebookEdit", "MultiEdit"}
+VG_DEFAULT_TIMEOUT = 120
+VG_MAX_TIMEOUT = 170  # 自己定的：Stop hook 註冊時限 180 秒（settings_ops.HOOK_TIMEOUTS）留 10 秒給其餘判斷
+VG_TAIL_LINES = 30
+
+
+def vg_cfg(cwd):
+    """專案層 verifyGate：{"command": str, "timeoutSec": 數字}；沒設 command 回 None。全域設定不讀（驗證指令一定是專案自己的）。"""
+    path = find_project_config(cwd)
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            g = (json.load(f) or {}).get("verifyGate") or {}
+    except Exception:
+        return None
+    cmd = g.get("command")
+    if not isinstance(cmd, str) or not cmd.strip() or g.get("enabled") is False:
+        return None
+    to = g.get("timeoutSec")
+    to = to if isinstance(to, (int, float)) and not isinstance(to, bool) and to > 0 else VG_DEFAULT_TIMEOUT
+    return {"command": cmd.strip(), "timeoutSec": min(float(to), VG_MAX_TIMEOUT), "project": os.path.dirname(os.path.dirname(path))}
+
+
+def vg_edited_code(transcript_path):
+    """這一輪（最後一則使用者訊息之後）主對話用編輯工具改到的程式檔路徑。讀不到回 []。"""
+    files = []
+
+    def stop(c):
+        return c[0] == "user" and c[1] is not None and bool(c[1].strip())
+    try:
+        it = _rev_lines(transcript_path)
+        try:
+            for raw in it:
+                line = raw.decode("utf-8", errors="replace")
+                c = _sg_line(line)
+                if c and stop(c):
+                    break
+                if '"tool_use"' not in line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                if d.get("type") != "assistant" or d.get("isSidechain"):
+                    continue
+                for b in (d.get("message") or {}).get("content") or []:
+                    if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") in VG_EDIT_TOOLS:
+                        inp = b.get("input") or {}
+                        fp = str(inp.get("file_path") or inp.get("notebook_path") or "")
+                        if SUB_CODE_PATH.search(fp) or fp.endswith(".ipynb"):
+                            files.append(fp)
+        finally:
+            it.close()
+    except Exception:
+        return []
+    return files
+
+
+def _vg_log(msg):
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(os.path.join(STATE_DIR, "verify-gate.log"), "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {msg}" + chr(10))
+    except Exception:
+        pass
+
+
+def verify_guard(payload, runner=None):
+    """回 Stop 的 block dict 或 None。runner(cmd, cwd, timeout) → (returncode, 輸出文字)，測試可替換。"""
+    if payload.get("stop_hook_active"):
+        return None
+    cwd = payload.get("cwd") or os.getcwd()
+    cfg = vg_cfg(cwd)
+    if not cfg:
+        return None
+    if any(isinstance(x, dict) and x.get("type") in SG_WAIT_TYPES for x in payload.get("background_tasks") or []):
+        return None  # 還有 agent／workflow 在跑：中途進度，不是收尾
+    edited = vg_edited_code(payload.get("transcript_path") or "")
+    if not edited:
+        return None
+    try:
+        ok, free, need = _tool_mod("resgate").enough()
+    except Exception:
+        ok, free, need = True, None, None
+    if not ok:
+        _vg_log(f"skip 記憶體不足 {free}/{need} GB｜{cfg['command']}")
+        return None
+    run = runner or _vg_run
+    try:
+        code, out = run(cfg["command"], cfg["project"], cfg["timeoutSec"])
+    except Exception as e:  # 逾時或跑不起來：不擋，只記
+        _vg_log(f"skip {type(e).__name__}｜{cfg['command']}")
+        return None
+    _vg_log(f"exit {code}｜{len(edited)} 檔｜{cfg['command']}")
+    if code == 0:
+        return None
+    tail = chr(10).join((out or "").strip().splitlines()[-VG_TAIL_LINES:])
+    return {"decision": "block",
+            "reason": "【驗證守門（hook）】這一輪改了 " + str(len(edited)) + " 個程式檔，專案的驗證指令 `" + cfg["command"] + "` 失敗（exit "
+                      + str(code) + "）。請修好再結束；如果失敗是改動前就有的（舊有失敗），回覆裡寫明是哪幾項、怎麼確認是舊的，不用硬修。"
+                      "輸出最後幾行：" + chr(10) + tail + chr(10) + "只退回這一次。"}
+
+
+def _vg_run(cmd, cwd, timeout):
+    import subprocess
+    r = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, timeout=timeout,
+                       env={**os.environ, "PYTHONUTF8": "1"}, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return r.returncode, (r.stdout or b"").decode("utf-8", "replace") + (r.stderr or b"").decode("utf-8", "replace")
 
 
 # 0.21.0 派工補充（SubagentStart）。使用者 2026-11-11：「它派出去的agent常常都不會遵守該專案裡的規則與長期記憶等等，還有連全域優化系統的規則
@@ -1813,7 +1929,8 @@ def subagent_brief(payload):
     out = ["【派工補充（hook）】你是被派出的 agent。下面幾件事主對話有、但不會自動傳給你："]
     lang = _settings_language()
     if lang:
-        out.append(f"- 語言：使用者的回覆語言設定是「{lang}」。中途文字與最終報告都用這個語言，寫法與全域 CLAUDE.md 相同（它是繁體中文就用繁體中文）。")
+        out.append(f"- 語言：使用者的回覆語言設定是「{lang}」。思考、中途文字與最終報告都用這個語言，寫法與全域 CLAUDE.md 相同（它是繁體中文就用繁體中文）；"
+                   "程式碼、指令、識別字保留原文；引用外文原文時緊接「意思：」加中文整理。")
     if payload.get("agent_type") in SUB_LIGHT_TYPES:
         return chr(10).join(out) if len(out) > 1 else None
     br = _git_branch(cwd)
@@ -2096,7 +2213,7 @@ def main():
             event = ""
     if event == "Stop":  # 查證守門：只看回覆，不查用量
         patrol_sync(payload)
-        out = source_guard(payload)
+        out = verify_guard(payload) or source_guard(payload)
         if out:
             print(json.dumps(out, ensure_ascii=True))
         return

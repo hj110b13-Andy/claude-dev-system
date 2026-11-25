@@ -512,6 +512,50 @@ def _restore_pre_install(lay: Layout, m: dict, log: list) -> None:
         log.append(f"已用安裝前備份還原 settings.json：{src}")
 
 
+LANG_LOCAL_KEY = "languageSet"  # local.json 記「本工具替使用者寫進 settings.json 的 language 值」，解除安裝只移除仍是這個值的
+
+
+def _drop_own_language(lay: Layout, s: dict) -> tuple:
+    """settings.json 的 language 仍是本工具寫的值就移除；使用者自己改過的不動。"""
+    try:
+        own = web.load_local(lay).get(LANG_LOCAL_KEY)
+    except ValueError:
+        return s, []
+    if own and isinstance(s, dict) and s.get("language") == own:
+        s = {k: v for k, v in s.items() if k != "language"}
+        return s, ["設定 language"]
+    return s, []
+
+
+@_locked
+def set_language(lay: Layout, value: str) -> tuple:
+    """`install.py web --language <語言>`（0.28.0）：寫 settings.json 的 language（官方鍵：回覆語言，原樣傳給模型）。
+    `--language off` 只移除本工具寫過、而且沒被改過的值。使用者 2026-11-25：「無論思考、回覆都統一要繁體中文」。"""
+    log: list = []
+    value = (value or "").strip()
+    local = web.load_local(lay)
+    s = read_json(lay.settings) if lay.settings.exists() else {}
+    if not isinstance(s, dict):
+        return 2, [f"{lay.settings} 不是 JSON 物件，不動它"]
+    if value.lower() in ("off", "none", ""):
+        s2, rm = _drop_own_language(lay, s)
+        if not rm:
+            return 0, [f"settings.json 的 language（{s.get('language')!r}）不是本工具寫的，不動它"]
+        backup(lay, log)
+        write_json(lay.settings, s2)
+        local.pop(LANG_LOCAL_KEY, None)
+        web.save_local(lay, local)
+        return 0, log + ["已移除 settings.json 的 language"]
+    if s.get("language") == value:
+        return 0, [f"settings.json 的 language 已是「{value}」，不用改"]
+    backup(lay, log)
+    s["language"] = value
+    write_json(lay.settings, s)
+    local[LANG_LOCAL_KEY] = value
+    web.save_local(lay, local)
+    return 0, log + [f"已把 settings.json 的 language 設為「{value}」（重開 Claude Code 對話後生效；思考語言沒有官方設定可控制，靠規則）"]
+
+
 @_locked
 def uninstall(lay: Layout, force: bool = False, restore_backup: bool = False, runner=web.default_runner) -> tuple:
     log: list = []
@@ -528,6 +572,8 @@ def uninstall(lay: Layout, force: bool = False, restore_backup: bool = False, ru
         s2, removed = settings_ops.remove_marked(s, m["settings"].get("createdKeys"))
         s2, env_removed = web.remove_env(s2, (m.get("web") or {}).get("envCreatedKeys"))
         removed += [f"env {k}" for k in env_removed]
+        s2, lang_removed = _drop_own_language(lay, s2)
+        removed += lang_removed
         if removed:
             first = pre_install_backup(m)
             if m["settings"].get("createdFile") and s2 == {}:
@@ -538,7 +584,7 @@ def uninstall(lay: Layout, force: bool = False, restore_backup: bool = False, ru
                 log.append("移除後內容與安裝前備份逐鍵相等，已還原原檔（含原排版）")
             else:
                 write_json(lay.settings, s2)
-            log.extend(f"移除 {'' if r.startswith('env ') else 'hook '}{r}" for r in removed)
+            log.extend(f"移除 {'' if r.startswith(('env ', '設定 ')) else 'hook '}{r}" for r in removed)
         else:
             log.append("settings.json 沒有本工具的條目（未寫入）")
     if web.local_path(lay).exists():

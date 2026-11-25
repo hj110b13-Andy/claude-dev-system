@@ -1,5 +1,14 @@
 # claude-dev-system 交接紀錄
 
+## 2026-11-25：v0.28.0 進行中（語言、精簡來源格式、改動分級、驗證守門、寫程式對照評測）
+
+- 使用者原話：「在寫程式上，有無安裝該專案的優化系統會有甚麼差異?」→「那你有建議要再怎麼優化這部分嗎?讓耗時、效能、品質、精確取一個平衡」→ main 提 5 項 →「好，可以」；另提「無論思考、回覆都統一要繁體中文」「這些部分可以不用一直顯示，等到使用者特別提到在列出來就好」「引用原文時，也要再加上這段原文的整理後的意思，用繁體中文寫出來」。問答：來源顯示選「行內短連結」；對照評測選「做小規模版」（5 題、裝與不裝各 1 輪）。
+- main 已做（未 commit）：core.md 加「語言」「依改動大小分級」、先找現成做法限中改以上；web-sources.md 第 7 節改精簡格式（原條文移成「使用者要求才展開」）；web-quick／core-detail／workflow 同步；hook 新增驗證守門 verify_guard（專案 verifyGate.command）、查證／建議守門訊息改新格式、派工補充加思考語言；settings_ops.HOOK_TIMEOUTS Stop=180 秒；`install.py web --language`（commands.set_language，解除安裝只移除本工具寫的值）；selftest.json 拿掉「查證過程」期望；tests/test_v028.py 13 項。
+- 派出 agent（opus／high）：建 `install.py coding-eval`（config/coding-eval.json、installer/cds/codingeval.py、tests/test_codingeval.py）並實跑 5 題 × 2 條件；不 commit，由 main 核對後 commit。
+- 還沒做：設定視窗（gui）沒有語言選項，只有指令；VERSION／CHANGELOG／README、update＋verify、push、tag、Release 等 agent 回來一起做。
+- 決策：2026-11-25｜分級門檻（1 檔／30 行、2～5 檔、>5 檔）先用自己定的值｜沒有現成研究給門檻｜官方只說超過「a couple of files」先用 plan mode（support.claude.com 14553240），待 coding-eval 校正。
+- 決策：2026-11-25｜思考語言只能靠規則｜官方 language 鍵只管回覆｜settings-reference「instruction to always respond in that language」，沒有控制思考的設定。
+
 ## 全方位健檢（2026-11-11 22:1x 開工、2026-11-12 23:4x 完成並發布 v0.27.0）
 
 **結果**：五個階段都做完。問題 116 條（P1 17、P2 43、P3 56）：修 108、依判斷不改 5、部分處理 3；測試 187 → 488 項、覆蓋率 61% → 72%；CI 改成每次 push 跑 Windows 的 Python 3.10／3.12／3.14（ubuntu、macos 手動觸發，2026-11-12 第一次全過）。本機已 `update` 到 0.27.0、`verify` 49 項全 ✅；update 前後 settings.json 只差 PostToolUse 的 matcher 多了 Monitor。完整內容：`PROJECT-AUDIT-REPORT.md`（逐條）、`PROJECT-STATUS.md`（狀態與限制）、`docs/PROJECT-ISSUES.md`（還開著的 7 條）、`docs/ARCHITECTURE.md`、CHANGELOG 0.27.0。

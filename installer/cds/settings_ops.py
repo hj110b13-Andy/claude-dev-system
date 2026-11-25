@@ -15,6 +15,8 @@ HOOK_SPECS = [("UserPromptSubmit", None), ("PostToolUse", "Bash|PowerShell|Agent
               ("PreToolUse", "SubagentHandback"),
               ("SubagentStop", None)]  # 0.22.0：agent 交報告時核對語言、數字出處、web-quick、記憶、commit 分支，不合格退回一次  # 0.21.0：agent 開工時補語言、工作目錄與分支、記憶內文路徑、自我核對清單
 HOOK_SCRIPT = "usage_guard.py"
+# 0.28.0：Stop 要跑專案的驗證指令（verifyGate，預設最多 120 秒），共用的 15 秒不夠；其他事件仍用 add_hooks 的預設值。
+HOOK_TIMEOUTS = {"Stop": 180}
 
 
 def hook_command(python: str, script_path: str) -> str:
@@ -55,7 +57,7 @@ def add_hooks(settings: dict, command: str, timeout: int = 15) -> tuple[dict, di
         if event not in s["hooks"]:
             s["hooks"][event] = []
             rec["createdKeys"].append(f"hooks.{event}")
-        group = {"hooks": [{"type": "command", "command": command, "timeout": timeout}]}
+        group = {"hooks": [{"type": "command", "command": command, "timeout": HOOK_TIMEOUTS.get(event, timeout)}]}
         if matcher is not None:
             group = {"matcher": matcher, **group}
         s["hooks"][event].append(group)

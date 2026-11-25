@@ -66,6 +66,7 @@ python installer/install.py verify     # 全部 ✅ 才算完成；重開 Claude
 安裝會做：①備份 `settings.json` 與 `CLAUDE.md` 到 `~/.claude/backups/claude-dev-system-<時間>*`；②複製規則／工具／hook／設定到 `~/.claude/claude-dev-system/`、skills 到 `~/.claude/skills/cds-*`；③在 `settings.json` 只**新增**指令結尾帶 `# claude-dev-system` 的 hook（若已有你自己的 `usage_guard.py` hook 就不重複註冊、不寫檔）；④在 `CLAUDE.md` 末端加 `<!-- claude-dev-system:begin … -->`～`<!-- claude-dev-system:end -->` 區塊，區塊外一字不動；⑤安裝紀錄（版本、每個檔的雜湊、加了哪些條目）寫在 `~/.claude/claude-dev-system/manifest.json`。
 不碰 `permissions`、`model`、`language`、`statusLine`、`enabledPlugins`、其他 hooks 與 `~/.claude/commands/`。不會把任何金鑰或 `.credentials.json` 打包進工具。
 細節：`docs/install.md`。
+回覆語言（0.28.0）：`python installer/install.py web --language 繁體中文` 寫入 `settings.json` 的 `language`；`--language off` 移除。專案要「改完程式自動跑測試」就在專案 `.claude/dispatch-config.json` 加 `"verifyGate": {"command": "<測試指令>", "timeoutSec": 120}`。
 
 ## 設定視窗（不用打指令）
 
