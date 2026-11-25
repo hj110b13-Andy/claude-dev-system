@@ -8,6 +8,7 @@
 - **小修只驗證一次**：core.md「依改動大小分級」的小修改成「改完只針對改動處驗證一次，不再全專案搜尋、不重複確認」。依據只有 coding-eval 第一輪一筆（tiny 題 with 19 秒／5 輪、without 10 秒／4 輪，多出來的是全專案搜尋與 `--help`），自己加的，用 medium 重跑校正。
 - **`install.py coding-eval --effort <level>`**：覆蓋設定檔的 effort（兩條件同一個值）。設定檔仍是 high（和第一輪可比）；使用者沒設 effortLevel，平常是 Opus 5.5 預設 medium（code.claude.com/docs/en/model-config：medium「fits day-to-day engineering work with a clear scope」）。
 - 測試：`tests/test_v028.py` 加 1 項（--effort 覆蓋到每一場指令）。
+- **2026-11-25 medium 重跑結果（每題每條件 1 次，with 已含新的小修規則）**：隱藏測試 5/5 對 5/5；token 1,395,618 對 853,657（1.63 倍，high 那輪 1.98 倍）；總時間 186 對 179 秒（1.04 倍，high 那輪以 duration_ms 算 274 對 226 秒＝1.21 倍）。tiny 題 with 12.6 秒對 without 7.9 秒，改完不再跑 `--help` 驗證，但改前多一次 Grep；這個變化分不清是新規則還是 medium 造成的（兩者同時改、只有 1 次）。
 
 ## 0.28.0（2026-11-25）
 

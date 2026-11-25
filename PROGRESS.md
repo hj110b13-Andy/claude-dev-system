@@ -1,5 +1,11 @@
 # claude-dev-system 交接紀錄
 
+## 2026-11-25：v0.28.1（小修只驗證一次、medium 重跑評測）
+
+- 使用者：「先做『小修只驗證一次』『用 medium 重跑評測』這兩個就好了」。claude.ai 連接器（Claude Docs）不關、5 個內建 skill 不動。
+- medium 結果：token 1.63 倍、時間 1.04 倍、5/5 對 5/5（high 那輪 1.98 倍、1.21 倍）。報告：scratchpad/coding-eval-medium/reports/coding-eval-20261125-133350.json。
+- 結論：使用者平常的 medium 下，裝了系統幾乎不多花時間，token 多約六成，多出的是每個請求的固定開銷（見下一節）。小修規則的效果只有 1 筆、和 effort 混在一起，還不能下結論。
+
 ## 2026-11-25：固定開銷拆解（使用者「好，繼續做下一步」）
 
 同一句「只回答 OK」、opus／effort low、只一輪、不在專案資料夾（hook 沒注入任何東西，rule-hits.log 沒有紀錄）。每個 API 請求送出的 context（input＋快取建＋快取讀）：
