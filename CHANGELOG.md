@@ -2,6 +2,12 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.30.0（2026-11-25）
+
+- **web-quick.md A 段開頭加「工具對照」**：parallel／exa／tavily／firecrawl／context7／deepwiki／mslearn 都改用 `tools/websearch.py`（skill cds-websearch），免費優先與換 -key 由腳本做；內建 WebSearch／WebFetch 仍可當第一步或退路。起因：0.29.0 並存比較時，擋掉 MCP 那組一次都沒用腳本（規則只寫 MCP 名稱）。
+- **重跑擋掉 MCP 那組（3 題，medium，各 1 次）**：pwsh、docs 兩題改用 `websearch.py fetch`，py314 用內建 WebSearch；判定 6/6；token 501,644、費用估算 $0.86、101 秒（只用 MCP 那組 628,879、$1.10、96 秒）。
+- 搜尋類 MCP 還沒拿掉（待使用者決定）。
+
 ## 0.29.0（2026-11-25）
 
 使用者：「擋掉搜尋類 MCP這部分，有辦法不要看專案擋掉，而是要用到搜尋類時再呼叫嗎?」→「你查證可行性」→ 選「先並存測試」；tavily 免金鑰「你再去查看看有沒有解決辦法」。
