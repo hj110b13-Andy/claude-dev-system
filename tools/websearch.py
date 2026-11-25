@@ -199,6 +199,19 @@ def run_chain(reg: dict, order: list, build, log=print):
     raise CallError("全部失敗：" + "；".join(tried) if tried else "沒有可用的伺服器（先跑 install.py web 啟用聯網來源）")
 
 
+def call_with_fallback(reg: dict, name: str, tool: str, args: dict, log=print):
+    """`call` 也免費優先（0.31.1）：指定免金鑰版而它限流／額度用完時，自動改用同一家的 `-key` 版；指定 `-key` 就只用它。
+    使用者 2026-11-25：「腳本可用也是一樣先用免金鑰，不能用免金鑰才改用金鑰版嗎?」——原本 call 沒有這個切換。"""
+    try:
+        return name, call_tool(reg[name], tool, args)
+    except LimitError as e:
+        key = name + "-key"
+        if name.endswith("-key") or key not in reg:
+            raise
+        log(f"〔{name} 限流或額度用完（{e}），改用 {key}〕")
+        return key, call_tool(reg[key], tool, args)
+
+
 def out_dir(home: Path | None = None) -> Path:
     d = (home or claude_home()) / "state" / "websearch"
     d.mkdir(parents=True, exist_ok=True)
@@ -370,8 +383,8 @@ def main(argv=None) -> int:
                 print("用法：call <伺服器> <工具> '<JSON 參數>'；可用：" + "、".join(sorted(reg)))
                 return 2
             args = json.loads(a.args[2]) if len(a.args) > 2 else {}
-            text = call_tool(reg[a.args[0]], a.args[1], args)
-            save_and_print("call", a.args[0], text, a.max, grep=a.grep)
+            name, text = call_with_fallback(reg, a.args[0], a.args[1], args)
+            save_and_print("call", name, text, a.max, grep=a.grep)
             return 0
         if not a.args:
             print(f"用法：{a.cmd} <{'查詢字' if a.cmd == 'search' else '網址'}>")

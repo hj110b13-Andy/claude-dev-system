@@ -182,3 +182,32 @@ class Readability(unittest.TestCase):
         out = []
         ws.save_and_print("fetch", "firecrawl", text, 20, home=tmp, emit=out.append, grep="secret")
         self.assertTrue(any("SECRET FACT" in x for x in out))
+
+
+class CallFallback(unittest.TestCase):
+    """0.31.1：call 也免費優先，限流時換同家 -key；非限流錯誤不換；指定 -key 只用它。"""
+
+    def run_call(self, behaviour, name="context7"):
+        fake = FakeServers(behaviour)
+        saved = ws._post
+        ws._post = fake
+        self.addCleanup(setattr, ws, "_post", saved)
+        reg = {n: {"url": n, "headers": {}} for n in ("context7", "context7-key", "deepwiki")}
+        return ws.call_with_fallback(reg, name, "query-docs", {}, log=lambda *_: None), fake
+
+    def test_limit_switches_to_key(self):
+        (name, text), _ = self.run_call({"context7": "limit", "context7-key": "ok:K"})
+        self.assertEqual((name, text), ("context7-key", "K"))
+
+    def test_free_ok_stays_free(self):
+        (name, _), fake = self.run_call({"context7": "ok:F"})
+        self.assertEqual(name, "context7")
+        self.assertEqual(len(fake.calls), 1)
+
+    def test_other_error_not_switched(self):
+        with self.assertRaises(ws.CallError):
+            self.run_call({"context7": "down", "context7-key": "ok:K"})
+
+    def test_no_key_version_reraises(self):
+        with self.assertRaises(ws.LimitError):
+            self.run_call({"deepwiki": "limit"}, name="deepwiki")
