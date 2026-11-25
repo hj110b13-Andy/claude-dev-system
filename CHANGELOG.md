@@ -2,6 +2,13 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.28.1（2026-11-25）
+
+使用者：「先做『小修只驗證一次』『用 medium 重跑評測』這兩個就好了」。
+- **小修只驗證一次**：core.md「依改動大小分級」的小修改成「改完只針對改動處驗證一次，不再全專案搜尋、不重複確認」。依據只有 coding-eval 第一輪一筆（tiny 題 with 19 秒／5 輪、without 10 秒／4 輪，多出來的是全專案搜尋與 `--help`），自己加的，用 medium 重跑校正。
+- **`install.py coding-eval --effort <level>`**：覆蓋設定檔的 effort（兩條件同一個值）。設定檔仍是 high（和第一輪可比）；使用者沒設 effortLevel，平常是 Opus 5.5 預設 medium（code.claude.com/docs/en/model-config：medium「fits day-to-day engineering work with a clear scope」）。
+- 測試：`tests/test_v028.py` 加 1 項（--effort 覆蓋到每一場指令）。
+
 ## 0.28.0（2026-11-25）
 
 使用者（2026-11-25）問「在寫程式上，有無安裝該專案的優化系統會有甚麼差異?」「讓耗時、效能、品質、精確取一個平衡」，同意 main 提的改法（「好，可以」）；另要求「無論思考、回覆都統一要繁體中文」「這些部分可以不用一直顯示，等到使用者特別提到在列出來就好」「引用原文時，也要再加上這段原文的整理後的意思，用繁體中文寫出來」。依據：官方 best-practices「If something has to happen every time, make it a hook」、ETH Zurich 研究（常駐指令讓推論成本增加 20% 以上、解題率沒有提升）。

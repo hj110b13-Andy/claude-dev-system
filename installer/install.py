@@ -72,6 +72,7 @@ def main(argv=None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="selftest：只印每題會執行的指令，不跑（零用量）")
     ap.add_argument("--smoke", action="store_true", help="selftest：只跑 selftest.json 的 smoke 三題（約 10 分鐘）")
     ap.add_argument("--condition", choices=["with", "without", "both"], default="both", help="coding-eval：跑哪個條件（without＝claude --safe-mode）")
+    ap.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"], help="coding-eval：覆蓋設定檔的努力程度（兩條件同一個值）")
     ap.add_argument("--work-dir", help="coding-eval：每場的工作目錄放這裡並保留（預設用暫存資料夾、跑完刪）")
     a = ap.parse_args(argv)
     lay = Layout(claude_home(a.claude_home))
@@ -84,7 +85,8 @@ def main(argv=None) -> int:
     if a.cmd == "coding-eval":
         from cds import codingeval  # noqa: PLC0415
         return codingeval.run(only=a.only or None, list_only=a.list, dry_run=a.dry_run, condition=a.condition,
-                              report_dir=Path(a.report_dir) if a.report_dir else None, work_dir=Path(a.work_dir) if a.work_dir else None)
+                              report_dir=Path(a.report_dir) if a.report_dir else None, work_dir=Path(a.work_dir) if a.work_dir else None,
+                              effort=a.effort)
     if a.cmd == "check":
         rows = env_report(lay.home)
         for name, ok, msg in rows:

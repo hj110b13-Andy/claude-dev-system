@@ -297,9 +297,12 @@ def format_table(rows: list[dict], summary: dict) -> list[str]:
 
 def run(only: list[str] | None = None, list_only: bool = False, dry_run: bool = False, condition: str = "both",
         cfg_path: Path | None = None, runner=selftest.default_runner, which=shutil.which, log=_log,
-        report_dir: Path | None = None, work_dir: Path | None = None) -> int:
-    """回 0 全部跑完（不論隱藏測試過不過：這是量測，不是閘門）；1 有場次沒跑完（沒有 result 或 result 是錯誤）；2 用法錯誤。"""
+        report_dir: Path | None = None, work_dir: Path | None = None, effort: str | None = None) -> int:
+    """回 0 全部跑完（不論隱藏測試過不過：這是量測，不是閘門）；1 有場次沒跑完（沒有 result 或 result 是錯誤）；2 用法錯誤。
+    effort：覆蓋設定檔的 effort（0.28.1；使用者平常沒設 effortLevel，Opus 5.5 預設 medium，設定檔固定 high 是為了和第一輪可比）。"""
     cfg = load_eval(cfg_path)
+    if effort:
+        cfg = {**cfg, "effort": effort}
     cases, unknown = select_cases(cfg, only)
     if unknown:
         log(f"{BAD} 沒有這些題目：{', '.join(unknown)}；可用：{', '.join(c['id'] for c in cfg.get('cases') or [])}")

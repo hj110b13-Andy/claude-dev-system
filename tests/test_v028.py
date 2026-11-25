@@ -220,3 +220,16 @@ class RuleHits(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CodingEvalEffort(unittest.TestCase):
+    def test_effort_override_reaches_every_command(self):
+        from cds import codingeval
+        lines = []
+        code = codingeval.run(dry_run=True, effort="medium", which=lambda _: "claude", log=lines.append)
+        self.assertEqual(code, 0)
+        cmds = [x for x in lines if "--safe-mode" in x or "claude" in x and "-p" in x]
+        self.assertTrue(cmds)
+        joined = "\n".join(lines)
+        self.assertIn("--effort medium", joined)
+        self.assertNotIn("--effort high", joined)
