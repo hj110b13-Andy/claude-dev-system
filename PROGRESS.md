@@ -1,5 +1,10 @@
 # claude-dev-system 交接紀錄
 
+## 2026-11-25：v0.30.1～v0.31.1（長結果不漏看、截斷守門、設定視窗文字、call 免費優先）
+
+- 使用者問「每個都有確認過會先用免金鑰版，然後不能用時會切換到金鑰版了嗎?」→ 實測（真的連線）：正常時 parallel、exa、firecrawl、context7 用免金鑰，tavily 因免金鑰當日額度已用完而真的換成 tavily-key；把免金鑰版模擬成限流時，5 家的 search、fetch（4 家）、call context7 全部自動換成對應 -key 且金鑰版真的回結果。deepwiki、mslearn 沒有金鑰版，限流就失敗（預期）。
+- 第 3 項（規則檔依修改時間重讀）查證後不建議：CLAUDE.md 本來就只在對話開始讀一次、之後走快取；hook 注入不省 token 且壓縮時會被摘要掉。可做的小版本（規則改過時提醒一句）待使用者決定。
+
 ## 2026-11-25：v0.29.0／v0.30.0 已發布（搜尋類 MCP 改成 websearch.py）
 
 - 0.29.0：tools/websearch.py＋skill cds-websearch（與 MCP 並存）。0.30.0：web-quick 工具對照改指向腳本；使用者選「全部 12 個都拿掉」→ local.json `webTransport`（預設 script），`install.py web --web-transport mcp` 可改回。
