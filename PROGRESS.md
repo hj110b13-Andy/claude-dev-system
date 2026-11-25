@@ -1,5 +1,12 @@
 # claude-dev-system 交接紀錄
 
+## 2026-11-25：v0.29.0／v0.30.0 已發布（搜尋類 MCP 改成 websearch.py）
+
+- 0.29.0：tools/websearch.py＋skill cds-websearch（與 MCP 並存）。0.30.0：web-quick 工具對照改指向腳本；使用者選「全部 12 個都拿掉」→ local.json `webTransport`（預設 script），`install.py web --web-transport mcp` 可改回。
+- 比較（3 題 × 1 次，medium）：只用 MCP 6/6、628,879 token、$1.10；腳本（規則改後）6/6、501,644、$0.86。本機拿掉後每請求 41,657 → 34,492。
+- tavily 免金鑰：要 header X-Tavily-Access-Mode: keyless（安裝器本來就有帶）；額度用完回 200＋daily_cap_reached，腳本以內容判斷。
+- 已知未做：設定視窗聯網區文字仍寫「MCP 已註冊／未註冊」；selftest 只改了 expect，沒有整套重跑（要花 11 場對話額度）。
+
 ## 2026-11-25：搜尋類 MCP 改「用到才呼叫」的可行性（使用者：「擋掉搜尋類 MCP這部分，有辦法不要看專案擋掉，而是要用到搜尋類時再呼叫嗎?」→「你查證可行性」）
 
 - 原型：scratchpad/websearch-proto/mcpcall.py（只用標準庫的 MCP Streamable HTTP 客戶端：initialize → initialized → tools/list／tools/call，JSON 與 SSE 都解）。
