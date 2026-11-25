@@ -117,7 +117,7 @@ class SaveAndRegistry(unittest.TestCase):
         out = []
         p = ws.save_and_print("search", "exa", "字" * 100, 10, home=self.tmp, emit=out.append)
         self.assertEqual(p.read_text(encoding="utf-8"), "字" * 100)
-        self.assertIn("只印前 10 字", out[1])
+        self.assertIn("只印前 10 字", out[-1])
         self.assertTrue(str(p).startswith(str(self.tmp / "state" / "websearch")))
 
     def test_installer_registry_roundtrip_and_removal(self):
@@ -142,3 +142,43 @@ class SaveAndRegistry(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Readability(unittest.TestCase):
+    """0.30.1：長結果不可讓重要資訊被截掉——搜尋每筆都列、抓頁取出正文、--grep 找原句、截斷時列出後面的標題。"""
+
+    def test_compact_search_lists_every_result(self):
+        raw = json.dumps({"results": [{"url": f"https://e/{i}", "title": f"T{i}", "excerpts": ["x" * 3000]} for i in range(10)]})
+        out = ws.compact_search(raw, item_chars=100)
+        for i in range(10):
+            self.assertIn(f"https://e/{i}", out)
+        self.assertLess(len(out), 3000)
+        self.assertIn("可用 --grep 找", out)
+
+    def test_compact_search_firecrawl_and_tavily_shapes(self):
+        fc = json.dumps({"success": True, "data": {"web": [{"url": "u1", "title": "A", "description": "d1"}]}})
+        tv = json.dumps({"answer": "ANS", "results": [{"url": "u2", "title": "B", "content": "c2"}]})
+        self.assertIn("d1", ws.compact_search(fc))
+        self.assertIn("ANS", ws.compact_search(tv))
+        self.assertIsNone(ws.compact_search("Title: plain exa text"))
+
+    def test_readable_unwraps_escaped_markdown(self):
+        raw = json.dumps({"markdown": "# H1\n\nline A\n\n## H2\n\nPEP 779 here"})
+        plain = ws.readable(raw)
+        self.assertGreater(len(plain.splitlines()), 4)
+        hits = ws.grep_lines(plain, "pep 779")
+        self.assertTrue(any("PEP 779 here" in h for h in hits))
+
+    def test_save_truncates_with_outline_and_grep_mode(self):
+        tmp = Path(tempfile.mkdtemp(prefix="cds-ws-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        text = json.dumps({"markdown": "intro\n" + "a" * 50 + "\n## Later Section\nSECRET FACT"})
+        out = []
+        p = ws.save_and_print("fetch", "firecrawl", text, 20, home=tmp, emit=out.append)
+        self.assertIn("## Later Section", out[-1])
+        self.assertIn("--grep", out[-1])
+        self.assertTrue(p.with_suffix(".raw.json").exists())
+        self.assertIn("SECRET FACT", p.read_text(encoding="utf-8"))
+        out = []
+        ws.save_and_print("fetch", "firecrawl", text, 20, home=tmp, emit=out.append, grep="secret")
+        self.assertTrue(any("SECRET FACT" in x for x in out))

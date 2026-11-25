@@ -17,7 +17,8 @@
   python websearch.py search "查詢字" [--via exa] [--n 5]
   python websearch.py fetch https://… [--via firecrawl] [--objective "要找什麼"]
   python websearch.py call context7 resolve-library-id '{"libraryName":"requests","query":"timeout"}'
-  共用：--max 6000（印出的最多字數；完整結果一律存檔並印路徑）
+  共用：--max N（印出的最多字數；預設 search 20000、其他 8000）、--grep "詞1|詞2"（只印全文中含這些詞的段落）；完整結果一律存檔並印路徑
+  search 會把 JSON 結果整理成每筆「標題、網址、摘錄」（每筆最多 1,500 字），確保每一筆都看得到
 免費優先：search／fetch 依 SEARCH_ORDER／FETCH_ORDER，每家先用免金鑰版，回限流／額度用完（HTTP 429／402／5xx，或內容含
 daily_cap_reached、rate limit 等）就改用同一家的 `-key` 版，再不行換下一家。結束碼：0 成功、2 用法錯誤、3 全部失敗。
 """
@@ -202,7 +203,7 @@ def out_dir(home: Path | None = None) -> Path:
     d = (home or claude_home()) / "state" / "websearch"
     d.mkdir(parents=True, exist_ok=True)
     cutoff = time.time() - KEEP_DAYS * 86400
-    for p in d.glob("*.md"):
+    for p in d.glob("*.*"):
         try:
             if p.stat().st_mtime < cutoff:
                 p.unlink()
@@ -211,11 +212,120 @@ def out_dir(home: Path | None = None) -> Path:
     return d
 
 
-def save_and_print(kind: str, name: str, text: str, max_chars: int, home: Path | None = None, emit=print) -> Path:
+ITEM_CHARS = 1500  # 自己定的：搜尋結果每筆最多印 1,500 字，讓每一筆都看得到（parallel 10 筆約 15k 字，仍小於 MCP 5 萬字整包放的門檻）
+DEFAULT_MAX = {"search": 20000, "fetch": 8000, "call": 8000}  # 0.30.1：原本一律 6,000，parallel 搜尋 2.7 萬字只看得到前一兩筆
+
+
+def compact_search(text: str, item_chars: int = ITEM_CHARS) -> str | None:
+    """把 parallel／tavily／firecrawl 的 JSON 搜尋結果整理成「每筆：標題、網址、摘錄」；不是這種格式回 None（照原文印）。"""
+    try:
+        d = json.loads(text)
+    except ValueError:
+        return None
+    items = d.get("results") if isinstance(d, dict) else None
+    if items is None and isinstance(d, dict) and isinstance(d.get("data"), dict):
+        items = d["data"].get("web")
+    if not isinstance(items, list) or not items:
+        return None
+    out = []
+    if isinstance(d, dict) and d.get("answer"):
+        out.append(f"〔服務給的摘要答案〕{d['answer']}")
+    for i, it in enumerate(items, 1):
+        if not isinstance(it, dict):
+            continue
+        body = it.get("excerpts") or it.get("content") or it.get("description") or it.get("snippet") or ""
+        if isinstance(body, list):
+            body = "\n".join(str(x) for x in body)
+        body = str(body).strip()
+        cut = "" if len(body) <= item_chars else f"…〔這筆共 {len(body):,} 字，其餘在存檔裡，可用 --grep 找〕"
+        date = f"（{it['publish_date']}）" if it.get("publish_date") else ""
+        out.append(f"{i}. {it.get('title') or '（無標題）'}{date}\n   {it.get('url', '')}\n   {body[:item_chars]}{cut}")
+    return "\n\n".join(out)
+
+
+BODY_KEYS = ("markdown", "raw_content", "full_content", "content", "excerpts", "text")
+
+
+def readable(text: str) -> str:
+    """抓頁結果常是 JSON（firecrawl：{"markdown": "…"}；tavily_extract：results[].raw_content；parallel：results[].excerpts），
+    整頁擠在一個跳脫過的字串裡＝只有一行，--grep 與段落標題都失效。把正文欄位取出來還原成有換行的文字；不是 JSON 或取不到就原樣回傳。"""
+    try:
+        d = json.loads(text)
+    except ValueError:
+        return text
+    docs = []
+
+    def take(obj):
+        if isinstance(obj, dict):
+            body = next((obj[k] for k in BODY_KEYS if obj.get(k)), None)
+            if body is not None:
+                if isinstance(body, list):
+                    body = "\n\n".join(str(x) for x in body)
+                head = " ".join(str(obj[k]) for k in ("title", "url") if obj.get(k))
+                docs.append((f"# 〔{head}〕\n\n" if head else "") + str(body))
+                return
+            for v in obj.values():
+                take(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                take(v)
+    take(d)
+    return "\n\n---\n\n".join(docs) if docs else text
+
+
+def grep_lines(text: str, pattern: str, context: int = 2, limit: int = 40) -> list[str]:
+    """在完整結果裡找 pattern（不分大小寫；多個詞用 | 分隔＝任一），印出前後 context 行。"""
+    terms = [t for t in pattern.split("|") if t.strip()]
+    rx = re.compile("|".join(re.escape(t.strip()) for t in terms), re.I)
+    lines = text.splitlines()
+    out, last = [], -1
+    for i, ln in enumerate(lines):
+        if rx.search(ln):
+            lo, hi = max(0, i - context, last + 1), min(len(lines), i + context + 1)
+            if out and lo > last + 1:
+                out.append("…")
+            out.extend(f"{n + 1}: {lines[n][:500]}" for n in range(lo, hi))
+            last = hi - 1
+            if sum(1 for x in out if x != "…") >= limit * (2 * context + 1):
+                out.append(f"…〔超過 {limit} 處，只列前面；改用更精確的詞〕")
+                break
+    return out
+
+
+def outline_after(text: str, pos: int, limit: int = 30) -> list[str]:
+    """截斷處之後的段落標題（Markdown # 開頭），讓 Claude 知道沒印出的部分在講什麼。"""
+    heads = [re.sub(r"\s*\[¶\]\([^)]*\)|\[([^\]]*)\]\([^)]*\)", lambda m: m.group(1) or "", ln.strip())[:80]
+             for ln in text[pos:].splitlines() if re.match(r"\s{0,3}#{1,6}\s", ln)]
+    return heads[:limit] + ([f"…另有 {len(heads) - limit} 個標題"] if len(heads) > limit else [])
+
+
+def save_and_print(kind: str, name: str, text: str, max_chars: int | None = None, home: Path | None = None, emit=print,
+                   grep: str | None = None) -> Path:
     path = out_dir(home) / f"{time.strftime('%Y%m%d-%H%M%S')}-{kind}-{name}.md"
+    shown = compact_search(text) if kind == "search" else None
+    if shown is None:
+        plain = readable(text)
+        if plain is not text:  # 取出了正文：存檔與 grep 都用正文，原始 JSON 另存一份
+            path.with_suffix(".raw.json").write_text(text, encoding="utf-8")
+            text = plain
     path.write_text(text, encoding="utf-8")
+    max_chars = max_chars or DEFAULT_MAX.get(kind, 8000)
     emit(f"〔來源伺服器：{name}｜全文 {len(text):,} 字已存：{path}〕")
-    emit(text if len(text) <= max_chars else text[:max_chars] + f"\n…〔只印前 {max_chars:,} 字；其餘用 Read 讀上面的檔案（可帶 offset）〕")
+    if grep:
+        hits = grep_lines(text, grep)
+        emit(f"〔--grep「{grep}」：{'找到以下段落（行號是存檔裡的行號）' if hits else '全文沒有找到'}〕")
+        for h in hits:
+            emit(h)
+        return path
+    body = shown if shown is not None else text
+    if len(body) <= max_chars:
+        emit(body)
+        return path
+    emit(body[:max_chars])
+    heads = outline_after(body, max_chars)
+    emit(f"…〔只印前 {max_chars:,} 字（共 {len(body):,} 字）。沒印出的部分"
+         + ("有這些段落：" + "；".join(heads) if heads else "沒有段落標題")
+         + "。要找的事實不在上面時，用 `--grep 關鍵字` 重跑或 Read 存檔（可帶 offset），確認全文都沒有才可寫〔未能確認〕〕")
     return path
 
 
@@ -230,7 +340,8 @@ def main(argv=None) -> int:
     ap.add_argument("--via", help="只用這一家（例如 exa、exa-key）")
     ap.add_argument("--n", type=int, default=5, help="search：結果數")
     ap.add_argument("--objective", help="fetch：要在頁面裡找什麼（parallel 會依此摘錄）")
-    ap.add_argument("--max", type=int, default=6000, help="最多印出幾個字（完整結果一律存檔）")
+    ap.add_argument("--max", type=int, help="最多印出幾個字（預設 search 20000、其他 8000；完整結果一律存檔）")
+    ap.add_argument("--grep", help="只印全文中含這些詞的段落（不分大小寫；多個詞用 | 分隔）")
     a = ap.parse_args(argv)
     reg = load_registry()
     if not reg:
@@ -260,7 +371,7 @@ def main(argv=None) -> int:
                 return 2
             args = json.loads(a.args[2]) if len(a.args) > 2 else {}
             text = call_tool(reg[a.args[0]], a.args[1], args)
-            save_and_print("call", a.args[0], text, a.max)
+            save_and_print("call", a.args[0], text, a.max, grep=a.grep)
             return 0
         if not a.args:
             print(f"用法：{a.cmd} <{'查詢字' if a.cmd == 'search' else '網址'}>")
@@ -276,7 +387,7 @@ def main(argv=None) -> int:
             reg = {k: v for k, v in reg.items() if k == a.via or (not a.via.endswith("-key") and k == base + "-key")}
         build = (lambda s: search_args(s, q, a.n)) if a.cmd == "search" else (lambda s: fetch_args(s, q, a.objective))
         name, text = run_chain(reg, order, build)
-        save_and_print(a.cmd, name, text, a.max)
+        save_and_print(a.cmd, name, text, a.max, grep=a.grep)
         return 0
     except (CallError, LimitError) as e:
         print(f"❌ {e}")

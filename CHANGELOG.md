@@ -2,6 +2,17 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.30.1（2026-11-25）
+
+使用者：「很長的結果會存成檔案，只印前段，不再整包塞進對話。這樣不會導致遺漏部分查證的重要資訊嗎?」——查證後確認是真的漏洞：MCP 在 5 萬字內會整包放進對話（code.claude.com/docs/en/mcp：「saves a successful result … to a file once it's longer than 50,000 characters」），0.30.0 的腳本卻一律只印前 6,000 字，一次 parallel 搜尋（實測 27,406 字、10 筆）只看得到前一兩筆。
+
+- **search 每筆都列**：parallel／tavily／firecrawl 的 JSON 整理成每筆「標題、網址、摘錄」（每筆最多 1,500 字，自己定的），10 筆約 15k 字全部看得到；預設印出上限 search 20,000、其他 8,000。
+- **抓頁取出正文**：firecrawl 回 `{"markdown":"…"}`、tavily_extract 回 `results[].raw_content`，整頁擠在一個跳脫字串裡＝只有一行，grep 與標題都失效；改成先取出正文、還原換行再存檔，原始 JSON 另存 `.raw.json`。
+- **`--grep "詞1|詞2"`**：只印全文中含這些詞的段落（附行號）。實測 Python 3.14 What's New 全文 293,038 字，`--grep "PEP 779"` 直接找到第 114 行原句。
+- **截斷時列出後面的段落標題**（去掉 ¶ 連結），並提示「要的事實不在上面時，用 --grep 或 Read 存檔，確認全文都沒有才可寫〔未能確認〕」；同一句寫進 skill cds-websearch 與 web-quick.md 工具對照。
+- 實測順帶確認：tavily 免金鑰額度用完時，腳本自動改用 tavily-key 成功。
+- 測試：`tests/test_websearch.py` 加 4 項（每筆都列、三家格式、正文還原後 grep 找得到、截斷附標題與 grep 模式）。
+
 ## 0.30.0（2026-11-25）
 
 - **web-quick.md A 段開頭加「工具對照」**：parallel／exa／tavily／firecrawl／context7／deepwiki／mslearn 都改用 `tools/websearch.py`（skill cds-websearch），免費優先與換 -key 由腳本做；內建 WebSearch／WebFetch 仍可當第一步或退路。起因：0.29.0 並存比較時，擋掉 MCP 那組一次都沒用腳本（規則只寫 MCP 名稱）。
