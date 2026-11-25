@@ -233,3 +233,45 @@ class CodingEvalEffort(unittest.TestCase):
         joined = "\n".join(lines)
         self.assertIn("--effort medium", joined)
         self.assertNotIn("--effort high", joined)
+
+
+class GrepGuard(unittest.TestCase):
+    """0.31.0：websearch 結果被截斷、回答寫「未能確認」、卻沒 --grep／Read 存檔 → 退回一次。"""
+    SAVED = r"C:\Users\x\.claude\state\websearch\20261125-1-fetch-firecrawl.md"
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="cds-gg-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        isolate_state(self, self.tmp)
+        self.tr = self.tmp / "t.jsonl"
+
+    def entries(self, after_trunc=(), answer="官方文件裡沒有提到這點，未能確認。" * 3):
+        trunc = {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content":
+                 f"〔來源伺服器：firecrawl｜全文 293,038 字已存：{self.SAVED}〕\n…〔只印前 8,000 字（共 293,038 字）〕"}]}}
+        es = [user("PEP 779 有沒有說 free-threading 預設啟用？"),
+              {"type": "assistant", "message": {"role": "assistant", "content": [
+                  {"type": "tool_use", "name": "Bash", "input": {"command": "py -3 websearch.py fetch https://x"}}]}},
+              trunc]
+        for cmd in after_trunc:
+            es.append({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", **cmd}]}})
+        es.append(say(answer))
+        write_transcript(self.tr, es)
+        return ug.grep_guard({"transcript_path": str(self.tr)})
+
+    def test_blocks_when_not_found_without_grep(self):
+        out = self.entries()
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("--grep", out["reason"])
+
+    def test_grep_after_truncation_passes(self):
+        self.assertIsNone(self.entries([{"name": "Bash", "input": {"command": 'py -3 websearch.py fetch https://x --grep "PEP 779"'}}]))
+
+    def test_read_saved_file_passes(self):
+        self.assertIsNone(self.entries([{"name": "Read", "input": {"file_path": self.SAVED}}]))
+
+    def test_answer_without_not_found_claim_passes(self):
+        self.assertIsNone(self.entries(answer="PEP 779：官方支援，但不是預設啟用（[來源](https://peps.python.org/pep-0779/)）。"))
+
+    def test_second_stop_not_blocked(self):
+        self.entries()
+        self.assertIsNone(ug.grep_guard({"transcript_path": str(self.tr), "stop_hook_active": True}))

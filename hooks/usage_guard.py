@@ -1879,6 +1879,85 @@ def _vg_run(cmd, cwd, timeout):
     return r.returncode, (r.stdout or b"").decode("utf-8", "replace") + (r.stderr or b"").decode("utf-8", "replace")
 
 
+# 0.31.0 截斷守門（Stop）。使用者 2026-11-25：「最後這條是『規則』可以改成強制機制嗎?」——tools/websearch.py 長結果只印一部分，
+# 規則要求「要的事實不在印出的部分時，先用 --grep 或 Read 存檔確認全文都沒有，才可寫〔未能確認〕」。這裡把它變成機械檢查：
+# 這一輪有 websearch 輸出被截斷（「只印前」），回答卻寫了「未能確認／查不到／沒有提到」之類的結論，而截斷之後沒有任何 --grep 或
+# Read 存檔 → 退回一次。只看「下了查無結論」的情況，正常回答不受影響。
+GG_TRUNC = "只印前"
+GG_SAVED = re.compile(r"字已存：([^\s〕]+)")
+GG_NOTFOUND = re.compile(r"未能確認|無法確認|查不到|找不到|沒有提到|未提及|沒有寫|沒有說明|文件中沒有|頁面上沒有")
+
+
+def _gg_turn(transcript_path):
+    """這一輪（最後一則真人／系統訊息之後）依序的事件：('trunc', 存檔路徑) 或 ('check', 指令文字)。讀不到回 []。"""
+    events = []
+    try:
+        it = _rev_lines(transcript_path)
+        try:
+            for raw in it:
+                line = raw.decode("utf-8", errors="replace")
+                c = _sg_line(line)
+                if c and c[0] == "user" and c[1] is not None and c[1].strip():
+                    break
+                if '"tool_use"' not in line and '"tool_result"' not in line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                if d.get("isSidechain"):
+                    continue
+                for b in (d.get("message") or {}).get("content") or []:
+                    if not isinstance(b, dict):
+                        continue
+                    if b.get("type") == "tool_result":
+                        body = b.get("content")
+                        text = body if isinstance(body, str) else "".join(
+                            x.get("text", "") for x in body or [] if isinstance(x, dict))
+                        if GG_TRUNC in text and "來源伺服器" in text:
+                            m = GG_SAVED.search(text)
+                            events.append(("trunc", m.group(1) if m else ""))
+                    elif b.get("type") == "tool_use":
+                        inp = b.get("input") or {}
+                        events.append(("check", str(inp.get("command") or inp.get("file_path") or "")))
+        finally:
+            it.close()
+    except Exception:
+        return []
+    events.reverse()
+    return events
+
+
+def grep_guard(payload):
+    """回 Stop 的 block dict 或 None。"""
+    if payload.get("stop_hook_active") or not sg_enabled():
+        return None
+    tp = payload.get("transcript_path") or ""
+    _, answer = sg_last_turn(tp)
+    if not answer or not GG_NOTFOUND.search(answer):
+        return None
+    pending = None
+    for kind, val in _gg_turn(tp):
+        if kind == "trunc":
+            pending = pending or val or "（存檔）"
+            continue
+        name = re.split(r"[\\/]", pending)[-1] if pending else ""
+        if pending and ("--grep" in val or (name and name in val) or ("/websearch/" in val.replace("\\", "/") and ".md" in val)):
+            pending = None  # 截斷之後用 --grep、Read 存檔、或用指令讀過存檔＝查過了
+    if not pending:
+        return None
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(os.path.join(STATE_DIR, "source-guard.log"), "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} block-grep｜{pending[:80]}" + chr(10))
+    except Exception:
+        pass
+    return {"decision": "block",
+            "reason": "【查證守門（hook）】這一輪 websearch.py 的結果被截斷（只印了一部分），回答卻寫了「未能確認／查不到／沒有提到」這類結論，"
+                      "但截斷之後沒有用 --grep 或 Read 查過完整存檔：" + pending + "。請先用 `websearch.py … --grep \"關鍵字\"` 或 Read 那個檔"
+                      "（可帶 offset／limit）確認全文真的沒有，再下結論；確認過真的沒有就照原本寫。只退回這一次。"}
+
+
 # 0.21.0 派工補充（SubagentStart）。使用者 2026-11-11：「它派出去的agent常常都不會遵守該專案裡的規則與長期記憶等等，還有連全域優化系統的規則
 # 它也不不遵守，不知道是不遵守還是不會看」。查 Stock-web 81 份 agent 對話紀錄＋官方文件（code.claude.com/docs/en/sub-agents、hooks）：
 # agent 有載入 CLAUDE.md 與 MEMORY.md 索引，但①回覆語言設定不傳 ②記憶內文不載入（81 個裡只有 1 個用指令讀過一條）③UserPromptSubmit／Stop 的守門
@@ -2247,7 +2326,7 @@ def main():
             event = ""
     if event == "Stop":  # 查證守門：只看回覆，不查用量
         patrol_sync(payload)
-        out = verify_guard(payload) or source_guard(payload)
+        out = verify_guard(payload) or grep_guard(payload) or source_guard(payload)
         if out:
             _emit(out, event)
         return

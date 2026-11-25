@@ -623,6 +623,14 @@ def refresh_usage(lay: Layout, python: str, run=subprocess.run) -> dict:
     return u
 
 
+def _registry_names(lay: Layout) -> set:
+    """tools/websearch.py 目前可用的伺服器（安裝器寫的 websearch-servers.json；不讀金鑰值）。"""
+    try:
+        return set((read_json(web.registry_path(lay)) or {}).get("servers") or {})
+    except (OSError, ValueError):
+        return set()
+
+
 def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.default_importer, ffmpeg=video.ffmpeg_path,
                python: str | None = None) -> dict:
     """畫面的唯一真相來源。python：exe 模式傳系統 Python 路徑（None＝找不到）。"""
@@ -669,6 +677,7 @@ def read_state(lay: Layout, repo: Path = REPO, env=env_status, importer=video.de
         "repo_version": repo_version(repo),
         "env": env_items,
         "web": {"enabled": bool(m and (m.get("web") or {}).get("enabled")), "servers": servers, "desired_now": sorted(want),
+                "transport": web.transport(local), "script_servers": sorted(_registry_names(lay)),
                 "env": {k: str(env_vals.get(k)) if env_vals.get(k) is not None else None for k in (src.get("env") or {}) if not k.startswith("_")},
                 "env_defaults": {k: str(v) for k, v in (src.get("env") or {}).items() if not k.startswith("_")},
                 "env_override": {k: str(v) for k, v in (local.get("env") or {}).items()}},

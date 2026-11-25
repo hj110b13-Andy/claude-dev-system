@@ -398,13 +398,26 @@ class App:
 
         # 聯網
         srv = s["web"]["servers"]
-        webf = self._section(f"聯網來源（免金鑰搜尋／文件 MCP ＋ WebSearch 上限）　共 {len(srv)} 個 MCP：目前開啟 {sum(1 for x in srv.values() if x['wanted'])}、已註冊 {sum(1 for x in srv.values() if x['registered'])}；環境變數 {len(s['web']['env_defaults'])} 個")
+        script = s["web"].get("transport", "script") == "script"
+        ready = set(s["web"].get("script_servers") or [])
+        if script:  # 0.30.1：預設不註冊 MCP，改由 tools/websearch.py 用到才呼叫；「未註冊」是正常的，不要讓人誤會
+            webf = self._section(f"聯網來源（tools/websearch.py 用到才呼叫，不註冊 MCP ＋ WebSearch 上限）　共 {len(srv)} 個服務：目前開啟 {sum(1 for x in srv.values() if x['wanted'])}、腳本可用 {sum(1 for n in srv if n in ready)}；環境變數 {len(s['web']['env_defaults'])} 個")
+        else:
+            webf = self._section(f"聯網來源（免金鑰搜尋／文件 MCP ＋ WebSearch 上限）　共 {len(srv)} 個 MCP：目前開啟 {sum(1 for x in srv.values() if x['wanted'])}、已註冊 {sum(1 for x in srv.values() if x['registered'])}；環境變數 {len(s['web']['env_defaults'])} 個")
         self.web_var = tk.BooleanVar(value=f.web_enabled)
         ttk.Checkbutton(webf, text="啟用聯網來源", variable=self.web_var, command=self.update_diff).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
         row = 1
         for n, sv in s["web"]["servers"].items():  # 每個 MCP 兩列：名稱＋功能、狀態＋工具（原本塞一行會被擠到最右邊、工具名從中間斷行）
             var = tk.BooleanVar(value=f.servers.get(n, sv["wanted"]))
             self.server_vars[n] = var
+            if script:
+                st = ("腳本可用（不註冊 MCP，用到才呼叫）" if n in ready else "未啟用（勾選並套用後腳本即可使用）")
+                st += "＋金鑰版" if (n + "-key") in ready else ("（純免費服務，沒有金鑰機制）" if not sv["keyable"] else "")
+                self._note(webf, gm.MCP_DESC.get(n, ""), wrap=900, row=row, column=1, sticky="w", padx=8)
+                ttk.Checkbutton(webf, text=n, variable=var, command=self.update_diff, width=12).grid(row=row, column=0, sticky="nw")
+                self._note(webf, f"狀態：{st}　　工具：{', '.join(sv['tools'])}", wrap=900, row=row + 1, column=1, sticky="w", padx=8, pady=(0, 8))
+                row += 2
+                continue
             st = "已註冊" if sv["registered"] else "未註冊"
             if sv["key_registered"]:
                 st += "＋金鑰版"

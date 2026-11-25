@@ -2,6 +2,15 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.31.0（2026-11-25）
+
+使用者：「最後這條是『規則』可以改成強制機制嗎?建議這樣做嗎?」「設定視窗的聯網區還寫著『MCP 已註冊／未註冊』……文字部分你也改一下，不要讓人誤會。」
+
+- **截斷守門（Stop，新）**：`grep_guard`——這一輪有 websearch.py 的輸出被截斷（含「只印前」與「來源伺服器」），回答寫了「未能確認／無法確認／查不到／找不到／沒有提到／未提及…」，而截斷之後沒有 `--grep`、沒有 Read 存檔、也沒有指令讀過存檔 → 退回一次（沿用【查證守門（hook）】標籤，記進 source-guard.log 的 block-grep）。只在「下了查無結論」時檢查，正常回答不受影響。Stop 順序：驗證守門 → 截斷守門 → 查證／建議守門。
+- **設定視窗聯網區**：script 接法時標題改成「tools/websearch.py 用到才呼叫，不註冊 MCP」、統計「腳本可用 N」，每個服務顯示「腳本可用（不註冊 MCP，用到才呼叫）＋金鑰版」或「未啟用（勾選並套用後腳本即可使用）」；mcp 接法維持原本的已註冊／未註冊。`gui_model.read_state` 的 web 多 `transport`、`script_servers`（讀 websearch-servers.json 的名稱，不讀金鑰）。實測：背景建出視窗讀到標題「共 7 個服務：目前開啟 7、腳本可用 7」。
+- skill cds-websearch 與 web-quick.md 註明這條由 hook 檢查。
+- 測試：`tests/test_v028.py` 加 GrepGuard 5 項（沒 grep 退回、grep 後放行、Read 存檔放行、沒寫查無結論放行、第二次不擋）。
+
 ## 0.30.1（2026-11-25）
 
 使用者：「很長的結果會存成檔案，只印前段，不再整包塞進對話。這樣不會導致遺漏部分查證的重要資訊嗎?」——查證後確認是真的漏洞：MCP 在 5 萬字內會整包放進對話（code.claude.com/docs/en/mcp：「saves a successful result … to a file once it's longer than 50,000 characters」），0.30.0 的腳本卻一律只印前 6,000 字，一次 parallel 搜尋（實測 27,406 字、10 筆）只看得到前一兩筆。
