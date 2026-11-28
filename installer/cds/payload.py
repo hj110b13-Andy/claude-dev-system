@@ -1,6 +1,7 @@
 """要安裝的檔案清單（來源 repo → 目標 CLAUDE_HOME 相對路徑）。"""
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from . import SKILL_MARKER_FILE
@@ -46,5 +47,11 @@ def skill_names(repo: Path) -> list[str]:
     return sorted(p.name for p in (repo / "skills").iterdir() if (p / "SKILL.md").is_file())
 
 
-def core_rules(repo: Path) -> str:
-    return (repo / "rules" / "core.md").read_text(encoding="utf-8")
+def core_rules(repo: Path, platform: str | None = None) -> str:
+    """併進全域 CLAUDE.md 的規則：core.md；Windows 再接 core-windows.md（0.32.2：原本放在使用者 Documents\\Claude\\CLAUDE.md，
+    只管得到那個資料夾底下的專案，Mac／Linux 用不到所以不併）。"""
+    text = (repo / "rules" / "core.md").read_text(encoding="utf-8")
+    win = repo / "rules" / "core-windows.md"
+    if (platform or sys.platform) == "win32" and win.is_file():
+        text = text.rstrip("\n") + "\n" + win.read_text(encoding="utf-8")
+    return text

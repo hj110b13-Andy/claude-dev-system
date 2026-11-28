@@ -2,6 +2,13 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.32.2（2026-11-28）
+
+使用者：「C:\Users\88691\Documents\Claude\CLAUDE.md 現在還有需要留嗎?還是這個專案的優化系統能整合這個?就可以把它刪掉了」→ 回覆整合方式後使用者：「好」。
+
+- **Windows 專用規則（新）**：`rules/core-windows.md`（pwsh 7 特性、碼頁 950 下 `.ps1` 存 UTF-8 with BOM、`Get-Content -Encoding UTF8`、Bash 啟動 pwsh 先設 OutputEncoding）。`payload.core_rules` 只在 Windows 把它接在 core.md 後面併進全域 CLAUDE.md；Mac／Linux 不併。原本放在使用者 `Documents\Claude\CLAUDE.md`，只管得到那個資料夾底下的專案。
+- 測試：`tests/test_core_windows.py`（win32 有、darwin／linux 沒有）。
+
 ## 0.32.1（2026-11-28）
 
 Stock-web 健檢 QA2-13：已停用的任務看板檔列在 `bigFileExceptions` 例外清單裡，盤點每次仍列成「問題」，掩蓋真正的問題訊號。
