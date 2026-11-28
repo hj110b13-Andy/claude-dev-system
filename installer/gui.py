@@ -848,6 +848,12 @@ class App:
         info = appdir.check_update(self.lay, REPO)
         if info["error"]:
             self._log(f"❌ {info['error']}" if manual else f"自動檢查更新：{info['error']}（可稍後按「檢查更新」）")
+            # 規則讀不到時仍查 exe（0.32.4）：exe 走 Releases、不看分支；0.32.3 主分支 master 改名 main 後，
+            # 舊 exe 讀 raw master 404 就整個停住、連 exe 新版都不查，只能手動下載。換成新 exe 就能自救。
+            ex = self._exe_update_info(quiet=not manual)
+            if appdir.update_plan(info, ex) == "exe_only":
+                self._log(f"但視窗程式有新版：v{ex['tag']}（執行中的是 v{repo_version(REPO)}），換新 exe 後再檢查規則")
+                self._pending_update = {**info, "exe_only": True}
             return
         ex = None if info["newer"] else self._exe_update_info(quiet=not manual)  # 規則有新版時更新流程自己會處理 exe，不重複查
         plan = appdir.update_plan(info, ex)

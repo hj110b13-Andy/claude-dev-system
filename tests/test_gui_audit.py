@@ -551,6 +551,18 @@ class GU10_UpdatePlan(unittest.TestCase):
         self.assertNotIn("check_update(self.lay", meth["_auto_check_update"], "自動檢查不自己另寫一份流程")
         self.assertNotIn("check_update(self.lay", meth["do_check_update"])
 
+    def test_rules_error_still_checks_exe(self):
+        """0.32.4：規則版本讀不到（0.32.3 master 改名 main，舊 exe 讀 raw master 404）時仍要查 exe，不可直接 return。"""
+        src = (REPO / "installer" / "gui.py").read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        app = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "App")
+        fn = next(n for n in app.body if isinstance(n, ast.FunctionDef) and n.name == "_check_updates")
+        err_if = next(n for n in ast.walk(fn) if isinstance(n, ast.If) and "error" in ast.get_source_segment(src, n.test))
+        body = "\n".join(ast.get_source_segment(src, s) for s in err_if.body)
+        self.assertIn("_exe_update_info(", body, "規則檢查失敗的分支要先查 exe 再 return")
+        self.assertIn("update_plan(", body)
+        self.assertEqual(appdir.update_plan({"newer": False, "error": "404"}, {"newer": True, "tag": "9.9.9"}), "exe_only")
+
 
 # ---------------------------------------------------------------- GU-11
 class GU11_CleanupOldExe(unittest.TestCase):

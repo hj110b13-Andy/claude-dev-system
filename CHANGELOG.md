@@ -2,6 +2,14 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.32.4（2026-11-28）
+
+使用者：「所以其他電腦例如是0.32.0的版本exe，可以不用下載新的exe，直接開啟原本的exe升級到 0.32.3嗎?」→ 讀碼發現 0.32.3 的說法錯了；使用者選「不建（master 橋接分支），舊電腦手動下載」。
+
+- **更正 0.32.3 的說法**：0.32.3 寫「舊 exe 的 exe 更新走 Releases 不受影響」是錯的——`_check_updates` 規則版本讀不到就直接 return，連 exe 新版都不查。**0.32.2 以前的 exe 無法自己升級**，每台電腦要到 Releases 手動下載一次新版 exe（之後就能自己更新）。
+- **修根因**：`installer/gui.py` `_check_updates` 規則檢查失敗時仍查 exe（`update_plan` 判 `exe_only` 就提示換 exe），以後 GitHub 端規則網址出狀況，0.32.4 以上的 exe 仍能自己換新 exe 自救。
+- 測試：`test_gui_audit.GU10_UpdatePlan.test_rules_error_still_checks_exe`。
+
 ## 0.32.3（2026-11-28）
 
 使用者：「你可以把這8個有連到github的專案主分支名稱都統一改成main嗎?」
