@@ -19,7 +19,7 @@ from cds.paths import Layout  # noqa: E402
 def fake_zip(version: str, extra: dict | None = None) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
-        top = "claude-dev-system-master/"
+        top = "claude-dev-system-main/"
         z.writestr(top + "config/VERSION", version + "\n")
         z.writestr(top + "rules/core.md", "# core " + version)
         z.writestr(top + "installer/install.py", "print(1)")

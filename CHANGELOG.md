@@ -2,6 +2,14 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.32.3（2026-11-28）
+
+使用者：「你可以把這8個有連到github的專案主分支名稱都統一改成main嗎?」
+
+- **主分支 `master` 改名 `main`**（GitHub 端用分支改名，預設分支、PR、網頁連結自動轉）：`installer/cds/appdir.py` 的 `BRANCH` 改 `main`（規則更新讀 `raw.githubusercontent.com/<repo>/main/config/VERSION` 與 `archive/refs/heads/main.zip`）、`tests.yml` 觸發分支、README／ARCHITECTURE／CLAUDE.md／視窗記錄字樣。
+- **舊版 exe（≤0.32.2）注意**：GitHub 官方文件「raw file URLs are not redirected」，舊 exe 的「檢查規則更新」會顯示連不上 GitHub（404，不會壞）；「exe 更新」走 Releases 不受影響，更新到本版 exe 後恢復。git clone 安裝的裝置要照 GitHub 改名說明改本機分支（`git branch -m master main`、`git fetch origin`、`git branch -u origin/main main`、`git remote set-head origin -a`）。
+- 測試：`test_docs_consistency` 改驗 `tests.yml` 的 push 分支是 `main`。
+
 ## 0.32.2（2026-11-28）
 
 使用者：「C:\Users\88691\Documents\Claude\CLAUDE.md 現在還有需要留嗎?還是這個專案的優化系統能整合這個?就可以把它刪掉了」→ 回覆整合方式後使用者：「好」。

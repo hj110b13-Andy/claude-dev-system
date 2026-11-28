@@ -5,8 +5,8 @@ name: tests
 on:
   push:
     branches:
-      - master
-      - "ci/**"   # 不想動 master 時推到 ci/<名稱> 就會跑；ci/all-os/<名稱> 另外加跑 ubuntu 與 macos
+      - main
+      - "ci/**"   # 不想動 main 時推到 ci/<名稱> 就會跑；ci/all-os/<名稱> 另外加跑 ubuntu 與 macos
   pull_request:
   workflow_dispatch:
     inputs:

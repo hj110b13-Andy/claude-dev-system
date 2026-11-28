@@ -24,7 +24,7 @@ from .checks import parse_ver
 from .paths import REPO, Layout, repo_version
 
 OWNER_REPO = "hj110b13-Andy/claude-dev-system"
-BRANCH = "master"
+BRANCH = "main"
 RAW_VERSION_URL = f"https://raw.githubusercontent.com/{OWNER_REPO}/{BRANCH}/config/VERSION"
 ZIP_URL = f"https://github.com/{OWNER_REPO}/archive/refs/heads/{BRANCH}.zip"
 RELEASES_URL = f"https://github.com/{OWNER_REPO}/releases/latest"

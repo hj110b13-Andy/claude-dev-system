@@ -178,6 +178,6 @@ python installer/install.py uninstall --restore-backup  # 另外用第一次安�
 python -m unittest discover -s tests -v
 ```
 
-推到 `master`（或 `ci/<名稱>` 分支、開 PR）時 GitHub Actions 的 `tests` 流程會在 Windows 上用 Python 3.10、3.12、3.14 各跑一次同一套測試；推到 `ci/all-os/<名稱>` 另外加跑 ubuntu 與 macos（這兩個平台標「未驗證」，結果只供參考）。
+推到 `main`（或 `ci/<名稱>` 分支、開 PR）時 GitHub Actions 的 `tests` 流程會在 Windows 上用 Python 3.10、3.12、3.14 各跑一次同一套測試；推到 `ci/all-os/<名稱>` 另外加跑 ubuntu 與 macos（這兩個平台標「未驗證」，結果只供參考）。
 
 修改後：更新 `config/VERSION`（語意化版本）、`CHANGELOG.md`；改到 manifest 結構時把 `installer/cds/__init__.py` 的 `MANIFEST_SCHEMA` +1 並在 `installer/cds/manifest.py` 的 `MIGRATIONS` 加遷移函式。通用規則更新後必跑自我測試（規格 11.5）；不可把單一專案的特殊需求升格成全域規則。

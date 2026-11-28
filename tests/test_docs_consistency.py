@@ -153,7 +153,7 @@ class WorkflowsAreSane(unittest.TestCase):
     def test_tests_workflow_runs_on_push(self):
         y = read(".github/workflows/tests.yml")
         self.assertIn("python -m unittest discover -s tests", y)
-        self.assertIn("master", y)
+        self.assertRegex(y, r"branches:\s*\n\s*- main\b", "push main 要跑測試")
         self.assertIn('"3.10"', y, "要在宣稱的最低 Python 版本上跑")
 
 

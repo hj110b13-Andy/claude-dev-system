@@ -838,7 +838,7 @@ class App:
 
     def do_check_update(self):
         def job():
-            self._log("=== 檢查更新（GitHub master 的 config/VERSION）===")
+            self._log("=== 檢查更新（GitHub main 的 config/VERSION）===")
             self._check_updates(manual=True)
         self._run_bg(job, refresh_after=False, what="檢查更新")
 

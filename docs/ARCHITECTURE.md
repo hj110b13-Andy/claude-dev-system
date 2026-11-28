@@ -49,7 +49,7 @@ selfupdate_exe.py ─▶ appdir
 ## 三、設定視窗與自我更新
 
 - 視窗層 `gui.py` 只負責畫面與執行緒：工作一律丟到背景執行緒、結果經 queue 回主執行緒更新畫面；一次只跑一個工作。能測的判斷都放在 `gui_model.py`（`read_state` 是畫面的唯一真相來源；`apply_form` 把表單變成安裝器命令與 `dispatch-config.json`／`local.json` 的寫入）。
-- **兩層更新**：①規則與工具——比對 GitHub `master` 的 `config/VERSION`，下載整包到 `claude-dev-system/app/`（只解需要的資料夾、擋 `..`、原子替換），之後以 `app/` 當來源套用；②exe 本身——GitHub 最新 Release 的 tag 比 exe 內建版本新就下載、比對大小與 `.sha256`、改名換檔、重開。exe 自己的更新步驟失敗時，改跑 `app/installer/selfupdate_exe.py`（永遠是最新程式碼）當備援。
+- **兩層更新**：①規則與工具——比對 GitHub `main` 的 `config/VERSION`，下載整包到 `claude-dev-system/app/`（只解需要的資料夾、擋 `..`、原子替換），之後以 `app/` 當來源套用；②exe 本身——GitHub 最新 Release 的 tag 比 exe 內建版本新就下載、比對大小與 `.sha256`、改名換檔、重開。exe 自己的更新步驟失敗時，改跑 `app/installer/selfupdate_exe.py`（永遠是最新程式碼）當備援。
 - `.sha256` 與 exe 來自同一個 Release，只能防下載截斷或損毀；沒有程式碼簽章。
 - **發布**（`.github/workflows/release.yml`）：推 `v主.次.修` 的 tag → 比對 tag 與 `config/VERSION` → 單元測試 → PyInstaller 打包 → 不開視窗的 selfcheck → 產生 `.sha256` → 附到 Release。任一步失敗就不發。平常 push 另有 `tests.yml` 在 Python 3.10／3.12／3.14 跑測試。
 
