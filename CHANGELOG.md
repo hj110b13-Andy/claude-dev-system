@@ -2,6 +2,13 @@
 
 格式：語意化版本（主.次.修）。主版號變動＝manifest 或設定結構不相容；次版號＝新增規則／skill／工具；修訂號＝修正。
 
+## 0.32.1（2026-11-28）
+
+Stock-web 健檢 QA2-13：已停用的任務看板檔列在 `bigFileExceptions` 例外清單裡，盤點每次仍列成「問題」，掩蓋真正的問題訊號。
+
+- **project-scan 讀例外清單**：大檔檢查改讀專案 `.claude/dispatch-config.json` 的 `projectAutomation.bigFileExceptions`（唯一來源 `hooks/usage_guard.big_file_exceptions`）；列在例外裡（原因非空白）的大檔不算問題，報告另列「已知例外」段附原因。讀不到時照舊全部列問題。
+- 測試：`tests/test_tools_scan.py` 加 BigFileExceptions。
+
 ## 0.32.0（2026-11-25）
 
 使用者：「不要每次讀取提示詞……讓claude每次都讀取我的提示詞MD檔……先去看MD檔修改時間跟之前時間比對，如果是新版的就重新讀取」→ 查證後回覆：CLAUDE.md 本來就只在對話開始讀一次、之後走快取（code.claude.com/docs/en/prompt-caching：「reads these files at session start and holds them in memory. To reload them, run /clear or /compact, or restart」），整份用 hook 重新注入不省 token、壓縮時還會被摘要掉（docs/en/context-window：hook 加的 context「Summarized with the rest of the conversation」，CLAUDE.md「Re-injected from disk」）；建議只做「改過就提醒」的小版本 → 使用者：「可以做」。

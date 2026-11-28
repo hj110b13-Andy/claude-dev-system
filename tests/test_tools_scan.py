@@ -616,7 +616,7 @@ if __name__ == "__main__":
 
 
 class BigFileExceptions(Base):
-    """0.27.1：例外清單（.claude/dispatch-config.json projectAutomation.bigFileExceptions）裡的大檔不算問題、另列已知例外（Stock-web QA2-13）。"""
+    """0.32.1：例外清單（.claude/dispatch-config.json projectAutomation.bigFileExceptions）裡的大檔不算問題、另列已知例外（Stock-web QA2-13）。"""
 
     def test_exception_moves_to_known(self):
         write(self.root, "tools/old.py", NL.join(f"x{i} = {i}" for i in range(30)))

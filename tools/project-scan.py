@@ -391,7 +391,7 @@ def build_dep_graph(root: Path, src: list[str], texts: dict) -> dict[str, set[st
 
 def big_file_exceptions(root: Path) -> dict[str, str]:
     """行數上限例外清單：唯一來源 hooks/usage_guard.big_file_exceptions（專案 .claude/dispatch-config.json projectAutomation.bigFileExceptions）。
-    0.27.1：盤點也讀它——Stock-web 已停用的任務看板檔（列在例外裡）每次盤點仍被列成「問題」，掩蓋真正的問題訊號（Stock-web 健檢 QA2-13）。
+    0.32.1：盤點也讀它——Stock-web 已停用的任務看板檔（列在例外裡）每次盤點仍被列成「問題」，掩蓋真正的問題訊號（Stock-web 健檢 QA2-13）。
     讀不到（hooks 不在、設定壞掉）＝{}，照舊全部列問題。"""
     try:
         hooks_dir = str(Path(__file__).resolve().parent.parent / "hooks")
