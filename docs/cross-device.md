@@ -8,6 +8,7 @@
 | 機密 | `.credentials.json`、API 金鑰、`.env.local` | 絕不進本 repo；由各裝置登入或自行放置 |
 | 聯網來源 | 定義 `config/web-sources.json`、規則 `rules/web-sources.md` 在 repo；**是否啟用、金鑰、開關偏好**在各裝置 `~/.claude/claude-dev-system/config/local.json` 與 `~/.claude.json` | 定義會同步；啟用與金鑰每台各自 `install --with-web`／`web --key …` |
 | 影片來源 | `tools/video.py`、`config/video.json` 在 repo；pip 套件、ffmpeg、faster-whisper、快取、`youtube`／`gemini` 金鑰在各裝置 | 每台各自 `--with-video`（pip）＋裝 ffmpeg；金鑰同上 |
+| Claude 記憶（auto memory） | 各裝置 `~/.claude/projects/<由專案路徑產生的名稱>/memory/`（`MEMORY.md` 索引＋各條記憶檔） | **不會**：官方文件寫 auto memory 是 machine-local、不同步到其他電腦，資料夾名稱由 repo 在磁碟上的路徑決定（https://code.claude.com/docs/en/memory）。要每台都生效的規則寫進專案 `CLAUDE.md`／交接紀錄（會跟著 git）；要搬記憶就把整個 memory 資料夾複製到新電腦同一個專案路徑對應的資料夾（路徑不同名稱就不同，〔未實測〕） |
 
 ## 新裝置步驟
 0. **最省事（Windows）**：到 [Releases](https://github.com/hj110b13-Andy/claude-dev-system/releases/latest) 下載 `claude-dev-system-settings.exe` 開啟，在視窗裡勾選、填金鑰、按套用；仍需先裝 Python ≥3.10 與 Claude Code（環境區有下載按鈕）。不想用 exe 再走 1～4。
@@ -16,6 +17,7 @@
 3. `python installer/install.py check` → `install --with-web --with-video` → `verify`（Windows 用 `py -3`）。金鑰（`cwa`、`moenv`、`openaq`、`tdx_id`、`tdx_secret`、`tavily`、`youtube`、`gemini`）在這台另外 `install.py web --key …`；影片要另裝 ffmpeg（與選用的 faster-whisper）；Claude in Chrome 要裝擴充並打 `/chrome`。完整的選用決策清單見 README「新裝置安裝流程」。
 4. 重開 Claude Code。
 5. 有需要的專案（例如 Stock-web）另外照該專案的新裝置文件設定專案專屬項目（task-board mod 與 board_server 在該專案 `tools/claude-setup/`、專案 hook）。
+6. 舊電腦的 Claude 記憶不會跟過來（見上表）：重要的使用者偏好與待辦，確認已寫在各專案 `CLAUDE.md`／`PROGRESS.md`，或把 `~/.claude/projects/*/memory/` 複製過去。
 
 ## 平台
 - Windows：已實測（Windows 11、Python 3.14、Claude Code 2.1.296）。hook 指令以 Git Bash 執行，結尾 `# claude-dev-system` 為註解。
